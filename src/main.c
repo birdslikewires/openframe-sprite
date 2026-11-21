@@ -861,7 +861,7 @@ int main(int argc, char **argv) {
 	pthread_sigmask(SIG_BLOCK, &chld, NULL);
 	wlr_log_init(getenv("SPRITE_DEBUG") ? WLR_DEBUG : WLR_INFO, NULL);
 	const char *apps_dir = getenv("SPRITE_APPS");
-	if (!apps_dir) apps_dir = "/opt/sprite/share/sprite/apps";
+	if (!apps_dir) apps_dir = "/opt/sprite/share/sprite/apps:/usr/share/sprite/apps"; // sprite's, then packages'
 	struct passwd *pw = getpwnam(getenv("SPRITE_USER") ? getenv("SPRITE_USER") : "of");
 	if (pw) prepare_runtime_dir(pw->pw_uid, pw->pw_gid);
 

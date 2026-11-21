@@ -67,7 +67,7 @@ struct sprite_app {
 };
 
 // apps.c
-void apps_load(const char *dir);
+void apps_load(const char *dirs);             // colon-separated directories of manifests
 int apps_count(void);
 struct sprite_app *apps_get(int i);
 struct sprite_app *apps_for_pid(pid_t pid);  // follows parent pids up to a launched app

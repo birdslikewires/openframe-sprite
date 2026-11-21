@@ -34,7 +34,9 @@ is changing. The display stack it needs (wlroots, Xwayland, SDL2) is about 10 MB
 
 ## Apps
 
-An app is a small manifest file in `/opt/sprite/share/sprite/apps/`, named `<id>.app`:
+An app is a small manifest file named `<id>.app`, in `/opt/sprite/share/sprite/apps/` (sprite's
+own) or `/usr/share/sprite/apps/` (installed by packages, such as
+[openframe-hamclock](https://github.com/birdslikewires/openframe-hamclock)):
 
 ```
 name=Clock

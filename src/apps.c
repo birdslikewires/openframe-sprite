@@ -63,9 +63,9 @@ static int cmp_apps(const void *a, const void *b) {
 	return strcasecmp(x->name, y->name);
 }
 
-void apps_load(const char *dir) {
+static void load_dir(const char *dir) {
 	DIR *d = opendir(dir);
-	if (!d) { wlr_log(WLR_ERROR, "no apps directory %s", dir); return; }
+	if (!d) return;
 	struct dirent *de;
 	while ((de = readdir(d)) && n_apps < MAX_APPS) {
 		size_t len = strlen(de->d_name);
@@ -98,9 +98,20 @@ void apps_load(const char *dir) {
 		fclose(f);
 		if (!a->name[0]) memcpy(a->name, a->id, sizeof a->name < sizeof a->id ? sizeof a->name : sizeof a->id);
 		if (!a->exec[0]) { wlr_log(WLR_ERROR, "%s: no exec", path); continue; }
+		bool dup = false; // the first directory to have an app id wins
+		for (int i = 0; i < n_apps; i++) dup |= !strcmp(apps[i].id, a->id);
+		if (dup) { wlr_log(WLR_INFO, "%s: %s is already loaded", path, a->id); continue; }
 		n_apps++;
 	}
 	closedir(d);
+}
+
+// dirs: colon-separated, e.g. sprite's own apps then the ones packages install.
+void apps_load(const char *dirs) {
+	char list[512];
+	snprintf(list, sizeof list, "%s", dirs);
+	for (char *save = NULL, *dir = strtok_r(list, ":", &save); dir; dir = strtok_r(NULL, ":", &save))
+		load_dir(dir);
 	qsort(apps, n_apps, sizeof apps[0], cmp_apps);
 	const char *v = settings_get("startup");
 	if (v) {
@@ -109,7 +120,7 @@ void apps_load(const char *dir) {
 				snprintf(autostart_id, sizeof autostart_id, "%.63s", apps[i].id);
 		if (!autostart_id[0]) wlr_log(WLR_ERROR, "startup=%s: no such app", v);
 	}
-	wlr_log(WLR_INFO, "%d apps from %s", n_apps, dir);
+	wlr_log(WLR_INFO, "%d apps from %s", n_apps, dirs);
 }
 
 static pid_t parent_of(pid_t pid) {
