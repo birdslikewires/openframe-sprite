@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+
+## sprite-helper v26.11.1 (21st November 2026)
+##  Does the few things sprite (which runs as the 'of' user) can't do itself. systemd
+##  starts one of these per connection to /run/sprite-helper.sock, with the connection
+##  as stdin and stdout. It reads one request, answers "ok" or "error: <reason>", and
+##  exits. Requests:
+##
+##    startup <app name>    set (or, with no name, clear) startup= in settings/sprite.txt
+##    reboot                restart the OpenFrame
+##    poweroff              switch it off
+
+SETTINGS="/boot/settings/sprite.txt"
+TEMPLATE="/opt/sprite/share/sprite/sprite.txt"
+
+answer() { echo "$*"; exit 0; }
+
+read -r -t 5 CMD ARG || [ -n "$CMD" ] || answer "error: no request"
+
+case "$CMD" in
+	startup)
+		# App names are letters, digits, spaces and a little punctuation; nothing else
+		# goes into the file.
+		[[ "$ARG" =~ ^[A-Za-z0-9\ ._()+-]{0,63}$ ]] || answer "error: bad app name"
+		NEW=$(mktemp) || answer "error: no temporary file"
+		trap 'rm -f "$NEW"' EXIT
+		if [ -f "$SETTINGS" ]; then
+			cp "$SETTINGS" "$NEW"
+		elif [ -f "$TEMPLATE" ]; then
+			cp "$TEMPLATE" "$NEW"
+		fi
+		if grep -q '^startup=' "$NEW"; then
+			awk -v v="$ARG" '/^startup=/ { print "startup=" v; next } { print }' "$NEW" > "$NEW.2" && mv "$NEW.2" "$NEW"
+		else
+			echo "startup=$ARG" >> "$NEW"
+		fi
+		# /boot is read-only (FAT, no journal): open it with bootrw, and replace the file
+		# with a synced copy so a power cut leaves the old file or the new one.
+		/usr/lib/openframe/bootrw open || answer "error: /boot can't be made writable"
+		mkdir -p "${SETTINGS%/*}" && sync && cp "$NEW" "$SETTINGS.new" && sync && mv -f "$SETTINGS.new" "$SETTINGS" && sync
+		OK=$?
+		/usr/lib/openframe/bootrw close
+		[ $OK -eq 0 ] || answer "error: writing $SETTINGS failed"
+		answer ok
+		;;
+	reboot|poweroff)
+		systemctl --no-block "$CMD" || answer "error: systemctl $CMD failed"
+		answer ok
+		;;
+	*)
+		answer "error: unknown request"
+		;;
+esac

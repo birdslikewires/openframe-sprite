@@ -27,8 +27,8 @@ is changing. The display stack it needs (wlroots, Xwayland, SDL2) is about 10 MB
   SIGKILL after 4 s if it's still running.
 - **The startup app** (one at most, labelled "Startup" on its tile) opens when sprite starts,
   and reopens 2 s after it closes or crashes, unless it was closed from the sheet. After three
-  exits within a minute it stops reopening and says so. The choice is kept in
-  `/var/lib/sprite/autostart`.
+  exits within a minute it stops reopening and says so. It's `startup=` in the settings
+  file (see Settings below).
 - **Settings:** brightness (through `of-backlight`, including automatic brightness),
   information about the system, and Restart and Switch off.
 
@@ -80,19 +80,41 @@ do.
 Then:
 
 ```
-OFH=of@<address> scripts/deploy.sh run
+OFH=of@<address> scripts/deploy.sh boot     # install, and start sprite at every boot (now too)
+OFH=of@<address> scripts/deploy.sh          # install a new build; restarts sprite if it's running
+OFH=of@<address> scripts/deploy.sh noboot   # back to the tty1 login
 ```
 
-That copies sprite, `scripts/sprite-run` and the apps to the unit, and starts sprite on the
-panel in place of the tty1 login, as a transient systemd unit. `sudo systemctl stop sprite`
-stops it and brings the login back. The log is in `/run/sprite.log`.
+sprite runs as `sprite.service` (in `system/`), on tty1 in place of the login prompt, as
+the `of` user in a logind session, so libseat gets the display and input through logind.
+It starts after `of-flash`, `of-mac-gate`, `of-provision` and Plymouth, which all use tty1
+first. If it keeps failing, the login prompt comes back (`OnFailure=getty@tty1.service`).
+The log is in the journal: `sudo journalctl -u sprite`.
 
-For the prototype, sprite runs as root with libseat's builtin seat, and drops to `of` for
-apps. It also expects the touchscreen calibration in `spike/touch/` to be installed.
+A few things need root, and go through `sprite-helper` (`system/`), which systemd starts
+for each connection to `/run/sprite-helper.sock` (group `of`). It takes one request and
+validates it: `startup <app name>` (write the startup app to the settings file), `reboot`
+and `poweroff`.
+
+It also expects the touchscreen calibration in `spike/touch/` to be installed.
+
+### Settings
+
+`settings/sprite.txt` on the OF-BOOT volume, alongside `wifi.txt` and the rest, so it can be
+edited from a PC:
+
+```
+startup=Clock      # the app to open at startup, by the name on its tile (or its id)
+```
+
+Setting "Open at startup" on the touchscreen writes the same file through the helper, which
+makes `/boot` writable with `bootrw` just while it replaces the file with a synced copy.
+`deploy.sh` puts a copy there if there isn't one. When a startup app is set, sprite keeps the
+screen black until the app's window appears, rather than showing the home screen first.
 
 ## Not done yet
 
-- Starting at boot, and running as `of` through logind rather than as root
+- Starting faster: 2.4 s pass between systemd starting sprite and sprite running, cold
 - Letting apps change the home pill while they run (a small Wayland protocol), and screen
   blanking
 - Wi-Fi setup, sound, time zone

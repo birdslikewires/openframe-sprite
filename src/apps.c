@@ -11,7 +11,6 @@
 #define _GNU_SOURCE
 #include <dirent.h>
 #include <time.h>
-#include <sys/stat.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <grp.h>
@@ -38,10 +37,10 @@ static char env_wayland[64], env_x[32];
 // access granted. So a root helper connects (which starts Xwayland), lets the apps' user in,
 // reports back through a pipe, and stays connected so the grant lasts. X11 apps launch
 // once it has reported.
-// The app opened at startup, kept by id in a small state file (written safely, as units
-// lose power without warning).
-#define STATE_DIR "/var/lib/sprite"
-#define AUTOSTART_FILE STATE_DIR "/autostart"
+// The app opened at startup: "startup=" in OF-BOOT's settings/sprite.txt, by the app's name
+// or id, so it can be set from a PC like the other settings there. sprite reads it at start;
+// changes made on the touchscreen are written by the root helper (/boot is read-only).
+#define SETTINGS_FILE "/boot/settings/sprite.txt"
 static char autostart_id[64];
 
 static pid_t keeper_pid;
@@ -106,10 +105,19 @@ void apps_load(const char *dir) {
 	}
 	closedir(d);
 	qsort(apps, n_apps, sizeof apps[0], cmp_apps);
-	FILE *af = fopen(AUTOSTART_FILE, "r");
-	if (af) {
-		if (fgets(autostart_id, sizeof autostart_id, af)) trim(autostart_id);
-		fclose(af);
+	FILE *sf = fopen(getenv("SPRITE_SETTINGS") ? getenv("SPRITE_SETTINGS") : SETTINGS_FILE, "r");
+	if (sf) {
+		char line[160];
+		while (fgets(line, sizeof line, sf)) {
+			trim(line);
+			if (strncmp(line, "startup=", 8)) continue;
+			const char *v = line + 8;
+			for (int i = 0; i < n_apps; i++) // by id or by name, ignoring case
+				if (!apps[i].builtin && (!strcasecmp(apps[i].id, v) || !strcasecmp(apps[i].name, v)))
+					snprintf(autostart_id, sizeof autostart_id, "%.63s", apps[i].id);
+			if (v[0] && !autostart_id[0]) wlr_log(WLR_ERROR, "startup=%s: no such app", v);
+		}
+		fclose(sf);
 	}
 	wlr_log(WLR_INFO, "%d apps from %s", n_apps, dir);
 }
@@ -206,7 +214,7 @@ void apps_x11_ready(bool ready) {
 
 void apps_launch(struct sprite_app *app) {
 	if (app->builtin || app->pid || app->pending) return;
-	if (app->x11 && !x_open) {
+	if (app->x11 && !x_open && getuid() == 0) { // as root, Xwayland must be opened to the apps' user
 		app->pending = true;
 		start_keeper(getenv("SPRITE_USER") ? getenv("SPRITE_USER") : "of");
 		return;
@@ -255,20 +263,10 @@ void apps_set_autostart(struct sprite_app *app, bool on) {
 	if (on) snprintf(autostart_id, sizeof autostart_id, "%s", app->id);
 	else if (!strcmp(autostart_id, app->id)) autostart_id[0] = 0;
 	else return;
-	mkdir(STATE_DIR, 0755);
-	if (!autostart_id[0]) {
-		unlink(AUTOSTART_FILE);
-	} else {
-		int fd = open(AUTOSTART_FILE ".new", O_WRONLY | O_CREAT | O_TRUNC, 0644);
-		if (fd < 0) { wlr_log(WLR_ERROR, "can't write %s: %s", AUTOSTART_FILE, strerror(errno)); return; }
-		dprintf(fd, "%s\n", autostart_id);
-		fsync(fd);
-		close(fd);
-		rename(AUTOSTART_FILE ".new", AUTOSTART_FILE);
-	}
-	int dfd = open(STATE_DIR, O_RDONLY | O_DIRECTORY);
-	if (dfd >= 0) { fsync(dfd); close(dfd); }
-	wlr_log(WLR_INFO, "open at startup: %s", autostart_id[0] ? autostart_id : "(none)");
+	char line[96];
+	snprintf(line, sizeof line, "startup %s", on ? app->name : "");
+	sysinfo_helper(line);
+	wlr_log(WLR_INFO, "open at startup: %s", on ? app->name : "(none)");
 }
 
 static uint32_t mono_ms(void) {
@@ -321,11 +319,13 @@ static void exited(struct sprite_app *a) {
 	if (++a->quick_exits >= 3) {
 		char s[128];
 		snprintf(s, sizeof s, "%s keeps closing, so it won't be reopened for now", a->name);
+		sprite_hold_for(NULL);
 		shell_notice(s);
 		wlr_log(WLR_ERROR, "%s exited 3 times in a minute; not reopening", a->name);
 		a->quick_exits = 0;
 		return;
 	}
+	sprite_hold_for(a);
 	if (!a->restart_timer) a->restart_timer = wl_event_loop_add_timer(sprite_event_loop(), restart_cb, a);
 	wl_event_source_timer_update(a->restart_timer, 2000);
 }

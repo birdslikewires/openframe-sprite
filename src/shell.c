@@ -464,8 +464,7 @@ static void bl_auto_changed(lv_event_t *e) {
 }
 
 static void confirm_cb(lv_event_t *e) {
-	const char *cmd = lv_event_get_user_data(e);
-	sysinfo_run(cmd);
+	sysinfo_helper(lv_event_get_user_data(e)); // "reboot" or "poweroff"
 }
 
 static void cancel_cb(lv_event_t *e) { lv_msgbox_close(lv_event_get_user_data(e)); }
@@ -478,7 +477,7 @@ static void power_clicked(lv_event_t *e) {
 	lv_msgbox_add_text(mb, reboot ? "It will be back in about half a minute."
 				       : "Unplug it and plug it back in to switch it on again.");
 	lv_obj_t *yes = lv_msgbox_add_footer_button(mb, reboot ? "Restart" : "Switch off");
-	lv_obj_add_event_cb(yes, confirm_cb, LV_EVENT_CLICKED, reboot ? "systemctl reboot" : "systemctl poweroff");
+	lv_obj_add_event_cb(yes, confirm_cb, LV_EVENT_CLICKED, reboot ? "reboot" : "poweroff");
 	lv_obj_t *no = lv_msgbox_add_footer_button(mb, "Cancel");
 	lv_obj_add_event_cb(no, cancel_cb, LV_EVENT_CLICKED, mb);
 }

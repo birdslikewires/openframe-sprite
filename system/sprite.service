@@ -1,0 +1,33 @@
+# sprite on the panel, in place of the tty1 login, as the 'of' user in a logind session.
+[Unit]
+Description=sprite, the OpenFrame touch shell
+# tty1 is shared: the installer (of-flash), the MAC store reboot (of-mac-gate), first-boot
+# provisioning (of-provision) and Plymouth all use it first. Starting under any of them
+# would break it, as with X (see xinit.service.d/openframe.conf).
+After=systemd-user-sessions.service of-flash.service of-mac-gate.service of-provision.service
+After=plymouth-quit.service plymouth-quit-wait.service getty@tty1.service
+Conflicts=getty@tty1.service
+# If sprite can't run, the login prompt comes back rather than a blank screen.
+OnFailure=getty@tty1.service
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+User=of
+PAMName=login
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty1
+UtmpMode=user
+Environment=XDG_SESSION_TYPE=wayland WLR_RENDERER=pixman PATH=/opt/sprite/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/opt/sprite/bin/sprite
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical.target

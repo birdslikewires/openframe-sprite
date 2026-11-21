@@ -83,6 +83,9 @@ void apps_set_autostart(struct sprite_app *app, bool on);
 void sprite_open_app(struct sprite_app *app); // show it, launching it if needed
 void sprite_go_home(void);
 void sprite_close_app(struct sprite_app *app); // ask its windows to close, then end it
+// Keep the screen black, rather than show the home screen, until this app's window appears
+// (the startup app, at startup and when it's reopened). NULL shows the home screen again.
+void sprite_hold_for(struct sprite_app *app);
 void sprite_lvgl_kick(void);                  // run the LVGL timer handler soon
 struct wl_event_loop *sprite_event_loop(void);
 
@@ -107,4 +110,6 @@ int sysinfo_backlight(void);                  // 0-100, -1 if unknown
 bool sysinfo_backlight_auto(void);
 void sysinfo_set_backlight(const char *arg);  // "0".."100" or "auto", runs of-backlight
 void sysinfo_summary(char *buf, size_t len);  // multi-line system text
-void sysinfo_run(const char *cmd);            // fire and forget, as root
+void sysinfo_run(const char *cmd);            // fire and forget
+// Ask sprite's root helper to do something (one line, e.g. "reboot"), without waiting.
+void sysinfo_helper(const char *line);

@@ -1,0 +1,12 @@
+[Unit]
+Description=sprite's helper for things that need root
+
+[Socket]
+ListenStream=/run/sprite-helper.sock
+SocketUser=root
+SocketGroup=of
+SocketMode=0660
+Accept=yes
+
+[Install]
+WantedBy=sockets.target

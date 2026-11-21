@@ -8,7 +8,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <sys/statvfs.h>
+#include <sys/un.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -108,6 +110,33 @@ void sysinfo_run(const char *cmd) {
 			setsid();
 			execl("/bin/sh", "/bin/sh", "-c", cmd, (char *)NULL);
 			_exit(127);
+		}
+		_exit(0);
+	}
+	if (pid > 0) waitpid(pid, NULL, 0);
+}
+
+// sprite's root helper listens here (systemd socket activation, one connection per request).
+#define HELPER_SOCKET "/run/sprite-helper.sock"
+
+void sysinfo_helper(const char *line) {
+	pid_t pid = fork();
+	if (pid == 0) {
+		if (fork() != 0) _exit(0); // double fork: never our child, no zombie
+		int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+		struct sockaddr_un sa = { .sun_family = AF_UNIX };
+		snprintf(sa.sun_path, sizeof sa.sun_path, "%s", HELPER_SOCKET);
+		if (fd < 0 || connect(fd, (struct sockaddr *)&sa, sizeof sa) != 0) {
+			fprintf(stderr, "sprite: helper not reachable at %s for '%s'\n", HELPER_SOCKET, line);
+			_exit(1);
+		}
+		dprintf(fd, "%s\n", line);
+		shutdown(fd, SHUT_WR);
+		char reply[256];
+		ssize_t n = read(fd, reply, sizeof reply - 1);
+		if (n > 0) {
+			reply[n] = 0;
+			if (strncmp(reply, "ok", 2)) fprintf(stderr, "sprite: helper: %s", reply);
 		}
 		_exit(0);
 	}

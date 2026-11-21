@@ -91,6 +91,8 @@ static struct {
 	struct wl_list views;
 	struct wl_list keyboards;
 	struct sprite_app *fg;          // app on screen, NULL = home
+	struct sprite_app *hold;        // black screen until this app's window appears
+	struct wl_event_source *hold_timer;
 	enum gesture gesture;
 	bool home_bottom;       // the home handle is at the bottom edge
 	double app_press_y;     // where a touch given to the app began
@@ -238,11 +240,11 @@ static void apply_foreground(void) {
 		if (v->tree) wlr_scene_node_set_enabled(&v->tree->node, v->mapped && v->app == S.fg && S.fg);
 		if (!S.fg || v != S.fg->view) set_view_active(v, false);
 	}
-	wlr_scene_node_set_enabled(&S.shell_node->node, S.fg == NULL);
+	wlr_scene_node_set_enabled(&S.shell_node->node, S.fg == NULL && S.hold == NULL);
 	wlr_scene_node_set_enabled(&S.handle->node, S.fg != NULL);
 	wlr_scene_node_raise_to_top(&S.handle->node);
 	handle_show(S.fg);
-	shell_set_visible(S.fg == NULL);
+	shell_set_visible(S.fg == NULL && S.hold == NULL);
 	if (S.fg && S.fg->view) {
 		wlr_scene_node_raise_to_top(&S.fg->view->tree->node);
 		wl_list_for_each(v, &S.views, link) // X menus and tooltips stay above the main window
@@ -253,6 +255,24 @@ static void apply_foreground(void) {
 		focus_view(NULL);
 	}
 	shell_apps_changed();
+}
+
+static int hold_timeout(void *data) {
+	if (!S.hold) return 0;
+	char s[128];
+	snprintf(s, sizeof s, "%s didn't open", S.hold->name);
+	wlr_log(WLR_ERROR, "%s", s);
+	S.hold = NULL;
+	apply_foreground();
+	shell_notice(s);
+	return 0;
+}
+
+void sprite_hold_for(struct sprite_app *app) {
+	if (S.hold == app) return;
+	S.hold = app;
+	wl_event_source_timer_update(S.hold_timer, app ? 20000 : 0);
+	apply_foreground();
 }
 
 void sprite_go_home(void) {
@@ -298,6 +318,10 @@ static void view_mapped(struct sprite_view *v) {
 		v->app->view = v;
 		wlr_log(WLR_INFO, "%s window mapped", v->app->name);
 		S.fg = v->app;   // a new main window comes to the front
+		if (S.hold == v->app) {
+			S.hold = NULL;
+			wl_event_source_timer_update(S.hold_timer, 0);
+		}
 	}
 	apply_foreground();
 }
@@ -310,7 +334,14 @@ static void view_unmapped(struct sprite_view *v) {
 		struct sprite_view *o;
 		wl_list_for_each(o, &S.views, link)
 			if (o != v && o->app == v->app && o->mapped && o->primary) { v->app->view = o; break; }
-		if (!v->app->view && S.fg == v->app) S.fg = NULL;
+		if (!v->app->view && S.fg == v->app) {
+			S.fg = NULL;
+			// the startup app going away by itself will be reopened: keep the screen black
+			if (v->app == apps_autostart() && !v->app->closing) {
+				S.hold = v->app;
+				wl_event_source_timer_update(S.hold_timer, 20000);
+			}
+		}
 	}
 	apply_foreground();
 }
@@ -872,10 +903,13 @@ int main(int argc, char **argv) {
 	wl_event_source_timer_update(S.lv_timer, 1);
 	apps_load(apps_dir);
 	shell_apps_changed();
+	S.hold_timer = wl_event_loop_add_timer(S.loop, hold_timeout, NULL);
 	struct sprite_app *start = apps_autostart();
 	if (start) {
+		// open it "clean": no home screen first, just black until its window appears
 		wlr_log(WLR_INFO, "opening %s at startup", start->name);
-		sprite_open_app(start); // comes to the front when its window maps
+		sprite_hold_for(start);
+		sprite_open_app(start);
 	}
 	S.sigchld = wl_event_loop_add_signal(S.loop, SIGCHLD, on_sigchld, NULL);
 	S.release_timer = wl_event_loop_add_timer(S.loop, release_timer_cb, NULL);
