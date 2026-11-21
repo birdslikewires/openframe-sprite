@@ -1,0 +1,18 @@
+#!/bin/sh
+
+# openframe-sprite prerm
+#  Stops and disables sprite before it's removed, while its unit files are still there (an
+#  upgrade restarts it from the postinst instead).
+
+set -e
+
+case "$1" in
+	remove)
+		if ! systemd-detect-virt -q --chroot 2>/dev/null; then
+			systemctl stop sprite.service sprite-helper.socket 2>/dev/null || true
+		fi
+		systemctl disable --quiet sprite.service sprite-helper.socket 2>/dev/null || true
+		;;
+esac
+
+exit 0

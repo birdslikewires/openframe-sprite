@@ -6,7 +6,9 @@
 #include <sys/types.h>
 #include <wayland-server-core.h>
 
-#define SPRITE_VERSION "0.1-proto"
+#ifndef SPRITE_VERSION // the package build sets it (package/version.sh)
+#define SPRITE_VERSION "dev"
+#endif
 #define SPRITE_W 800
 #define SPRITE_H 480
 

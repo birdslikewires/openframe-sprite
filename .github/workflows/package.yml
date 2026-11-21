@@ -1,0 +1,100 @@
+name: package
+run-name: openframe-sprite package build and release
+
+# Builds the openframe-sprite package (package/build.sh) in the sprite-build image
+# (build/Dockerfile: the Mesa-free wlroots, Xwayland and SDL), tests it on a clean Trixie
+# with the OpenFrame repository, and publishes it as a GitHub release. The version is
+# year.month.N (package/version.sh).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'apps/settings.app'
+      - 'build/**'
+      - 'package/**'
+      - 'system/**'
+      - 'settings/**'
+      - 'Makefile'
+      - 'scripts/fetch-lvgl.sh'
+      - '.github/workflows/package.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-package
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0    # the version counts this month's commits
+
+      # i386 programs run as they are on the x86-64 runner, so no emulation is needed. Docker's
+      # default seccomp filter on the runner stops i386 programs looking up names, so the i386
+      # containers run without it (as openframe-linux's crystalhd workflow).
+      - name: Build the build image
+        run: |
+          docker build --platform linux/386 --security-opt seccomp=unconfined -t sprite-build build/
+
+      - name: Build the package
+        run: |
+          version=$(bash package/version.sh)
+          echo "version=${version}" >> "$GITHUB_ENV"
+          echo "Building openframe-sprite ${version}"
+          sh scripts/fetch-lvgl.sh
+          docker run --rm --security-opt seccomp=unconfined --platform linux/386 -v "$PWD:/src" \
+            sprite-build sh package/build.sh "${version}" out
+          ls -l out/*.deb
+
+      # On a clean Trixie with the OpenFrame repository (for openframe-scripts), as a unit
+      # would get it: apt finds every dependency, nothing it pulls in is Mesa (the OpenFrame has
+      # no use for it, and it's hundreds of MB), every binary and library finds what it links,
+      # Xwayland runs, and the units are where systemd looks.
+      - name: Test the package
+        run: |
+          docker run --rm --security-opt seccomp=unconfined --platform linux/386 -v "$PWD/out:/out:ro" \
+            i386/debian:trixie sh -euxc '
+            apt-get -qq --error-on=any update
+            DEBIAN_FRONTEND=noninteractive apt-get -qq install -y ca-certificates curl > /dev/null
+            curl -fsSL https://kernel.openbeak.net/key.gpg -o /usr/share/keyrings/openframe-apt.gpg
+            echo "deb [signed-by=/usr/share/keyrings/openframe-apt.gpg] https://linux.openbeak.net/ trixie main" \
+              > /etc/apt/sources.list.d/openframe-linux.list
+            apt-get -qq --error-on=any update
+            DEBIAN_FRONTEND=noninteractive apt-get -qq install -y /out/openframe-sprite_*.deb > /dev/null
+            ! dpkg -l | grep -E "^ii +(libgbm1|mesa-|libllvm|libgl1|libegl1)"
+            for f in /opt/sprite/bin/sprite /opt/sprite/bin/Xwayland /opt/sprite/lib/libSDL2-2.0.so.0 /opt/sprite/lib/libSDL-1.2.so.0; do
+              ! LD_LIBRARY_PATH=/opt/sprite/lib ldd "$f" | grep "not found"
+            done
+            /opt/sprite/bin/Xwayland -version 2>&1 | grep -q "Xwayland Version"
+            test -s /usr/lib/systemd/system/sprite.service
+            test -x /opt/sprite/libexec/sprite-helper
+            test -s /opt/sprite/share/sprite/apps/settings.app
+            echo "set bogus x" | /opt/sprite/libexec/sprite-helper | grep -q "^error: unknown setting"
+            test -s /usr/share/doc/openframe-sprite/copyright
+          '
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v${version}"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            echo "Release $tag exists already: nothing to do"
+            exit 0
+          fi
+          cp "out/openframe-sprite_${version}_i386.deb" out/openframe-sprite_i386.deb
+          (cd out && sha256sum openframe-sprite_*.deb > SHA256SUMS)
+          notes="sprite ${version}, the OpenFrame touch shell, for Debian Trixie (i386).
+
+          \`sudo apt install ./openframe-sprite_${version}_i386.deb\` (it needs the OpenFrame repository, linux.openbeak.net, for openframe-scripts). Installing it puts sprite on tty1 in place of the login prompt."
+          gh release create "$tag" --title "openframe-sprite ${version}" --notes "$notes" --latest \
+            "out/openframe-sprite_${version}_i386.deb" out/openframe-sprite_i386.deb out/SHA256SUMS

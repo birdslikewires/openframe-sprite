@@ -1,0 +1,16 @@
+openframe-sprite: sprite, the OpenFrame touch shell, and the display stack it runs on.
+
+sprite
+  https://github.com/birdslikewires/openframe-sprite
+  Copyright 2026 BirdsLikeWires
+  Licence: LICENCE_PENDING
+
+Shipped with it, under /opt/sprite, built from Debian Trixie's sources without Mesa:
+  wlroots 0.18 (MIT), lib/i386-linux-gnu/libwlroots-0.18.so
+  Xwayland 24.1 (MIT/X11), bin/Xwayland
+  SDL 2.32 (zlib), lib/libSDL2-2.0.so.0
+  sdl12-compat 1.2 (zlib), lib/libSDL-1.2.so.0
+Built into sprite:
+  LVGL 9.3 (MIT), https://lvgl.io
+
+Their licences follow.

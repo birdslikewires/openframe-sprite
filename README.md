@@ -57,35 +57,41 @@ Builds run in an i386 Debian Trixie container, so they need Docker; on the Mac t
 The repository has to be under `$HOME`, because colima only shares the home directory.
 
 ```
-scripts/build.sh           # out/sprite (and out/sprite.stripped, which is what gets deployed)
-scripts/build.sh stack     # also out/sprite-stack.tgz: wlroots, Xwayland and SDL for /opt/sprite
+scripts/build.sh            # out/sprite
+scripts/build.sh package    # out/openframe-sprite_<version>_i386.deb
 ```
 
 The first build creates the `sprite-build` image, which compiles the Mesa-free display stack
 (`build/stack.sh`). That takes a few minutes, and is cached after that. LVGL 9.3.0 is downloaded
 into `third_party/` and its checksum verified (`scripts/fetch-lvgl.sh`).
 
+CI (`.github/workflows/package.yml`) builds the package on every change to what goes into it,
+installs it on a clean Trixie with the OpenFrame repository to test it, and publishes a
+release. The version is year.month.N (`package/version.sh`).
+
+## The package
+
+`openframe-sprite` carries sprite and the display stack under `/opt/sprite`: wlroots,
+Xwayland, SDL2 and sdl12-compat (for SDL apps), the root helper, the Settings app and a
+template of the settings file. Its systemd units go in `/usr/lib/systemd/system`. None of it
+needs Mesa: Debian's own wlroots, Xwayland and SDL2 do, at about 250 MB. It depends on
+`openframe-scripts` (for `bootrw` and `of-backlight`).
+
+The first time it's installed, it takes tty1 from the login prompt (marked in
+`/var/lib/openframe-sprite`, so disabling sprite by hand afterwards sticks), and puts
+`settings/sprite.txt` on OF-BOOT if there isn't one. Removing it brings the login prompt back.
+
 ## Running on an OpenFrame
 
-The unit needs the stack in `/opt/sprite` (unpack `out/sprite-stack.tgz` there), and the
-runtime libraries it uses from Debian:
-
 ```
-sudo apt install --no-install-recommends libseat1 libdisplay-info2 libliftoff0 libinput10 \
-	libxcb-composite0 libxcb-ewmh2 libxcb-icccm4 libxcb-render0 libxcb-res0 libxcb-xfixes0 \
-	libxcb-errors0 libxfont2 libxcvt0 libxshmfence1 x11-xkb-utils xkb-data
+scripts/build.sh package && OFH=of@<address> scripts/deploy.sh   # install the package, and the demo apps
+OFH=of@<address> scripts/deploy.sh noboot                        # back to the tty1 login
+OFH=of@<address> scripts/deploy.sh boot                          # sprite at boot again
 ```
 
-None of these pulls in Mesa. Check any package you add for libgbm1, libegl1 or libgl1, which
-do.
-
-Then:
-
-```
-OFH=of@<address> scripts/deploy.sh boot     # install, and start sprite at every boot (now too)
-OFH=of@<address> scripts/deploy.sh          # install a new build; restarts sprite if it's running
-OFH=of@<address> scripts/deploy.sh noboot   # back to the tty1 login
-```
+The demo apps (`apps/demo/`) go in `/usr/local/share/sprite/apps`, for test units. sprite reads
+manifests from `/opt/sprite/share/sprite/apps`, then `/usr/share/sprite/apps` (packages), then
+`/usr/local/share/sprite/apps`.
 
 sprite runs as `sprite.service` (in `system/`), on tty1 in place of the login prompt, as
 the `of` user in a logind session, so libseat gets the display and input through logind.

@@ -5,7 +5,8 @@ PKGS = wlroots-0.18 wayland-server xkbcommon pixman-1 libdrm xcb
 export PKG_CONFIG_PATH := $(PREFIX)/lib/i386-linux-gnu/pkgconfig:$(PREFIX)/lib/pkgconfig
 CC ?= cc
 CFLAGS ?= -O2 -g -march=atom
-CFLAGS += -std=gnu11 -Wall -Wno-unused-parameter -DWLR_USE_UNSTABLE -DLV_CONF_INCLUDE_SIMPLE \
+VERSION ?= dev
+CFLAGS += -DSPRITE_VERSION=\"$(VERSION)\" -std=gnu11 -Wall -Wno-unused-parameter -DWLR_USE_UNSTABLE -DLV_CONF_INCLUDE_SIMPLE \
 	-Isrc -Ithird_party -Ithird_party/lvgl -Ibuild/gen $(shell pkg-config --cflags $(PKGS))
 LDLIBS = $(shell pkg-config --libs $(PKGS)) -lpthread -lm
 LDFLAGS += -Wl,-rpath,$(PREFIX)/lib/i386-linux-gnu

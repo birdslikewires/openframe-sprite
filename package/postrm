@@ -1,0 +1,28 @@
+#!/bin/sh
+
+# openframe-sprite postrm
+#  Removed: tty1's login prompt comes back, and the record of the first install goes, so
+#  installing again takes tty1 again. The settings file on OF-BOOT is left alone: it's the
+#  owner's.
+
+set -e
+
+in_chroot() {
+	systemd-detect-virt -q --chroot 2>/dev/null
+}
+
+case "$1" in
+	remove)
+		rm -f /var/lib/openframe-sprite/enable-default
+		systemctl enable --quiet getty@tty1.service 2>/dev/null || true
+		if ! in_chroot; then
+			systemctl daemon-reload 2>/dev/null || true
+			systemctl start getty@tty1.service 2>/dev/null || true
+		fi
+		;;
+	purge)
+		rm -rf /var/lib/openframe-sprite
+		;;
+esac
+
+exit 0

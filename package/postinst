@@ -1,0 +1,52 @@
+#!/bin/sh
+
+# openframe-sprite postinst
+#  Once per system, sprite takes tty1 from the login prompt (getty@tty1), so it starts at
+#  boot; disabling it afterwards sticks. The settings file goes onto OF-BOOT if there isn't
+#  one, for editing from a PC. On an upgrade, a running sprite restarts on the new version.
+
+set -e
+
+ENABLEMARKER="/var/lib/openframe-sprite/enable-default"
+SETTINGS="/boot/settings/sprite.txt"
+
+# True inside a chroot, as when an image is being built.
+in_chroot() {
+	systemd-detect-virt -q --chroot 2>/dev/null
+}
+
+case "$1" in
+	configure)
+		in_chroot || systemctl daemon-reload 2>/dev/null || true
+		systemctl enable --quiet sprite-helper.socket 2>/dev/null || true
+		in_chroot || systemctl start sprite-helper.socket 2>/dev/null || true
+
+		if [ ! -e "$ENABLEMARKER" ]; then
+			systemctl disable --quiet getty@tty1.service 2>/dev/null || true
+			systemctl enable --quiet sprite.service 2>/dev/null || true
+			mkdir -p "${ENABLEMARKER%/*}"
+			touch "$ENABLEMARKER"
+			FIRST=yes
+		fi
+
+		# /boot is read-only (bootrw makes it writable while this writes; in a chroot it's
+		# writable already and bootrw does nothing). A synced copy is renamed into place, so a
+		# power cut leaves no half-written file.
+		if [ -d /boot/settings ] && [ ! -e "$SETTINGS" ]; then
+			if /usr/lib/openframe/bootrw open; then
+				cp /opt/sprite/share/sprite/sprite.txt "$SETTINGS.new" && sync && mv -f "$SETTINGS.new" "$SETTINGS" && sync || true
+				/usr/lib/openframe/bootrw close
+			fi
+		fi
+
+		if ! in_chroot; then
+			if [ -n "${FIRST:-}" ]; then
+				systemctl start sprite.service 2>/dev/null || true
+			elif systemctl is-active --quiet sprite.service; then
+				systemctl restart sprite.service 2>/dev/null || true
+			fi
+		fi
+		;;
+esac
+
+exit 0

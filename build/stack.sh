@@ -27,4 +27,11 @@ cmake --build b -j"$(nproc)" && cmake --install b
 cd /bld/sdl12-compat-*/
 cmake -S . -B b -DCMAKE_INSTALL_PREFIX=$P -DCMAKE_BUILD_TYPE=Release -DSDL12TESTS=OFF -DCMAKE_PREFIX_PATH=$P
 cmake --build b -j"$(nproc)" && cmake --install b
+# Keep the licences: the package ships them (package/build.sh)
+L=$P/share/licences
+mkdir -p $L
+cp /bld/wlroots-0.18*/LICENSE $L/wlroots
+cp /bld/xwayland-*/COPYING $L/xwayland
+cp /bld/libsdl2-2*/LICENSE.txt $L/sdl2
+cp /bld/sdl12-compat-*/LICENSE.txt $L/sdl12-compat
 rm -rf /bld
