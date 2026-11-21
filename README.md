@@ -22,6 +22,13 @@ is changing. The display stack it needs (wlroots, Xwayland, SDL2) is about 10 MB
 - **Going home:** while an app shows, a small pill sits at the bottom centre of the screen.
   Touch it, or swipe up from it, to go home. With a USB keyboard, Alt+Esc also goes home, and
   Ctrl+Alt+Backspace quits sprite.
+- **Long press on a tile** opens a sheet with Open, Close (when the app is running) and
+  **Open at startup**. Close asks the app's window to close, then sends SIGTERM after 2 s and
+  SIGKILL after 4 s if it's still running.
+- **The startup app** (one at most, labelled "Startup" on its tile) opens when sprite starts,
+  and reopens 2 s after it closes or crashes, unless it was closed from the sheet. After three
+  exits within a minute it stops reopening and says so. The choice is kept in
+  `/var/lib/sprite/autostart`.
 - **Settings:** brightness (through `of-backlight`, including automatic brightness),
   information about the system, and Restart and Switch off.
 
@@ -85,7 +92,6 @@ apps. It also expects the touchscreen calibration in `spike/touch/` to be instal
 
 ## Not done yet
 
-- Closing apps from the shell (long press on a tile, perhaps)
 - Starting at boot, and running as `of` through logind rather than as root
 - Letting apps change the home pill while they run (a small Wayland protocol), and screen
   blanking

@@ -58,6 +58,12 @@ struct sprite_app {
 	float handle;       // home handle opacity while this app shows (manifest: handle=normal|faint|hidden)
 	pid_t pid;          // launched process, 0 when not running
 	struct sprite_view *view; // the app's main mapped window, if any
+	// closing and restarting
+	bool closing;       // closed from the shell: don't restart it
+	int close_stage;
+	struct wl_event_source *close_timer, *restart_timer;
+	int quick_exits;    // exits within a minute of the first, for the startup app
+	uint32_t first_exit_ms;
 };
 
 // apps.c
@@ -69,10 +75,14 @@ void apps_launch(struct sprite_app *app);
 void apps_reap(void);                         // collect exited apps, update state
 void apps_set_env(const char *wayland_display, const char *x_display);
 void apps_x11_ready(bool ready);              // the X keeper has (or no longer has) opened X to apps
+void apps_close(struct sprite_app *app);      // SIGTERM, then SIGKILL, unless it goes by itself
+struct sprite_app *apps_autostart(void);      // the app opened at startup, or NULL
+void apps_set_autostart(struct sprite_app *app, bool on);
 
 // main.c, for the shell
 void sprite_open_app(struct sprite_app *app); // show it, launching it if needed
 void sprite_go_home(void);
+void sprite_close_app(struct sprite_app *app); // ask its windows to close, then end it
 void sprite_lvgl_kick(void);                  // run the LVGL timer handler soon
 struct wl_event_loop *sprite_event_loop(void);
 
@@ -81,6 +91,7 @@ void shell_init(void *pixels);                // pixels: SPRITE_W x SPRITE_H XRG
 void shell_pointer(int x, int y, bool pressed);
 void shell_apps_changed(void);                // running state or list changed
 void shell_set_visible(bool visible);
+void shell_notice(const char *text);          // a banner on the home screen
 
 // main.c provides this for shell.c's flush callback
 void sprite_shell_damage(int x, int y, int w, int h, bool commit);

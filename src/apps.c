@@ -10,6 +10,8 @@
 //   handle=faint         (home handle: normal, faint or hidden while the app shows)
 #define _GNU_SOURCE
 #include <dirent.h>
+#include <time.h>
+#include <sys/stat.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <grp.h>
@@ -36,6 +38,12 @@ static char env_wayland[64], env_x[32];
 // access granted. So a root helper connects (which starts Xwayland), lets the apps' user in,
 // reports back through a pipe, and stays connected so the grant lasts. X11 apps launch
 // once it has reported.
+// The app opened at startup, kept by id in a small state file (written safely, as units
+// lose power without warning).
+#define STATE_DIR "/var/lib/sprite"
+#define AUTOSTART_FILE STATE_DIR "/autostart"
+static char autostart_id[64];
+
 static pid_t keeper_pid;
 static bool x_open;
 static struct wl_event_source *keeper_src;
@@ -98,6 +106,11 @@ void apps_load(const char *dir) {
 	}
 	closedir(d);
 	qsort(apps, n_apps, sizeof apps[0], cmp_apps);
+	FILE *af = fopen(AUTOSTART_FILE, "r");
+	if (af) {
+		if (fgets(autostart_id, sizeof autostart_id, af)) trim(autostart_id);
+		fclose(af);
+	}
 	wlr_log(WLR_INFO, "%d apps from %s", n_apps, dir);
 }
 
@@ -231,6 +244,92 @@ void apps_launch(struct sprite_app *app) {
 	wlr_log(WLR_INFO, "launched %s (pid %d): %s", app->name, pid, app->exec);
 }
 
+struct sprite_app *apps_autostart(void) {
+	if (!autostart_id[0]) return NULL;
+	for (int i = 0; i < n_apps; i++)
+		if (!apps[i].hidden && !apps[i].builtin && !strcmp(apps[i].id, autostart_id)) return &apps[i];
+	return NULL;
+}
+
+void apps_set_autostart(struct sprite_app *app, bool on) {
+	if (on) snprintf(autostart_id, sizeof autostart_id, "%s", app->id);
+	else if (!strcmp(autostart_id, app->id)) autostart_id[0] = 0;
+	else return;
+	mkdir(STATE_DIR, 0755);
+	if (!autostart_id[0]) {
+		unlink(AUTOSTART_FILE);
+	} else {
+		int fd = open(AUTOSTART_FILE ".new", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+		if (fd < 0) { wlr_log(WLR_ERROR, "can't write %s: %s", AUTOSTART_FILE, strerror(errno)); return; }
+		dprintf(fd, "%s\n", autostart_id);
+		fsync(fd);
+		close(fd);
+		rename(AUTOSTART_FILE ".new", AUTOSTART_FILE);
+	}
+	int dfd = open(STATE_DIR, O_RDONLY | O_DIRECTORY);
+	if (dfd >= 0) { fsync(dfd); close(dfd); }
+	wlr_log(WLR_INFO, "open at startup: %s", autostart_id[0] ? autostart_id : "(none)");
+}
+
+static uint32_t mono_ms(void) {
+	struct timespec t;
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	return (uint32_t)(t.tv_sec * 1000 + t.tv_nsec / 1000000);
+}
+
+static int restart_cb(void *data) {
+	struct sprite_app *a = data;
+	wlr_log(WLR_INFO, "reopening %s", a->name);
+	apps_launch(a);
+	shell_apps_changed();
+	return 0;
+}
+
+static int close_cb(void *data) {
+	struct sprite_app *a = data;
+	if (a->pid <= 0) return 0;
+	pid_t target = a->hidden ? a->pid : -a->pid; // launched apps lead their own process group
+	if (++a->close_stage == 1) {
+		wlr_log(WLR_INFO, "%s still running: SIGTERM", a->name);
+		kill(target, SIGTERM);
+		wl_event_source_timer_update(a->close_timer, 2000);
+	} else {
+		wlr_log(WLR_INFO, "%s still running: SIGKILL", a->name);
+		kill(target, SIGKILL);
+	}
+	return 0;
+}
+
+void apps_close(struct sprite_app *a) {
+	if (a->builtin || a->pid <= 0) return;
+	a->closing = true;
+	a->close_stage = 0;
+	if (a->restart_timer) wl_event_source_timer_update(a->restart_timer, 0);
+	if (!a->close_timer) a->close_timer = wl_event_loop_add_timer(sprite_event_loop(), close_cb, a);
+	// a window has been asked to close; give it 2 s to do so itself
+	wl_event_source_timer_update(a->close_timer, a->view ? 2000 : 1);
+}
+
+// The startup app is reopened when it exits, unless it was closed from the shell or keeps
+// failing (three exits within a minute).
+static void exited(struct sprite_app *a) {
+	if (a->close_timer) wl_event_source_timer_update(a->close_timer, 0);
+	if (a->closing) { a->closing = false; return; }
+	if (a != apps_autostart()) return;
+	uint32_t now = mono_ms();
+	if (!a->quick_exits || now - a->first_exit_ms > 60000) { a->quick_exits = 0; a->first_exit_ms = now; }
+	if (++a->quick_exits >= 3) {
+		char s[128];
+		snprintf(s, sizeof s, "%s keeps closing, so it won't be reopened for now", a->name);
+		shell_notice(s);
+		wlr_log(WLR_ERROR, "%s exited 3 times in a minute; not reopening", a->name);
+		a->quick_exits = 0;
+		return;
+	}
+	if (!a->restart_timer) a->restart_timer = wl_event_loop_add_timer(sprite_event_loop(), restart_cb, a);
+	wl_event_source_timer_update(a->restart_timer, 2000);
+}
+
 void apps_reap(void) {
 	int st;
 	if (keeper_pid && waitpid(keeper_pid, &st, WNOHANG) == keeper_pid) {
@@ -250,6 +349,7 @@ void apps_reap(void) {
 			wlr_log(WLR_INFO, "%s exited (%s %d)", a->name, WIFEXITED(status) ? "status" : "signal",
 				WIFEXITED(status) ? WEXITSTATUS(status) : WTERMSIG(status));
 			a->pid = 0;
+			exited(a);
 		}
 	}
 	// hidden entries: drop the pid once the process has gone

@@ -273,6 +273,17 @@ void sprite_open_app(struct sprite_app *app) {
 	}
 }
 
+void sprite_close_app(struct sprite_app *app) {
+	struct sprite_view *v;
+	wl_list_for_each(v, &S.views, link) {
+		if (v->app != app || !v->mapped) continue;
+		if (v->xdg) wlr_xdg_toplevel_send_close(v->xdg);
+		else if (v->xw && !v->xw->override_redirect) wlr_xwayland_surface_close(v->xw);
+	}
+	apps_close(app);
+	if (S.fg == app) sprite_go_home();
+}
+
 static pid_t view_pid(struct sprite_view *v) {
 	pid_t pid = 0;
 	if (v->xdg) wl_client_get_credentials(v->xdg->base->client->client, &pid, NULL, NULL);
@@ -861,6 +872,11 @@ int main(int argc, char **argv) {
 	wl_event_source_timer_update(S.lv_timer, 1);
 	apps_load(apps_dir);
 	shell_apps_changed();
+	struct sprite_app *start = apps_autostart();
+	if (start) {
+		wlr_log(WLR_INFO, "opening %s at startup", start->name);
+		sprite_open_app(start); // comes to the front when its window maps
+	}
 	S.sigchld = wl_event_loop_add_signal(S.loop, SIGCHLD, on_sigchld, NULL);
 	S.release_timer = wl_event_loop_add_timer(S.loop, release_timer_cb, NULL);
 	S.handle_timer = wl_event_loop_add_timer(S.loop, handle_timer_cb, NULL);

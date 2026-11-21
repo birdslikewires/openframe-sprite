@@ -29,6 +29,10 @@ static lv_obj_t *bl_slider, *bl_auto, *about_label;
 static bool visible = true, rebuild_pending;
 static struct sprite_app *opening;
 static lv_timer_t *toast_timer;
+static lv_timer_t *hold_timer;        // polls input while a finger is down (long press)
+static lv_obj_t *sheet;               // the long-press sheet for one app
+static struct sprite_app *sheet_app;
+static void sheet_dismiss(void);
 
 /* ---- display and input glue ---- */
 
@@ -50,11 +54,17 @@ static void indev_read(lv_indev_t *i, lv_indev_data_t *data) {
 	data->state = ptr_pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
 }
 
+static void hold_read(lv_timer_t *t) { lv_indev_read(indev); }
+
 void shell_pointer(int x, int y, bool pressed) {
 	ptr_x = x < 0 ? 0 : x >= SPRITE_W ? SPRITE_W - 1 : x;
 	ptr_y = y < 0 ? 0 : y >= SPRITE_H ? SPRITE_H - 1 : y;
 	ptr_pressed = pressed;
 	lv_indev_read(indev);
+	// LVGL reads input only when there is some (event mode), but a long press needs reading
+	// while the finger is still, so poll until it lifts.
+	if (pressed && !hold_timer) hold_timer = lv_timer_create(hold_read, 30, NULL);
+	else if (!pressed && hold_timer) { lv_timer_delete(hold_timer); hold_timer = NULL; }
 	sprite_lvgl_kick();
 }
 
@@ -64,7 +74,9 @@ void shell_set_visible(bool v) {
 		ptr_pressed = false;
 		lv_obj_add_flag(toast, LV_OBJ_FLAG_HIDDEN);
 		if (toast_timer) { lv_timer_delete(toast_timer); toast_timer = NULL; }
+		if (hold_timer) { lv_timer_delete(hold_timer); hold_timer = NULL; }
 		opening = NULL;
+		sheet_dismiss();
 	}
 }
 
@@ -176,6 +188,11 @@ static void show_toast(const char *text, uint32_t ms) {
 	lv_timer_set_repeat_count(toast_timer, 1);
 }
 
+void shell_notice(const char *text) {
+	show_toast(text, 6000);
+	sprite_lvgl_kick();
+}
+
 static void refresh_settings(lv_timer_t *t) {
 	if (lv_obj_has_flag(page_settings, LV_OBJ_FLAG_HIDDEN) || !visible) return;
 	static char text[768];
@@ -190,8 +207,7 @@ static void refresh_settings(lv_timer_t *t) {
 	}
 }
 
-static void tile_clicked(lv_event_t *e) {
-	struct sprite_app *a = lv_event_get_user_data(e);
+static void open_app(struct sprite_app *a) {
 	if (a->builtin) {
 		show_page(page_settings);
 		refresh_settings(NULL);
@@ -206,6 +222,114 @@ static void tile_clicked(lv_event_t *e) {
 	sprite_open_app(a);
 }
 
+static void tile_clicked(lv_event_t *e) { open_app(lv_event_get_user_data(e)); }
+
+/* ---- long-press sheet: open, close, open at startup ---- */
+
+static void sheet_dismiss(void) {
+	if (!sheet) return;
+	lv_obj_delete_async(sheet);
+	sheet = NULL;
+	sheet_app = NULL;
+}
+
+static void sheet_backdrop(lv_event_t *e) {
+	if (lv_event_get_target(e) == lv_event_get_current_target(e)) sheet_dismiss(); // a tap outside the card
+}
+
+static void sheet_open(lv_event_t *e) {
+	struct sprite_app *a = sheet_app;
+	sheet_dismiss();
+	open_app(a);
+}
+
+static void sheet_close_app(lv_event_t *e) {
+	struct sprite_app *a = sheet_app;
+	sheet_dismiss();
+	char s[96];
+	snprintf(s, sizeof s, "Closing %s...", a->name);
+	show_toast(s, 4000);
+	sprite_close_app(a);
+}
+
+static void sheet_startup(lv_event_t *e) {
+	apps_set_autostart(sheet_app, lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
+	shell_apps_changed();
+}
+
+static lv_obj_t *sheet_button(lv_obj_t *parent, const char *text, uint32_t color, lv_event_cb_t cb) {
+	lv_obj_t *b = lv_button_create(parent);
+	lv_obj_set_size(b, 180, 56);
+	lv_obj_set_style_bg_color(b, lv_color_hex(color), 0);
+	lv_obj_t *l = lv_label_create(b);
+	lv_label_set_text(l, text);
+	lv_obj_center(l);
+	lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
+	return b;
+}
+
+static void open_sheet(struct sprite_app *a) {
+	if (a->builtin || sheet) return;
+	sheet_app = a;
+	sheet = lv_obj_create(lv_layer_top());
+	lv_obj_remove_style_all(sheet);
+	lv_obj_set_size(sheet, SPRITE_W, SPRITE_H);
+	lv_obj_set_style_bg_color(sheet, lv_color_black(), 0);
+	lv_obj_set_style_bg_opa(sheet, LV_OPA_60, 0);
+	lv_obj_add_flag(sheet, LV_OBJ_FLAG_CLICKABLE);
+	lv_obj_add_event_cb(sheet, sheet_backdrop, LV_EVENT_CLICKED, NULL);
+
+	lv_obj_t *card = lv_obj_create(sheet);
+	lv_obj_set_size(card, 460, LV_SIZE_CONTENT);
+	lv_obj_center(card);
+	lv_obj_set_style_bg_color(card, lv_color_hex(0x1c242c), 0);
+	lv_obj_set_style_border_width(card, 0, 0);
+	lv_obj_set_style_radius(card, 22, 0);
+	lv_obj_set_style_pad_all(card, 24, 0);
+	lv_obj_set_style_pad_row(card, 18, 0);
+	lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+	lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+
+	lv_obj_t *title = lv_label_create(card);
+	lv_label_set_text(title, a->name);
+	lv_obj_set_style_text_font(title, &lv_font_montserrat_28, 0);
+	lv_obj_set_style_text_color(title, lv_color_hex(C_TEXT), 0);
+
+	lv_obj_t *row = lv_obj_create(card);
+	lv_obj_remove_style_all(row);
+	lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+	lv_obj_set_style_pad_column(row, 20, 0);
+	sheet_button(row, LV_SYMBOL_PLAY "  Open", C_ACCENT, sheet_open);
+	if (a->pid || a->pending) sheet_button(row, LV_SYMBOL_CLOSE "  Close", 0xb3403a, sheet_close_app);
+
+	lv_obj_t *srow = lv_obj_create(card);
+	lv_obj_remove_style_all(srow);
+	lv_obj_set_size(srow, LV_PCT(100), LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(srow, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(srow, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_t *text = lv_obj_create(srow);
+	lv_obj_remove_style_all(text);
+	lv_obj_set_size(text, 300, LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(text, LV_FLEX_FLOW_COLUMN);
+	lv_obj_t *l1 = lv_label_create(text);
+	lv_label_set_text(l1, "Open at startup");
+	lv_obj_set_style_text_color(l1, lv_color_hex(C_TEXT), 0);
+	lv_obj_t *l2 = lv_label_create(text);
+	lv_label_set_text(l2, "Opens when the OpenFrame starts, and again if it closes.");
+	lv_label_set_long_mode(l2, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(l2, 300);
+	lv_obj_set_style_text_font(l2, &lv_font_montserrat_14, 0);
+	lv_obj_set_style_text_color(l2, lv_color_hex(C_DIM), 0);
+	lv_obj_t *sw = lv_switch_create(srow);
+	lv_obj_set_size(sw, 72, 38);
+	if (apps_autostart() == a) lv_obj_add_state(sw, LV_STATE_CHECKED);
+	lv_obj_add_event_cb(sw, sheet_startup, LV_EVENT_VALUE_CHANGED, NULL);
+	sprite_lvgl_kick();
+}
+
+static void tile_long_pressed(lv_event_t *e) { open_sheet(lv_event_get_user_data(e)); }
+
 static void rebuild_grid(void *unused) {
 	rebuild_pending = false;
 	lv_obj_clean(grid);
@@ -217,7 +341,9 @@ static void rebuild_grid(void *unused) {
 		lv_obj_set_size(tile, TILE_W, TILE_H);
 		lv_obj_add_flag(tile, LV_OBJ_FLAG_CLICKABLE);
 		lv_obj_remove_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
-		lv_obj_add_event_cb(tile, tile_clicked, LV_EVENT_CLICKED, a);
+		// a short click opens; a long press (which LVGL doesn't follow with SHORT_CLICKED) shows the sheet
+		lv_obj_add_event_cb(tile, tile_clicked, LV_EVENT_SHORT_CLICKED, a);
+		lv_obj_add_event_cb(tile, tile_long_pressed, LV_EVENT_LONG_PRESSED, a);
 
 		lv_obj_t *badge = lv_obj_create(tile);
 		lv_obj_remove_style_all(badge);
@@ -244,6 +370,19 @@ static void rebuild_grid(void *unused) {
 			lv_obj_set_style_border_color(dot, lv_color_white(), 0);
 			lv_obj_set_style_border_width(dot, 2, 0);
 			lv_obj_align(dot, LV_ALIGN_TOP_RIGHT, -12, 12);
+		}
+
+		if (a == apps_autostart()) { // a small label on the app that opens at startup
+			lv_obj_t *chip = lv_label_create(badge);
+			lv_label_set_text(chip, LV_SYMBOL_POWER " Startup");
+			lv_obj_set_style_text_font(chip, &lv_font_montserrat_14, 0);
+			lv_obj_set_style_text_color(chip, lv_color_white(), 0);
+			lv_obj_set_style_bg_color(chip, lv_color_black(), 0);
+			lv_obj_set_style_bg_opa(chip, LV_OPA_40, 0);
+			lv_obj_set_style_radius(chip, 10, 0);
+			lv_obj_set_style_pad_hor(chip, 8, 0);
+			lv_obj_set_style_pad_ver(chip, 3, 0);
+			lv_obj_align(chip, LV_ALIGN_BOTTOM_LEFT, 10, -10);
 		}
 
 		lv_obj_t *name = lv_label_create(tile);
