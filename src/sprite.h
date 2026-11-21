@@ -1,0 +1,99 @@
+// sprite: OpenFrame touch shell. Compositor (wlroots, pixman) and LVGL shell in one process.
+#pragma once
+
+#include <stdbool.h>
+#include <stdint.h>
+#include <sys/types.h>
+#include <wayland-server-core.h>
+
+#define SPRITE_VERSION "0.1-proto"
+#define SPRITE_W 800
+#define SPRITE_H 480
+
+// Going home. While an app shows, a pill-shaped handle sits at the middle of the home edge
+// (bottom by default; SPRITE_HOME_EDGE=top|bottom), and a touch that starts under it goes
+// home at once. It's a touch rather than a swipe because the OF1's controller sends its
+// first movement sample about 60 ms after contact: a quick flick often arrives as a touch at
+// the edge and nothing more, and a quick tap looks the same. Distances are measured from the
+// edge (see edge_dist in main.c).
+#define SPRITE_EDGE_PX 20
+// A touch starting a little further out goes to the app, but goes home instead if it then
+// travels SPRITE_EDGE_SWIPE_PX away from the edge, so swipes that start short still work and
+// taps near the edge of an app stay with the app.
+#define SPRITE_EDGE_BAND_PX 32
+#define SPRITE_EDGE_SWIPE_PX 30
+// Only the middle of the edge counts: accidental bumps while using an app land as close to
+// the edge as deliberate touches, but anywhere along it.
+#define SPRITE_EDGE_HALF_W 80
+#define SPRITE_HANDLE_W (2 * SPRITE_EDGE_HALF_W) // the handle shows the whole zone
+#define SPRITE_HANDLE_H 6
+#define SPRITE_HANDLE_Y 5  // gap between the handle and the screen edge
+// Calibrated touch reaches y = 9 at the top but only y = 462 at the bottom, so the bottom
+// edge is measured from y = 465. Touches aimed at the bottom bezel register at y = 458-462,
+// and at the top bezel at y = 10-19.
+#define SPRITE_BOTTOM_REACH 465
+// Handle opacity. An app's manifest can ask for it faint or hidden; the touch zone works the
+// same either way. It shows at normal strength when an app comes up, then fades.
+#define SPRITE_HANDLE_NORMAL 0.35f
+#define SPRITE_HANDLE_FAINT 0.10f
+#define SPRITE_HANDLE_HOLD_MS 2000
+#define SPRITE_HANDLE_FADE_MS 250
+// The OpenFrame's resistive touchscreen briefly loses contact during fast strokes: it reports
+// a release and then a new press 28-56 ms later, further along. A release is held this long,
+// and a press within it is taken as the same finger still moving.
+#define SPRITE_DEBOUNCE_MS 64
+
+struct sprite_view;
+
+struct sprite_app {
+	char id[64];
+	char name[64];
+	char exec[512];
+	char icon[32];      // a keyword (see shell.c) or up to two letters
+	uint32_t color;     // tile colour, 0xRRGGBB
+	bool builtin;       // handled inside sprite (settings), no process
+	bool hidden;        // not shown on the home screen (adopted windows)
+	bool x11;           // needs Xwayland (manifest: display=x11)
+	bool pending;       // waiting for Xwayland before launching
+	float handle;       // home handle opacity while this app shows (manifest: handle=normal|faint|hidden)
+	pid_t pid;          // launched process, 0 when not running
+	struct sprite_view *view; // the app's main mapped window, if any
+};
+
+// apps.c
+void apps_load(const char *dir);
+int apps_count(void);
+struct sprite_app *apps_get(int i);
+struct sprite_app *apps_for_pid(pid_t pid);  // follows parent pids up to a launched app
+void apps_launch(struct sprite_app *app);
+void apps_reap(void);                         // collect exited apps, update state
+void apps_set_env(const char *wayland_display, const char *x_display);
+void apps_x11_ready(bool ready);              // the X keeper has (or no longer has) opened X to apps
+
+// main.c, for the shell
+void sprite_open_app(struct sprite_app *app); // show it, launching it if needed
+void sprite_go_home(void);
+void sprite_lvgl_kick(void);                  // run the LVGL timer handler soon
+struct wl_event_loop *sprite_event_loop(void);
+
+// shell.c
+void shell_init(void *pixels);                // pixels: SPRITE_W x SPRITE_H XRGB8888
+void shell_pointer(int x, int y, bool pressed);
+void shell_apps_changed(void);                // running state or list changed
+void shell_set_visible(bool visible);
+
+// main.c provides this for shell.c's flush callback
+void sprite_shell_damage(int x, int y, int w, int h, bool commit);
+
+// sysinfo.c
+struct sprite_net {
+	bool eth_up, wifi_up;
+	char eth_ip[48], wifi_ip[48];
+	int wifi_quality;     // 0-100, -1 when unknown
+};
+void sysinfo_net(struct sprite_net *out);
+int sysinfo_backlight(void);                  // 0-100, -1 if unknown
+bool sysinfo_backlight_auto(void);
+void sysinfo_set_backlight(const char *arg);  // "0".."100" or "auto", runs of-backlight
+void sysinfo_summary(char *buf, size_t len);  // multi-line system text
+void sysinfo_run(const char *cmd);            // fire and forget, as root

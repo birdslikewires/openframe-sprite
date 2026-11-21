@@ -1,0 +1,259 @@
+// Apps: manifests on disk, launching as the unprivileged user, and tracking their processes.
+//
+// A manifest is a small key=value file, one per app, in the apps directory:
+//   name=Clock
+//   exec=xclock -digital -update 1
+//   icon=clock           (keyword or up to two letters)
+//   color=2a6f97         (tile colour)
+//   builtin=settings     (handled by sprite itself, no exec)
+//   display=x11          (an X11 or SDL app, run through Xwayland; default wayland)
+//   handle=faint         (home handle: normal, faint or hidden while the app shows)
+#define _GNU_SOURCE
+#include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <grp.h>
+#include <pwd.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <wlr/util/log.h>
+#include <xcb/xcb.h>
+
+#include "sprite.h"
+
+#define MAX_APPS 64
+
+static struct sprite_app apps[MAX_APPS];
+static int n_apps;
+static char env_wayland[64], env_x[32];
+
+// The X keeper. wlroots runs Xwayland as root and starts it only when a client connects;
+// Xwayland admits only its own user, and quits when its last client leaves, forgetting any
+// access granted. So a root helper connects (which starts Xwayland), lets the apps' user in,
+// reports back through a pipe, and stays connected so the grant lasts. X11 apps launch
+// once it has reported.
+static pid_t keeper_pid;
+static bool x_open;
+static struct wl_event_source *keeper_src;
+
+void apps_set_env(const char *wayland_display, const char *x_display) {
+	snprintf(env_wayland, sizeof env_wayland, "%s", wayland_display ? wayland_display : "");
+	snprintf(env_x, sizeof env_x, "%s", x_display ? x_display : "");
+}
+
+int apps_count(void) { return n_apps; }
+struct sprite_app *apps_get(int i) { return i >= 0 && i < n_apps ? &apps[i] : NULL; }
+
+static void trim(char *s) {
+	char *e = s + strlen(s);
+	while (e > s && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' ' || e[-1] == '\t')) *--e = 0;
+}
+
+static int cmp_apps(const void *a, const void *b) {
+	const struct sprite_app *x = a, *y = b;
+	if (x->builtin != y->builtin) return x->builtin ? 1 : -1; // settings last
+	return strcasecmp(x->name, y->name);
+}
+
+void apps_load(const char *dir) {
+	DIR *d = opendir(dir);
+	if (!d) { wlr_log(WLR_ERROR, "no apps directory %s", dir); return; }
+	struct dirent *de;
+	while ((de = readdir(d)) && n_apps < MAX_APPS) {
+		size_t len = strlen(de->d_name);
+		if (len < 5 || strcmp(de->d_name + len - 4, ".app")) continue;
+		char path[512];
+		snprintf(path, sizeof path, "%s/%s", dir, de->d_name);
+		FILE *f = fopen(path, "r");
+		if (!f) continue;
+		struct sprite_app *a = &apps[n_apps];
+		memset(a, 0, sizeof *a);
+		snprintf(a->id, sizeof a->id, "%.*s", (int)(len - 4), de->d_name);
+		a->color = 0x3a4a5a;
+		a->handle = SPRITE_HANDLE_NORMAL;
+		char line[768];
+		while (fgets(line, sizeof line, f)) {
+			trim(line);
+			char *eq = strchr(line, '=');
+			if (line[0] == '#' || !eq) continue;
+			*eq = 0;
+			const char *k = line, *v = eq + 1;
+			if (!strcmp(k, "name")) snprintf(a->name, sizeof a->name, "%s", v);
+			else if (!strcmp(k, "exec")) snprintf(a->exec, sizeof a->exec, "%s", v);
+			else if (!strcmp(k, "icon")) snprintf(a->icon, sizeof a->icon, "%s", v);
+			else if (!strcmp(k, "color")) a->color = strtoul(v, NULL, 16);
+			else if (!strcmp(k, "builtin")) { a->builtin = true; snprintf(a->exec, sizeof a->exec, "%s", v); }
+			else if (!strcmp(k, "display")) a->x11 = !strcmp(v, "x11");
+			else if (!strcmp(k, "handle"))
+				a->handle = !strcmp(v, "hidden") ? 0.0f : !strcmp(v, "faint") ? SPRITE_HANDLE_FAINT : SPRITE_HANDLE_NORMAL;
+		}
+		fclose(f);
+		if (!a->name[0]) memcpy(a->name, a->id, sizeof a->name < sizeof a->id ? sizeof a->name : sizeof a->id);
+		if (!a->exec[0]) { wlr_log(WLR_ERROR, "%s: no exec", path); continue; }
+		n_apps++;
+	}
+	closedir(d);
+	qsort(apps, n_apps, sizeof apps[0], cmp_apps);
+	wlr_log(WLR_INFO, "%d apps from %s", n_apps, dir);
+}
+
+static pid_t parent_of(pid_t pid) {
+	char path[64], buf[512];
+	snprintf(path, sizeof path, "/proc/%d/stat", pid);
+	FILE *f = fopen(path, "r");
+	if (!f) return 0;
+	size_t n = fread(buf, 1, sizeof buf - 1, f);
+	fclose(f);
+	buf[n] = 0;
+	char *p = strrchr(buf, ')'); // the command name can contain spaces
+	int ppid = 0;
+	if (p) sscanf(p + 2, "%*c %d", &ppid);
+	return ppid;
+}
+
+struct sprite_app *apps_for_pid(pid_t pid) {
+	for (pid_t p = pid; p > 1; p = parent_of(p))
+		for (int i = 0; i < n_apps; i++)
+			if (apps[i].pid == p) return &apps[i];
+	// A window from a process we didn't launch (started by hand over SSH, say): give it a
+	// hidden entry of its own so it can still be shown and closed like any other app.
+	for (int i = 0; i < n_apps; i++)
+		if (apps[i].hidden && apps[i].pid == pid) return &apps[i];
+	if (n_apps >= MAX_APPS) return &apps[n_apps - 1];
+	struct sprite_app *a = &apps[n_apps++];
+	memset(a, 0, sizeof *a);
+	snprintf(a->id, sizeof a->id, "pid-%d", pid);
+	snprintf(a->name, sizeof a->name, "Window %d", pid);
+	a->hidden = true;
+	a->pid = pid;
+	a->handle = SPRITE_HANDLE_NORMAL;
+	return a;
+}
+
+static int keeper_readable(int fd, uint32_t mask, void *data) {
+	char c = 0;
+	ssize_t n = read(fd, &c, 1);
+	wl_event_source_remove(keeper_src);
+	keeper_src = NULL;
+	close(fd);
+	apps_x11_ready(n == 1 && c == 'y');
+	shell_apps_changed();
+	return 0;
+}
+
+static void start_keeper(const char *user) {
+	int p[2];
+	if (keeper_pid || !env_x[0] || pipe(p) != 0) return;
+	pid_t pid = fork();
+	if (pid == 0) {
+		close(p[0]);
+		sigset_t set;
+		sigemptyset(&set);
+		sigprocmask(SIG_SETMASK, &set, NULL);
+		xcb_connection_t *c = xcb_connect(env_x, NULL);
+		char ok = 'n';
+		if (!xcb_connection_has_error(c)) {
+			char entry[80]; // server-interpreted address: "localuser" NUL user
+			int len = snprintf(entry, sizeof entry, "localuser%c%s", 0, user);
+			xcb_void_cookie_t ck = xcb_change_hosts_checked(c, XCB_HOST_MODE_INSERT,
+				XCB_FAMILY_SERVER_INTERPRETED, len, (const uint8_t *)entry);
+			xcb_generic_error_t *err = xcb_request_check(c, ck);
+			ok = err ? 'n' : 'y';
+			free(err);
+		}
+		if (write(p[1], &ok, 1) != 1) _exit(1);
+		close(p[1]);
+		if (ok != 'y') _exit(1);
+		// stay connected; leave when Xwayland goes away
+		xcb_generic_event_t *ev;
+		while ((ev = xcb_wait_for_event(c))) free(ev);
+		_exit(0);
+	}
+	close(p[1]);
+	if (pid < 0) { close(p[0]); return; }
+	keeper_pid = pid;
+	keeper_src = wl_event_loop_add_fd(sprite_event_loop(), p[0], WL_EVENT_READABLE, keeper_readable, NULL);
+	wlr_log(WLR_INFO, "X keeper started (pid %d)", pid);
+}
+
+void apps_x11_ready(bool ready) {
+	x_open = ready;
+	wlr_log(WLR_INFO, "X %s to apps", ready ? "open" : "closed");
+	for (int i = 0; i < n_apps; i++) {
+		if (!apps[i].pending) continue;
+		apps[i].pending = false;
+		if (ready) apps_launch(&apps[i]);
+		else wlr_log(WLR_ERROR, "%s not started: X is not available", apps[i].name);
+	}
+}
+
+void apps_launch(struct sprite_app *app) {
+	if (app->builtin || app->pid || app->pending) return;
+	if (app->x11 && !x_open) {
+		app->pending = true;
+		start_keeper(getenv("SPRITE_USER") ? getenv("SPRITE_USER") : "of");
+		return;
+	}
+	const char *user = getenv("SPRITE_USER") ? getenv("SPRITE_USER") : "of";
+	struct passwd *pw = getpwnam(user);
+	pid_t pid = fork();
+	if (pid < 0) { wlr_log(WLR_ERROR, "fork: %s", strerror(errno)); return; }
+	if (pid == 0) {
+		setsid();
+		sigset_t set;
+		sigemptyset(&set);
+		sigprocmask(SIG_SETMASK, &set, NULL); // the compositor blocks SIGCHLD for its loop
+		if (getuid() == 0 && pw) {
+			if (initgroups(pw->pw_name, pw->pw_gid) || setgid(pw->pw_gid) || setuid(pw->pw_uid)) _exit(126);
+			setenv("HOME", pw->pw_dir, 1);
+			setenv("USER", pw->pw_name, 1);
+			setenv("LOGNAME", pw->pw_name, 1);
+			if (chdir(pw->pw_dir) != 0) { /* stay where we are */ }
+		}
+		setenv("WAYLAND_DISPLAY", env_wayland, 1);
+		if (env_x[0]) setenv("DISPLAY", env_x, 1);
+		setenv("SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS", "0", 1); // sprite keeps it, in the background
+		setenv("SDL_VIDEODRIVER", "x11", 1); // SDL's Wayland backend needs EGL, which we don't have
+		// sdl12-compat loads our Mesa-free SDL2 at run time
+		setenv("LD_LIBRARY_PATH", "/opt/sprite/lib:/opt/sprite/lib/i386-linux-gnu", 1);
+		unsetenv("LIBSEAT_BACKEND");
+		unsetenv("WLR_RENDERER");
+		int fd = open("/dev/null", O_RDWR);
+		if (fd >= 0) { dup2(fd, 0); close(fd); }
+		execl("/bin/sh", "/bin/sh", "-c", app->exec, (char *)NULL);
+		_exit(127);
+	}
+	app->pid = pid;
+	wlr_log(WLR_INFO, "launched %s (pid %d): %s", app->name, pid, app->exec);
+}
+
+void apps_reap(void) {
+	int st;
+	if (keeper_pid && waitpid(keeper_pid, &st, WNOHANG) == keeper_pid) {
+		wlr_log(WLR_INFO, "X keeper exited");
+		keeper_pid = 0;
+		if (keeper_src) { // died before reporting
+			wl_event_source_remove(keeper_src);
+			keeper_src = NULL;
+		}
+		apps_x11_ready(false);
+	}
+	for (int i = 0; i < n_apps; i++) {
+		struct sprite_app *a = &apps[i];
+		if (a->pid <= 0 || a->hidden) continue;
+		int status;
+		if (waitpid(a->pid, &status, WNOHANG) == a->pid) {
+			wlr_log(WLR_INFO, "%s exited (%s %d)", a->name, WIFEXITED(status) ? "status" : "signal",
+				WIFEXITED(status) ? WEXITSTATUS(status) : WTERMSIG(status));
+			a->pid = 0;
+		}
+	}
+	// hidden entries: drop the pid once the process has gone
+	for (int i = 0; i < n_apps; i++)
+		if (apps[i].hidden && apps[i].pid > 0 && kill(apps[i].pid, 0) != 0 && errno == ESRCH && !apps[i].view)
+			apps[i].pid = 0;
+}
