@@ -6,7 +6,8 @@
 ##  as stdin and stdout. It reads one request, answers "ok" or "error: <reason>", and
 ##  exits. Requests:
 ##
-##    startup <app name>    set (or, with no name, clear) startup= in settings/sprite.txt
+##    set <key> <value>     set a setting in settings/sprite.txt (an empty value clears it):
+##                            startup (an app name) or calibration (six numbers)
 ##    reboot                restart the OpenFrame
 ##    poweroff              switch it off
 
@@ -18,10 +19,17 @@ answer() { echo "$*"; exit 0; }
 read -r -t 5 CMD ARG || [ -n "$CMD" ] || answer "error: no request"
 
 case "$CMD" in
-	startup)
-		# App names are letters, digits, spaces and a little punctuation; nothing else
-		# goes into the file.
-		[[ "$ARG" =~ ^[A-Za-z0-9\ ._()+-]{0,63}$ ]] || answer "error: bad app name"
+	set)
+		KEY="${ARG%% *}"
+		VAL=""
+		[ "$KEY" = "$ARG" ] || VAL="${ARG#* }"
+		# Only known settings, each with only the characters it can need.
+		case "$KEY" in
+			startup) RE='^[A-Za-z0-9 ._()+-]{0,63}$' ;;
+			calibration) RE='^(-?[0-9]+(\.[0-9]+)?(,-?[0-9]+(\.[0-9]+)?){5})?$' ;;
+			*) answer "error: unknown setting" ;;
+		esac
+		[[ "$VAL" =~ $RE ]] || answer "error: bad value for $KEY"
 		NEW=$(mktemp) || answer "error: no temporary file"
 		trap 'rm -f "$NEW"' EXIT
 		if [ -f "$SETTINGS" ]; then
@@ -29,10 +37,10 @@ case "$CMD" in
 		elif [ -f "$TEMPLATE" ]; then
 			cp "$TEMPLATE" "$NEW"
 		fi
-		if grep -q '^startup=' "$NEW"; then
-			awk -v v="$ARG" '/^startup=/ { print "startup=" v; next } { print }' "$NEW" > "$NEW.2" && mv "$NEW.2" "$NEW"
+		if grep -q "^$KEY=" "$NEW"; then
+			awk -v k="$KEY" -v v="$VAL" 'index($0, k "=") == 1 { print k "=" v; next } { print }' "$NEW" > "$NEW.2" && mv "$NEW.2" "$NEW"
 		else
-			echo "startup=$ARG" >> "$NEW"
+			echo "$KEY=$VAL" >> "$NEW"
 		fi
 		# /boot is read-only (FAT, no journal): open it with bootrw, and replace the file
 		# with a synced copy so a power cut leaves the old file or the new one.

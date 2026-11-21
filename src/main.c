@@ -98,6 +98,9 @@ static struct {
 	double app_press_y;     // where a touch given to the app began
 	bool app_press_home_x;  // ... and whether that was in the middle, under the handle
 	bool button_down;
+	bool trace_input;       // SPRITE_TRACE_INPUT=1: log presses given to apps
+	double calib[6];        // touch correction (see sprite.h)
+	bool calibrating;
 	struct wl_event_source *release_timer; // see SPRITE_DEBOUNCE_MS
 	bool release_pending;
 	uint32_t release_button, release_time;
@@ -520,6 +523,8 @@ static void forward_to_app(double x, double y, uint32_t t) {
 		if (ss) surface = ss->surface;
 	}
 	if (surface) {
+		if (S.trace_input && !S.button_down)
+			wlr_log(WLR_INFO, "trace: app pointer at %.1f,%.1f (screen %.1f,%.1f)", sx, sy, x, y);
 		wlr_seat_pointer_notify_enter(S.seat, surface, sx, sy);
 		wlr_seat_pointer_notify_motion(S.seat, t, sx, sy);
 	} else if (!S.button_down) {
@@ -529,6 +534,39 @@ static void forward_to_app(double x, double y, uint32_t t) {
 
 // How far a point is from the home edge, in the same terms for top and bottom.
 static double edge_dist(double y) { return S.home_bottom ? SPRITE_BOTTOM_REACH - y : y; }
+
+/* ---- touch calibration ---- */
+
+void sprite_set_calibration(const double m[6]) { memcpy(S.calib, m, sizeof S.calib); }
+void sprite_get_calibration(double m[6]) { memcpy(m, S.calib, sizeof S.calib); }
+void sprite_calibrating(bool on) { S.calibrating = on; }
+
+static void load_calibration(void) {
+	const double identity[6] = { 1, 0, 0, 0, 1, 0 };
+	memcpy(S.calib, identity, sizeof S.calib);
+	const char *v = settings_get("calibration");
+	double m[6];
+	if (v && sscanf(v, "%lf,%lf,%lf,%lf,%lf,%lf", &m[0], &m[1], &m[2], &m[3], &m[4], &m[5]) == 6) {
+		memcpy(S.calib, m, sizeof S.calib);
+		wlr_log(WLR_INFO, "touch calibration: %s", v);
+	}
+}
+
+// Where the finger is, in screen terms: the cursor position with the correction applied.
+static void finger(double *x, double *y) {
+	double cx = S.cursor->x, cy = S.cursor->y;
+	if (!S.calibrating) {
+		*x = S.calib[0] * cx + S.calib[1] * cy + S.calib[2];
+		*y = S.calib[3] * cx + S.calib[4] * cy + S.calib[5];
+	} else {
+		*x = cx;
+		*y = cy;
+	}
+	if (*x < 0) *x = 0;
+	if (*x > SPRITE_W - 1) *x = SPRITE_W - 1;
+	if (*y < 0) *y = 0;
+	if (*y > SPRITE_H - 1) *y = SPRITE_H - 1;
+}
 
 static void input_motion(double x, double y, uint32_t t) {
 	switch (S.gesture) {
@@ -573,6 +611,7 @@ static void input_press(double x, double y, uint32_t t, uint32_t button) {
 			return;
 		}
 		S.gesture = G_APP;
+		if (S.trace_input) wlr_log(WLR_INFO, "trace: app press at screen %.1f,%.1f", x, y);
 		S.app_press_y = y;
 		S.app_press_home_x = middle;
 		forward_to_app(x, y, t);
@@ -594,7 +633,9 @@ static void finish_release(double x, double y, uint32_t t, uint32_t button) {
 static int release_timer_cb(void *data) {
 	if (!S.release_pending) return 0;
 	S.release_pending = false;
-	finish_release(S.cursor->x, S.cursor->y, S.release_time, S.release_button);
+	double x, y;
+	finger(&x, &y);
+	finish_release(x, y, S.release_time, S.release_button);
 	return 0;
 }
 
@@ -609,17 +650,23 @@ static void input_release(double x, double y, uint32_t t, uint32_t button) {
 static void cursor_motion(struct wl_listener *l, void *data) {
 	struct wlr_pointer_motion_event *e = data;
 	wlr_cursor_move(S.cursor, &e->pointer->base, e->delta_x, e->delta_y);
-	input_motion(S.cursor->x, S.cursor->y, e->time_msec);
+	double x, y;
+	finger(&x, &y);
+	input_motion(x, y, e->time_msec);
 }
 static void cursor_motion_abs(struct wl_listener *l, void *data) {
 	struct wlr_pointer_motion_absolute_event *e = data;
 	wlr_cursor_warp_absolute(S.cursor, &e->pointer->base, e->x, e->y);
-	input_motion(S.cursor->x, S.cursor->y, e->time_msec);
+	double x, y;
+	finger(&x, &y);
+	input_motion(x, y, e->time_msec);
 }
 static void cursor_button(struct wl_listener *l, void *data) {
 	struct wlr_pointer_button_event *e = data;
-	if (e->state == WL_POINTER_BUTTON_STATE_PRESSED) input_press(S.cursor->x, S.cursor->y, e->time_msec, e->button);
-	else input_release(S.cursor->x, S.cursor->y, e->time_msec, e->button);
+	double x, y;
+	finger(&x, &y);
+	if (e->state == WL_POINTER_BUTTON_STATE_PRESSED) input_press(x, y, e->time_msec, e->button);
+	else input_release(x, y, e->time_msec, e->button);
 }
 static void cursor_axis(struct wl_listener *l, void *data) {
 	struct wlr_pointer_axis_event *e = data;
@@ -638,6 +685,7 @@ static void touch_down(struct wl_listener *l, void *data) {
 	double x, y;
 	wlr_cursor_absolute_to_layout_coords(S.cursor, &e->touch->base, e->x, e->y, &x, &y);
 	wlr_cursor_warp_closest(S.cursor, NULL, x, y);
+	finger(&x, &y);
 	input_motion(x, y, e->time_msec);
 	input_press(x, y, e->time_msec, BTN_LEFT);
 }
@@ -647,13 +695,16 @@ static void touch_motion(struct wl_listener *l, void *data) {
 	double x, y;
 	wlr_cursor_absolute_to_layout_coords(S.cursor, &e->touch->base, e->x, e->y, &x, &y);
 	wlr_cursor_warp_closest(S.cursor, NULL, x, y);
+	finger(&x, &y);
 	input_motion(x, y, e->time_msec);
 }
 static void touch_up(struct wl_listener *l, void *data) {
 	struct wlr_touch_up_event *e = data;
 	if (e->touch_id != touch_id) return;
 	touch_id = -1;
-	input_release(S.cursor->x, S.cursor->y, e->time_msec, BTN_LEFT);
+	double x, y;
+	finger(&x, &y);
+	input_release(x, y, e->time_msec, BTN_LEFT);
 }
 static void touch_frame(struct wl_listener *l, void *data) { if (S.fg) wlr_seat_pointer_notify_frame(S.seat); }
 
@@ -778,6 +829,12 @@ static void new_output(struct wl_listener *l, void *data) {
 
 /* ---- children ---- */
 
+static int on_terminate(int sig, void *data) {
+	wlr_log(WLR_INFO, "signal %d: stopping", sig);
+	wl_display_terminate(S.display);
+	return 0;
+}
+
 static int on_sigchld(int sig, void *data) {
 	apps_reap();
 	shell_apps_changed();
@@ -799,6 +856,8 @@ int main(int argc, char **argv) {
 	sigset_t chld;
 	sigemptyset(&chld);
 	sigaddset(&chld, SIGCHLD);
+	sigaddset(&chld, SIGTERM);
+	sigaddset(&chld, SIGINT);
 	pthread_sigmask(SIG_BLOCK, &chld, NULL);
 	wlr_log_init(getenv("SPRITE_DEBUG") ? WLR_DEBUG : WLR_INFO, NULL);
 	const char *apps_dir = getenv("SPRITE_APPS");
@@ -844,6 +903,7 @@ int main(int argc, char **argv) {
 	draw_handle(S.handlebuf.pixels, SPRITE_HANDLE_W, SPRITE_HANDLE_H);
 	wlr_buffer_init(&S.handlebuf.base, &shellbuf_impl, SPRITE_HANDLE_W, SPRITE_HANDLE_H);
 	S.handle = wlr_scene_buffer_create(&S.scene->tree, &S.handlebuf.base);
+	S.trace_input = getenv("SPRITE_TRACE_INPUT") && atoi(getenv("SPRITE_TRACE_INPUT"));
 	S.home_bottom = !getenv("SPRITE_HOME_EDGE") || strcmp(getenv("SPRITE_HOME_EDGE"), "top");
 	wlr_scene_node_set_position(&S.handle->node, (SPRITE_W - SPRITE_HANDLE_W) / 2,
 		S.home_bottom ? SPRITE_H - SPRITE_HANDLE_Y - SPRITE_HANDLE_H : SPRITE_HANDLE_Y);
@@ -901,6 +961,8 @@ int main(int argc, char **argv) {
 	shell_init(S.shellbuf.pixels);
 	S.lv_timer = wl_event_loop_add_timer(S.loop, lv_timer_cb, NULL);
 	wl_event_source_timer_update(S.lv_timer, 1);
+	settings_load();
+	load_calibration();
 	apps_load(apps_dir);
 	shell_apps_changed();
 	S.hold_timer = wl_event_loop_add_timer(S.loop, hold_timeout, NULL);
@@ -912,6 +974,8 @@ int main(int argc, char **argv) {
 		sprite_open_app(start);
 	}
 	S.sigchld = wl_event_loop_add_signal(S.loop, SIGCHLD, on_sigchld, NULL);
+	wl_event_loop_add_signal(S.loop, SIGTERM, on_terminate, NULL);
+	wl_event_loop_add_signal(S.loop, SIGINT, on_terminate, NULL);
 	S.release_timer = wl_event_loop_add_timer(S.loop, release_timer_cb, NULL);
 	S.handle_timer = wl_event_loop_add_timer(S.loop, handle_timer_cb, NULL);
 
@@ -921,6 +985,7 @@ int main(int argc, char **argv) {
 		S.xwayland ? S.xwayland->display_name : "(none)");
 	wl_display_run(S.display);
 
+	apps_end_all();
 	wl_display_destroy_clients(S.display);
 	if (S.xwayland) wlr_xwayland_destroy(S.xwayland);
 	wlr_scene_node_destroy(&S.scene->tree.node);

@@ -1,6 +1,7 @@
 // The shell: status bar, home screen of app tiles, settings. LVGL, rendered in software
 // into the buffer the compositor shows whenever no app is on screen.
 #define _GNU_SOURCE
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -34,6 +35,23 @@ static lv_obj_t *sheet;               // the long-press sheet for one app
 static struct sprite_app *sheet_app;
 static void sheet_dismiss(void);
 
+// Touch calibration: crosses at these points, tapped in turn.
+#define CAL_N 9
+static const int cal_pts[CAL_N][2] = {
+	{ 60, 60 }, { 400, 60 }, { 740, 60 },
+	{ 60, 240 }, { 400, 240 }, { 740, 240 },
+	{ 60, 420 }, { 400, 420 }, { 740, 420 },
+};
+static lv_obj_t *cal;                  // the calibration screen, while it's up
+static int cal_i;                      // which cross is showing
+static double cal_raw[CAL_N][2];       // where each tap was reported, uncorrected
+static double cal_sx, cal_sy;          // sums of positions during the current touch
+static int cal_n;
+static bool cal_collecting;
+static double cal_prev[6];             // the calibration in use before, to put back on Cancel
+static double cal_new[6];
+static void cal_tap(double x, double y);
+
 /* ---- display and input glue ---- */
 
 static uint32_t tick_ms(void) {
@@ -57,6 +75,11 @@ static void indev_read(lv_indev_t *i, lv_indev_data_t *data) {
 static void hold_read(lv_timer_t *t) { lv_indev_read(indev); }
 
 void shell_pointer(int x, int y, bool pressed) {
+	if (cal_collecting) { // calibration takes the raw positions, not LVGL
+		if (pressed) { cal_sx += x; cal_sy += y; cal_n++; }
+		else if (cal_n) { cal_tap(cal_sx / cal_n, cal_sy / cal_n); cal_sx = cal_sy = 0; cal_n = 0; }
+		return;
+	}
 	ptr_x = x < 0 ? 0 : x >= SPRITE_W ? SPRITE_W - 1 : x;
 	ptr_y = y < 0 ? 0 : y >= SPRITE_H ? SPRITE_H - 1 : y;
 	ptr_pressed = pressed;
@@ -490,6 +513,178 @@ static lv_obj_t *section(lv_obj_t *parent, const char *title) {
 	return l;
 }
 
+/* ---- touch calibration ---- */
+
+static void apply(const double m[6], double x, double y, double *ox, double *oy) {
+	*ox = m[0] * x + m[1] * y + m[2];
+	*oy = m[3] * x + m[4] * y + m[5];
+}
+
+// Least squares for x' = a x + b y + c (and the same for y'), by the normal equations.
+static bool cal_fit(double m[6]) {
+	double S[3][3] = { { 0 } }, bx[3] = { 0 }, by[3] = { 0 };
+	for (int i = 0; i < CAL_N; i++) {
+		double v[3] = { cal_raw[i][0], cal_raw[i][1], 1 };
+		for (int r = 0; r < 3; r++) {
+			for (int c = 0; c < 3; c++) S[r][c] += v[r] * v[c];
+			bx[r] += v[r] * cal_pts[i][0];
+			by[r] += v[r] * cal_pts[i][1];
+		}
+	}
+	double det = S[0][0] * (S[1][1] * S[2][2] - S[1][2] * S[2][1]) - S[0][1] * (S[1][0] * S[2][2] - S[1][2] * S[2][0]) +
+		     S[0][2] * (S[1][0] * S[2][1] - S[1][1] * S[2][0]);
+	if (fabs(det) < 1e-9) return false;
+	for (int k = 0; k < 2; k++) { // Cramer's rule, once for x' and once for y'
+		double *b = k ? by : bx;
+		for (int col = 0; col < 3; col++) {
+			double T[3][3];
+			memcpy(T, S, sizeof T);
+			for (int r = 0; r < 3; r++) T[r][col] = b[r];
+			double d = T[0][0] * (T[1][1] * T[2][2] - T[1][2] * T[2][1]) - T[0][1] * (T[1][0] * T[2][2] - T[1][2] * T[2][0]) +
+				   T[0][2] * (T[1][0] * T[2][1] - T[1][1] * T[2][0]);
+			m[k * 3 + col] = d / det;
+		}
+	}
+	return true;
+}
+
+static void cal_errors(const double m[6], double *mean, double *worst) {
+	*mean = *worst = 0;
+	for (int i = 0; i < CAL_N; i++) {
+		double x, y;
+		apply(m, cal_raw[i][0], cal_raw[i][1], &x, &y);
+		double e = hypot(x - cal_pts[i][0], y - cal_pts[i][1]);
+		*mean += e / CAL_N;
+		if (e > *worst) *worst = e;
+	}
+}
+
+static void cal_close(void) {
+	cal_collecting = false;
+	sprite_calibrating(false);
+	if (cal) { lv_obj_delete_async(cal); cal = NULL; }
+}
+
+static void cal_show_cross(void);
+static void cal_start(lv_event_t *e);
+
+static void cal_cancel(lv_event_t *e) {
+	sprite_set_calibration(cal_prev);
+	cal_close();
+}
+
+static void cal_save(lv_event_t *e) {
+	char v[160];
+	snprintf(v, sizeof v, "%.6f,%.6f,%.4f,%.6f,%.6f,%.4f", cal_new[0], cal_new[1], cal_new[2], cal_new[3], cal_new[4], cal_new[5]);
+	settings_set("calibration", v);
+	cal_close();
+	show_toast("Touch calibration saved", 3000);
+}
+
+static lv_obj_t *cal_button(lv_obj_t *parent, const char *text, uint32_t color, lv_event_cb_t cb) {
+	lv_obj_t *b = lv_button_create(parent);
+	lv_obj_set_size(b, 200, 60);
+	lv_obj_set_style_bg_color(b, lv_color_hex(color), 0);
+	lv_obj_t *l = lv_label_create(b);
+	lv_label_set_text(l, text);
+	lv_obj_center(l);
+	lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
+	return b;
+}
+
+static void cal_result(void) {
+	cal_collecting = false;
+	sprite_calibrating(false);
+	lv_obj_clean(cal);
+	lv_obj_t *box = lv_obj_create(cal);
+	lv_obj_remove_style_all(box);
+	lv_obj_set_size(box, 640, LV_SIZE_CONTENT);
+	lv_obj_center(box);
+	lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_align(box, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_row(box, 22, 0);
+	lv_obj_t *l = lv_label_create(box);
+	lv_obj_set_style_text_color(l, lv_color_hex(C_TEXT), 0);
+	lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+	lv_obj_t *row = lv_obj_create(box);
+	lv_obj_remove_style_all(row);
+	lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+	lv_obj_set_style_pad_column(row, 20, 0);
+
+	double before, before_worst, after, after_worst;
+	cal_errors(cal_prev, &before, &before_worst);
+	if (!cal_fit(cal_new)) after_worst = 1e9;
+	else cal_errors(cal_new, &after, &after_worst);
+	if (after_worst > 25) { // one tap well away from its cross, most likely
+		lv_label_set_text(l, "That didn't look right: one of the taps was probably off its cross.\n"
+				      "Nothing has changed.");
+		cal_button(row, LV_SYMBOL_REFRESH "  Again", C_ACCENT, cal_start);
+		cal_button(row, "Cancel", 0x3a4a5a, cal_cancel);
+		return;
+	}
+	// Try the new calibration straight away, so the buttons below are tapped with it.
+	sprite_set_calibration(cal_new);
+	lv_label_set_text_fmt(l, "Touches were landing %.0f px from the crosses on average (%.0f at worst).\n"
+			      "With this calibration: %.0f px (%.0f at worst).", before, before_worst, after, after_worst);
+	cal_button(row, LV_SYMBOL_OK "  Save", 0x2e8b57, cal_save);
+	cal_button(row, LV_SYMBOL_REFRESH "  Again", 0x3a4a5a, cal_start);
+	cal_button(row, "Cancel", 0x3a4a5a, cal_cancel);
+}
+
+static void cal_tap(double x, double y) {
+	cal_raw[cal_i][0] = x;
+	cal_raw[cal_i][1] = y;
+	if (++cal_i == CAL_N) cal_result();
+	else cal_show_cross();
+	sprite_lvgl_kick();
+}
+
+static void cal_show_cross(void) {
+	lv_obj_clean(cal);
+	int x = cal_pts[cal_i][0], y = cal_pts[cal_i][1];
+	for (int k = 0; k < 2; k++) { // a cross: two thin bars
+		lv_obj_t *bar = lv_obj_create(cal);
+		lv_obj_remove_style_all(bar);
+		lv_obj_set_style_bg_color(bar, lv_color_white(), 0);
+		lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+		if (k == 0) { lv_obj_set_size(bar, 40, 2); lv_obj_set_pos(bar, x - 20, y - 1); }
+		else { lv_obj_set_size(bar, 2, 40); lv_obj_set_pos(bar, x - 1, y - 20); }
+	}
+	lv_obj_t *l = lv_label_create(cal);
+	lv_label_set_text_fmt(l, "Tap the centre of the cross (%d of %d)", cal_i + 1, CAL_N);
+	lv_obj_set_style_text_color(l, lv_color_hex(C_DIM), 0);
+	lv_obj_align(l, LV_ALIGN_CENTER, 0, cal_pts[cal_i][1] == 240 ? 60 : 0);
+}
+
+static void cal_start(lv_event_t *e) {
+	if (!cal) {
+		sprite_get_calibration(cal_prev);
+		cal = lv_obj_create(lv_layer_top());
+		lv_obj_remove_style_all(cal);
+		lv_obj_set_size(cal, SPRITE_W, SPRITE_H);
+		lv_obj_set_style_bg_color(cal, lv_color_black(), 0);
+		lv_obj_set_style_bg_opa(cal, LV_OPA_COVER, 0);
+		lv_obj_add_flag(cal, LV_OBJ_FLAG_CLICKABLE); // nothing underneath reacts meanwhile
+	} else {
+		sprite_set_calibration(cal_prev);
+	}
+	cal_i = 0;
+	cal_n = 0;
+	cal_sx = cal_sy = 0;
+	cal_show_cross();
+	// The button fires on release, so the finger is already up: collect from the next touch.
+	cal_collecting = true;
+	sprite_calibrating(true);
+}
+
+static void cal_reset(lv_event_t *e) {
+	const double identity[6] = { 1, 0, 0, 0, 1, 0 };
+	sprite_set_calibration(identity);
+	settings_set("calibration", "");
+	show_toast("Standard touch calibration", 3000);
+}
+
 static void build_settings(lv_obj_t *scr) {
 	page_settings = lv_obj_create(scr);
 	lv_obj_remove_style_all(page_settings);
@@ -528,6 +723,26 @@ static void build_settings(lv_obj_t *scr) {
 	bl_auto = lv_switch_create(row);
 	lv_obj_set_size(bl_auto, 72, 38);
 	lv_obj_add_event_cb(bl_auto, bl_auto_changed, LV_EVENT_VALUE_CHANGED, NULL);
+
+	section(page_settings, "TOUCH");
+	lv_obj_t *trow = lv_obj_create(page_settings);
+	lv_obj_remove_style_all(trow);
+	lv_obj_set_size(trow, LV_PCT(100), 64);
+	lv_obj_set_flex_flow(trow, LV_FLEX_FLOW_ROW);
+	lv_obj_set_style_pad_column(trow, 20, 0);
+	lv_obj_t *tb = lv_button_create(trow);
+	lv_obj_set_size(tb, 260, 56);
+	lv_obj_t *tl = lv_label_create(tb);
+	lv_label_set_text(tl, LV_SYMBOL_EDIT "  Calibrate touch");
+	lv_obj_center(tl);
+	lv_obj_add_event_cb(tb, cal_start, LV_EVENT_CLICKED, NULL);
+	lv_obj_t *rb = lv_button_create(trow);
+	lv_obj_set_size(rb, 220, 56);
+	lv_obj_set_style_bg_color(rb, lv_color_hex(0x3a4a5a), 0);
+	lv_obj_t *rl = lv_label_create(rb);
+	lv_label_set_text(rl, "Standard");
+	lv_obj_center(rl);
+	lv_obj_add_event_cb(rb, cal_reset, LV_EVENT_CLICKED, NULL);
 
 	section(page_settings, "ABOUT");
 	about_label = lv_label_create(page_settings);

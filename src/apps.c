@@ -37,10 +37,7 @@ static char env_wayland[64], env_x[32];
 // access granted. So a root helper connects (which starts Xwayland), lets the apps' user in,
 // reports back through a pipe, and stays connected so the grant lasts. X11 apps launch
 // once it has reported.
-// The app opened at startup: "startup=" in OF-BOOT's settings/sprite.txt, by the app's name
-// or id, so it can be set from a PC like the other settings there. sprite reads it at start;
-// changes made on the touchscreen are written by the root helper (/boot is read-only).
-#define SETTINGS_FILE "/boot/settings/sprite.txt"
+// The app opened at startup: "startup=" in settings/sprite.txt, by the app's name or id.
 static char autostart_id[64];
 
 static pid_t keeper_pid;
@@ -105,19 +102,12 @@ void apps_load(const char *dir) {
 	}
 	closedir(d);
 	qsort(apps, n_apps, sizeof apps[0], cmp_apps);
-	FILE *sf = fopen(getenv("SPRITE_SETTINGS") ? getenv("SPRITE_SETTINGS") : SETTINGS_FILE, "r");
-	if (sf) {
-		char line[160];
-		while (fgets(line, sizeof line, sf)) {
-			trim(line);
-			if (strncmp(line, "startup=", 8)) continue;
-			const char *v = line + 8;
-			for (int i = 0; i < n_apps; i++) // by id or by name, ignoring case
-				if (!apps[i].builtin && (!strcasecmp(apps[i].id, v) || !strcasecmp(apps[i].name, v)))
-					snprintf(autostart_id, sizeof autostart_id, "%.63s", apps[i].id);
-			if (v[0] && !autostart_id[0]) wlr_log(WLR_ERROR, "startup=%s: no such app", v);
-		}
-		fclose(sf);
+	const char *v = settings_get("startup");
+	if (v) {
+		for (int i = 0; i < n_apps; i++) // by id or by name, ignoring case
+			if (!apps[i].builtin && (!strcasecmp(apps[i].id, v) || !strcasecmp(apps[i].name, v)))
+				snprintf(autostart_id, sizeof autostart_id, "%.63s", apps[i].id);
+		if (!autostart_id[0]) wlr_log(WLR_ERROR, "startup=%s: no such app", v);
 	}
 	wlr_log(WLR_INFO, "%d apps from %s", n_apps, dir);
 }
@@ -263,9 +253,7 @@ void apps_set_autostart(struct sprite_app *app, bool on) {
 	if (on) snprintf(autostart_id, sizeof autostart_id, "%s", app->id);
 	else if (!strcmp(autostart_id, app->id)) autostart_id[0] = 0;
 	else return;
-	char line[96];
-	snprintf(line, sizeof line, "startup %s", on ? app->name : "");
-	sysinfo_helper(line);
+	settings_set("startup", on ? app->name : "");
 	wlr_log(WLR_INFO, "open at startup: %s", on ? app->name : "(none)");
 }
 
@@ -328,6 +316,34 @@ static void exited(struct sprite_app *a) {
 	sprite_hold_for(a);
 	if (!a->restart_timer) a->restart_timer = wl_event_loop_add_timer(sprite_event_loop(), restart_cb, a);
 	wl_event_source_timer_update(a->restart_timer, 2000);
+}
+
+// Apps lead their own process groups and, under a PAM session, live outside sprite's
+// service, so nothing else ends them when sprite stops. Left running they hold on to
+// things (HamClock refuses to start while an old copy runs). SIGTERM all, wait up to 2 s,
+// then SIGKILL what's left.
+void apps_end_all(void) {
+	int left = 0;
+	for (int i = 0; i < n_apps; i++) {
+		if (apps[i].pid <= 0 || apps[i].hidden) continue;
+		kill(-apps[i].pid, SIGTERM);
+		left++;
+	}
+	if (keeper_pid) kill(keeper_pid, SIGTERM);
+	for (int t = 0; t < 20 && left; t++) {
+		usleep(100000);
+		left = 0;
+		for (int i = 0; i < n_apps; i++) {
+			if (apps[i].pid <= 0 || apps[i].hidden) continue;
+			if (waitpid(apps[i].pid, NULL, WNOHANG) == apps[i].pid) apps[i].pid = 0;
+			else left++;
+		}
+	}
+	for (int i = 0; i < n_apps; i++)
+		if (apps[i].pid > 0 && !apps[i].hidden) {
+			wlr_log(WLR_INFO, "%s still running at exit: SIGKILL", apps[i].name);
+			kill(-apps[i].pid, SIGKILL);
+		}
 }
 
 void apps_reap(void) {

@@ -89,12 +89,14 @@ sprite runs as `sprite.service` (in `system/`), on tty1 in place of the login pr
 the `of` user in a logind session, so libseat gets the display and input through logind.
 It starts after `of-flash`, `of-mac-gate`, `of-provision` and Plymouth, which all use tty1
 first. If it keeps failing, the login prompt comes back (`OnFailure=getty@tty1.service`).
-The log is in the journal: `sudo journalctl -u sprite`.
+The log is in the journal: `sudo journalctl _COMM=sprite` (under the PAM session, sprite's
+own lines aren't filed under the unit). `SPRITE_TRACE_INPUT=1` logs every press given to an
+app.
 
 A few things need root, and go through `sprite-helper` (`system/`), which systemd starts
 for each connection to `/run/sprite-helper.sock` (group `of`). It takes one request and
-validates it: `startup <app name>` (write the startup app to the settings file), `reboot`
-and `poweroff`.
+validates it: `set <key> <value>` for `startup` and `calibration` in the settings file,
+`reboot` and `poweroff`.
 
 It also expects the touchscreen calibration in `spike/touch/` to be installed.
 
@@ -105,7 +107,14 @@ edited from a PC:
 
 ```
 startup=Clock      # the app to open at startup, by the name on its tile (or its id)
+calibration=1.013455,-0.001630,-5.9928,-0.002758,1.047415,-8.2094
 ```
+
+`calibration=` comes from Settings > Calibrate touch: nine crosses, tapped in turn, and an
+affine fit of where the taps landed (x' = a x + b y + c, y' = d x + e y + f). sprite applies
+it to all touch input, for apps as well as the shell, on top of the kernel's calibration
+(`spike/touch/`). An empty value means none. HamClock's keyboard needed it: each key types a
+different character in its top and bottom halves, 22 px each.
 
 Setting "Open at startup" on the touchscreen writes the same file through the helper, which
 makes `/boot` writable with `bootrw` just while it replaces the file with a synced copy.

@@ -10,7 +10,7 @@ CFLAGS += -std=gnu11 -Wall -Wno-unused-parameter -DWLR_USE_UNSTABLE -DLV_CONF_IN
 LDLIBS = $(shell pkg-config --libs $(PKGS)) -lpthread -lm
 LDFLAGS += -Wl,-rpath,$(PREFIX)/lib/i386-linux-gnu
 
-SRC = src/main.c src/shell.c src/apps.c src/sysinfo.c
+SRC = src/main.c src/shell.c src/apps.c src/sysinfo.c src/settings.c
 LVGL_SRC = $(shell find third_party/lvgl/src -name '*.c' 2>/dev/null)
 OBJ = $(SRC:%.c=out/obj/%.o)
 LVGL_OBJ = $(LVGL_SRC:%.c=out/obj/%.o)

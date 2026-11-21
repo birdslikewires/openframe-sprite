@@ -76,6 +76,7 @@ void apps_reap(void);                         // collect exited apps, update sta
 void apps_set_env(const char *wayland_display, const char *x_display);
 void apps_x11_ready(bool ready);              // the X keeper has (or no longer has) opened X to apps
 void apps_close(struct sprite_app *app);      // SIGTERM, then SIGKILL, unless it goes by itself
+void apps_end_all(void);                      // at exit: end every app sprite launched
 struct sprite_app *apps_autostart(void);      // the app opened at startup, or NULL
 void apps_set_autostart(struct sprite_app *app, bool on);
 
@@ -98,6 +99,17 @@ void shell_notice(const char *text);          // a banner on the home screen
 
 // main.c provides this for shell.c's flush callback
 void sprite_shell_damage(int x, int y, int w, int h, bool commit);
+
+// settings.c: settings/sprite.txt on OF-BOOT
+void settings_load(void);
+const char *settings_get(const char *key);        // NULL when unset or empty
+void settings_set(const char *key, const char *value); // in memory now, on disk via the helper
+
+// main.c: touch calibration, an affine correction applied to all touch input on top of the
+// kernel's (hwdb) calibration: x' = m0 x + m1 y + m2, y' = m3 x + m4 y + m5.
+void sprite_set_calibration(const double m[6]);
+void sprite_get_calibration(double m[6]);
+void sprite_calibrating(bool on);                 // pass input uncorrected, for measuring
 
 // sysinfo.c
 struct sprite_net {
