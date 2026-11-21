@@ -1,0 +1,4 @@
+# OpenFrame 1 touchscreen axis calibration (sprite spike 2026-11-21, fitted from finger taps)
+evdev:input:b0003v04B4p1974*
+ EVDEV_ABS_00=-347:33043
+ EVDEV_ABS_01=-632:33952

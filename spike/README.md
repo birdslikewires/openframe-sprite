@@ -85,8 +85,31 @@ reports as an absolute-position mouse: BTN_LEFT, BTN_RIGHT and BTN_MIDDLE, with 
 both 0-32639, and udev tags it ID_INPUT_MOUSE. libinput and wlroots map it onto the output as an
 absolute pointer, so a single-touch shell treats press, motion and release as touch.
 
-Not checked yet: whether a tap lands under the finger. That needs someone at the panel. Run
-`sdl12test 1 30` under `runapp.sh`: it draws five targets and prints where each tap lands.
+The factory axis range overshoots the visible screen. With the range as reported, finger taps on
+five targets were accurate at the centre, but landed further out towards the edges: about 2%
+horizontally and 6% vertically, up to 16 px at the corners. A fitted range applied through udev
+hwdb fixes it: `touch/61-openframe-touchscreen.hwdb`, installed in `/etc/udev/hwdb.d/` on the
+test unit. Run `systemd-hwdb update` after installing it, then retrigger the device.
+
+| Target | Before (average of taps) | After (one tap) |
+|---|---|---|
+| 400,240 | 401,245 | 394,238 |
+| 20,20 | 32,14 | 10,28 |
+| 780,20 | 789,8 | 775,13 |
+| 20,460 | 6,476 | 16,459 |
+| 780,460 | 791,476 | 788,459 |
+
+After calibration the worst error was 10 px and the errors had no common direction, which looks
+like finger scatter. With the new range, raw 0 and 32639 map about 8-10 px inside the screen
+edges, so edge gestures must start within about 20 px of an edge.
+
+Still open:
+- Only one unit was measured, with one or two finger taps per target.
+- Check another OF1, and the OF2's touchscreen, before shipping the range in openframe-linux.
+- Consider a calibration screen in sprite's settings, in case units differ.
+
+To repeat the test, run `runapp.sh SDL_VIDEODRIVER=x11 ./sdl12test 1 60`. It shows five
+targets and prints where each tap lands.
 
 ## Other findings
 
@@ -123,5 +146,6 @@ Not checked yet: whether a tap lands under the finger. That needs someone at the
 - gcc, make, and the Wayland, libinput and DRM dev headers. The package list from before this
   work is in `~/pkgs-before-sprite.txt`.
 - The runtime libraries listed above.
+- The touchscreen calibration in `/etc/udev/hwdb.d/61-openframe-touchscreen.hwdb`.
 
 Debian's wlroots, cage, Xwayland and Mesa have been purged again.
