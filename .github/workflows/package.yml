@@ -96,10 +96,14 @@ jobs:
             echo "Release $tag exists already: nothing to do"
             exit 0
           fi
-          cp "out/openframe-sprite_${version}_i386.deb" out/openframe-sprite_i386.deb
-          (cd out && sha256sum openframe-sprite_*.deb > SHA256SUMS)
+          # out/ belongs to root (the container built it), so the release is put together apart
+          rel="$RUNNER_TEMP/release"
+          mkdir -p "$rel"
+          cp "out/openframe-sprite_${version}_i386.deb" "$rel/"
+          cp "out/openframe-sprite_${version}_i386.deb" "$rel/openframe-sprite_i386.deb"
+          (cd "$rel" && sha256sum openframe-sprite_*.deb > SHA256SUMS)
           notes="sprite ${version}, the OpenFrame touch shell, for Debian Trixie (i386).
 
           \`sudo apt install ./openframe-sprite_${version}_i386.deb\` (it needs the OpenFrame repository, linux.openbeak.net, for openframe-scripts). Installing it puts sprite on tty1 in place of the login prompt."
           gh release create "$tag" --title "openframe-sprite ${version}" --notes "$notes" --latest \
-            "out/openframe-sprite_${version}_i386.deb" out/openframe-sprite_i386.deb out/SHA256SUMS
+            "$rel/openframe-sprite_${version}_i386.deb" "$rel/openframe-sprite_i386.deb" "$rel/SHA256SUMS"
