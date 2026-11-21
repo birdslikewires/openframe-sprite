@@ -41,9 +41,13 @@ jobs:
       # i386 programs run as they are on the x86-64 runner, so no emulation is needed. Docker's
       # default seccomp filter on the runner stops i386 programs looking up names, so the i386
       # containers run without it (as openframe-linux's crystalhd workflow).
+      # 'docker build' takes no --security-opt, so for the image build the daemon's default
+      # seccomp profile is made unconfined, for this job's runner only.
       - name: Build the build image
         run: |
-          docker build --platform linux/386 --security-opt seccomp=unconfined -t sprite-build build/
+          echo '{ "seccomp-profile": "unconfined" }' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
+          docker build --platform linux/386 -t sprite-build build/
 
       - name: Build the package
         run: |
