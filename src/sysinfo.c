@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // System state for the status bar and settings: network, backlight, a summary.
 // Reads /proc and /sys only; changes go through the existing openframe tools (of-backlight).
 #define _GNU_SOURCE

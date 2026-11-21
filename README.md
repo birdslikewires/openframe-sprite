@@ -137,3 +137,13 @@ screen black until the app's window appears, rather than showing the home screen
 - Wi-Fi setup, sound, time zone
 - The app store: an index repository of app manifests, added to by pull request, with apps
   as i386 `.deb` packages
+
+## Licence
+
+sprite is under the GNU General Public License, version 3 or (at your option) any later version
+(see [LICENSE](LICENSE)). Copyright 2026 Andrew Davison.
+
+What it's built on keeps its own terms: LVGL (MIT), downloaded into `third_party/` at build
+time, and wlroots and Xwayland (MIT/X11) and SDL2 and sdl12-compat (zlib), built from Debian's
+sources by `build/stack.sh`. The package carries all of their licences. `src/lv_conf.h` is
+generated from LVGL's configuration template.

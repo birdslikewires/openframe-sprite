@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Apps: manifests on disk, launching as the unprivileged user, and tracking their processes.
 //
 // A manifest is a small key=value file, one per app, in the apps directory:

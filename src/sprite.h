@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // sprite: OpenFrame touch shell. Compositor (wlroots, pixman) and LVGL shell in one process.
 #pragma once
 

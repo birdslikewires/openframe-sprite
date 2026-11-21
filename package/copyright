@@ -2,8 +2,9 @@ openframe-sprite: sprite, the OpenFrame touch shell, and the display stack it ru
 
 sprite
   https://github.com/birdslikewires/openframe-sprite
-  Copyright 2026 BirdsLikeWires
-  Licence: LICENCE_PENDING
+  Copyright 2026 Andrew Davison
+  Licence: GPL-3.0-or-later (the GNU General Public License, version 3 or any later version;
+  on Debian systems the text is in /usr/share/common-licenses/GPL-3)
 
 Shipped with it, under /opt/sprite, built from Debian Trixie's sources without Mesa:
   wlroots 0.18 (MIT), lib/i386-linux-gnu/libwlroots-0.18.so

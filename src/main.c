@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // sprite compositor: wlroots with the pixman renderer, one fullscreen app at a time,
 // LVGL shell drawn into a buffer of our own in the same scene.
 #define _GNU_SOURCE

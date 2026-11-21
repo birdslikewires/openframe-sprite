@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // sprite's settings: settings/sprite.txt on the OF-BOOT volume, key=value lines like the
 // other OpenFrame settings files, so they can be edited from a PC. sprite reads them at
 // start. Changes from the touchscreen go through the root helper (/boot is read-only).

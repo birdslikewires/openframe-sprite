@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 ## sprite-helper v26.11.1 (21st November 2026)
 ##  Does the few things sprite (which runs as the 'of' user) can't do itself. systemd

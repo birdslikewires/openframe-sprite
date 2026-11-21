@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // The shell: status bar, home screen of app tiles, settings. LVGL, rendered in software
 // into the buffer the compositor shows whenever no app is on screen.
 #define _GNU_SOURCE
