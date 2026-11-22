@@ -63,14 +63,15 @@ later page.
 ## 4. Home grid
 
 - **6 columns by 3 rows,** 18 apps a page, as OpenPeak's own home screen had (O2's had 5×3).
-- **Cells are 128×140,** with 16 px side margins and 14 px above the first row. The whole
+- **Cells are 128×140,** with 16 px side margins and 10 px above the first row. The whole
   cell takes the touch.
-- **Icons are 88×88** with 18 px corners, 6 px from the top of the cell.
-- **Labels** start 6 px below the icon: 16 px text, centred, up to two lines, ending in "..."
+- **Icons are 88×88** with 18 px corners, 10 px from the top of the cell.
+- **Labels** start 6 px below the icon: 16 px text, centred, up to two lines (36 px), ending in "..."
   beyond that.
 - **A running app** has a 12 px dot on its icon's top-right corner: green with a window,
   amber while starting. **The startup app** (there's only ever one) has a 3 px ring in the
-  accent colour round its icon, 3 px out from it.
+  accent colour round its icon, 2 px out from it. It sits inside the cell, 5 px from its top,
+  so the press highlight takes it in.
 - **A press** lightens the whole cell (white at 20%, with the 18 px radius).
 
 ## 5. Pages and motion

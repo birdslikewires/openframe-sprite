@@ -31,17 +31,19 @@
 #define GRID_COLS 6
 #define GRID_ROWS 3
 #define GRID_PAD_X 16                                       // 16 + 6 x 128 + 16 = 800
-#define GRID_PAD_TOP 14                                     // 40 + 14 + 3 x 140 = 474 of 480
+#define GRID_PAD_TOP 10                                     // 40 + 10 + 3 x 140 = 470 of 480
 #define TILE_W ((SPRITE_W - 2 * GRID_PAD_X) / GRID_COLS)  // 128
 #define TILE_H 140
 #define ICON_SIZE 88
 #define ICON_RADIUS 18                                      // ICON_SIZE x RADIUS_RATIO
-#define ICON_TOP 6
+#define ICON_TOP 10                                         // room for the startup ring inside the cell
 #define LABEL_GAP 6
-#define LABEL_H 38                                          // two lines of 16 px Montserrat
+#define LABEL_H 36                                          // two lines of 16 px Montserrat (18 px each)
 #define STARTUP_RING_W 3                                    // the startup app's ring
-#define STARTUP_RING_PAD 3
-_Static_assert(STARTUP_RING_W + STARTUP_RING_PAD <= ICON_TOP, "the startup ring must fit in the cell");
+#define STARTUP_RING_PAD 2
+_Static_assert(ICON_TOP - STARTUP_RING_W - STARTUP_RING_PAD >= 5, "the startup ring sits inside the press highlight");
+_Static_assert(STARTUP_RING_W + STARTUP_RING_PAD < LABEL_GAP, "the startup ring clears the label");
+_Static_assert(ICON_TOP + ICON_SIZE + LABEL_GAP + LABEL_H <= TILE_H, "the cell holds its icon and label");
 #define PER_PAGE (GRID_COLS * GRID_ROWS)                    // further apps go on further pages
 _Static_assert(GRID_PAD_X + (TILE_W - ICON_SIZE) / 2 == CONTENT_X, "the grid's first icon is at CONTENT_X");
 _Static_assert(GRID_PAD_TOP + ICON_TOP == CONTENT_TOP, "the grid's first icon is at CONTENT_TOP");
@@ -806,8 +808,8 @@ static void make_cell(lv_obj_t *page, struct sprite_app *a) {
 		lv_obj_align(dot, LV_ALIGN_TOP_RIGHT, -6, 6);
 	}
 
-	// The app that opens at startup (only ever one): an accent ring round its icon, 3 px out
-	// from it. The ring's top edge is the top of the cell (ICON_TOP is 6).
+	// The app that opens at startup (only ever one): an accent ring round its icon, 2 px out
+	// from it, inside the cell, so the press highlight takes it in with room to spare.
 	if (a == apps_autostart()) {
 		lv_obj_set_style_outline_color(badge, lv_color_hex(C_ACCENT), 0);
 		lv_obj_set_style_outline_width(badge, STARTUP_RING_W, 0);
