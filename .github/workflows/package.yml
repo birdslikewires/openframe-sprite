@@ -71,7 +71,9 @@ jobs:
             apt-get -qq --error-on=any update
             DEBIAN_FRONTEND=noninteractive apt-get -qq install -y ca-certificates curl > /dev/null
             curl -fsSL https://kernel.openbeak.net/key.gpg -o /usr/share/keyrings/openframe-apt.gpg
-            echo "deb [signed-by=/usr/share/keyrings/openframe-apt.gpg] https://linux.openbeak.net/ trixie main" \
+            # trixie-testing too, as a test unit has: this Sprite goes there first, and may need
+            # an openframe-scripts that is only there yet
+            printf "deb [signed-by=/usr/share/keyrings/openframe-apt.gpg] https://linux.openbeak.net/ %s main\n" trixie trixie-testing \
               > /etc/apt/sources.list.d/openframe-linux.list
             apt-get -qq --error-on=any update
             DEBIAN_FRONTEND=noninteractive apt-get -qq install -y /out/openframe-sprite_*.deb > /dev/null
