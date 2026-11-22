@@ -154,6 +154,15 @@ boxes get it from sprite's theme layer, so new ones can't drift from it.
 
 ## 7. Buttons and list screens
 
+**Settings is tabs down the left**, not one long scrolling page: a rail 208 px wide, a step
+darker than the background (`#0d1217`), with Home at its top and then a tab per group,
+each 52 px tall with a 24 px glyph (Lucide, like the tiles) and its name. The chosen tab
+is a lighter box (white at 10%) with its glyph in the accent colour; the panel beside it
+holds that group's settings, which should fit without scrolling (a panel that outgrows the
+screen scrolls on its own). The groups: **Network** (Wi-Fi, remote access), **Display**
+(brightness, touch), **Time** (the clock; the time zone to come), **About** and **Power**.
+Sound will be a tab of its own. A status line in a panel is one line, ending in "...".
+
 **Every button has one shape** (`button()`): **48 px tall** (the smallest touch target), as
 wide as its label plus 24 px each side, and **never narrower than 160 px**. Text is 20 px.
 Buttons in a row are 20 px apart.
@@ -243,6 +252,5 @@ the long-press sheet, the Restart and Switch off questions, and the calibration 
 - **Icon artwork** for apps that bring their own (an 88×88 PNG, its corners rounded as it's
   loaded?), alongside the glyph tiles.
 - **Light or dark,** and whether the look follows the time of day or the light sensor.
-- **Settings' layout** as it grows: sound, time zone.
 - **Fonts beyond ASCII,** for network and app names with accents or emoji: each size built
   in with more characters costs memory, so measure first.

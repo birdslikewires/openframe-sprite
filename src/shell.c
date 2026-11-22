@@ -17,6 +17,7 @@
 #include "lvgl/lvgl_private.h" // lv_theme_t, to layer sprite's rules over LVGL's default theme
 #include "sprite.h"
 #include "icons_table.h"
+#include "ui_icons.h"
 
 #define BAR_H 40
 // Corner radii follow one rule for every box (icons, buttons, cards, banners, highlights): in
@@ -68,6 +69,15 @@ static lv_obj_t *bar_clock, *bar_date, *bar_title, *net_eth, *net_wifi;
 static lv_obj_t *page_home, *pager, *strip, *page_settings, *page_wifi, *page_entry, *toast;
 static lv_obj_t *dots, *gear;         // page dots and the Settings gear, in the status bar
 static int cur_page, n_pages;
+// Settings' tabs (see build_settings)
+#define RAIL_W 208
+#define RAIL_PAD 16
+#define TAB_H 52
+#define C_RAIL 0x0d1217   // a step between the bar and the background
+enum { TAB_NETWORK, TAB_DISPLAY, TAB_TIME, TAB_ABOUT, TAB_POWER, N_TABS };
+static lv_obj_t *tab_btn[N_TABS], *tab_icon[N_TABS], *tab_panel[N_TABS];
+static int settings_tab;
+static void settings_show_tab(int t);
 
 // Paging: the pages sit side by side on a strip, which follows a sideways drag and then
 // slides to a page. A touch becomes a page drag once it has moved PAGE_DRAG_START sideways
@@ -275,7 +285,7 @@ void shell_set_visible(bool v) {
 // A tile's icon: a Lucide glyph named by the manifest's icon= (the names are in src/icons.txt,
 // made into icons_40.c by scripts/make-icons.sh), or else up to two letters from icon=, or
 // the name's first letter. buf gets the text; the font to draw it in is returned.
-extern const lv_font_t sprite_icons_40;
+extern const lv_font_t sprite_icons_40, sprite_ui_24;
 
 static const lv_font_t *icon_text(const struct sprite_app *a, char *buf, size_t len) {
 	for (size_t i = 0; i < sizeof icon_names / sizeof icon_names[0]; i++)
@@ -942,7 +952,7 @@ static void scroll_glide(lv_obj_t *obj, int from, int to, uint32_t ms) {
 
 // The scrolling screen showing, if any: sprite does its scrolling itself (see drag_input).
 static lv_obj_t *scrolling_screen(void) {
-	if (showing(page_settings)) return page_settings;
+	if (showing(page_settings)) return tab_panel[settings_tab];
 	if (showing(page_wifi)) return page_wifi;
 	return NULL;
 }
@@ -1692,7 +1702,7 @@ static void wifi_join_now(const char *ssid, const char *password) {
 	wifi_watch = lv_timer_create(wifi_watch_tick, 1500, NULL);
 	wifi_watch_start = lv_tick_get();
 	show_page(page_settings);
-	lv_obj_scroll_to_y(page_settings, 0, LV_ANIM_OFF); // the Wi-Fi section is at the top
+	settings_show_tab(TAB_NETWORK); // where Wi-Fi is
 	refresh_settings(NULL);
 	wifi_show_status();
 }
@@ -2171,7 +2181,7 @@ static void ssh_status_done(char *reply, void *data) {
 		else if (!strncmp(l, "keys=", 5)) keys = atoi(l + 5);
 	}
 	char t[96];
-	if (!strcmp(pw, "shared")) snprintf(t, sizeof t, "Still the old shared password: set one");
+	if (!strcmp(pw, "shared")) snprintf(t, sizeof t, "Still the shared password");
 	else if (!strcmp(pw, "set")) snprintf(t, sizeof t, "Password set%s", keys ? ", and keys" : "");
 	else if (keys) snprintf(t, sizeof t, "By key only (no password)");
 	else snprintf(t, sizeof t, "Off: set a password to log in");
@@ -2209,15 +2219,103 @@ static void ssh_set_now(const char *password) {
 
 static void ssh_set_clicked(lv_event_t *e) { open_entry(ENTRY_SSH, ""); }
 
-static void build_settings(lv_obj_t *scr) {
-	page_settings = list_page(scr);
-	button(page_settings, LV_SYMBOL_LEFT "  Home", BUTTON_MAIN, back_clicked, NULL);
+// Settings: tabs down the left (a rail), the chosen tab's settings on the right. Each panel
+// fits without scrolling as things stand; if one grows past the screen, it scrolls on its own.
 
+static void settings_show_tab(int t) {
+	settings_tab = t;
+	for (int i = 0; i < N_TABS; i++) {
+		if (i == t) {
+			lv_obj_remove_flag(tab_panel[i], LV_OBJ_FLAG_HIDDEN);
+			lv_obj_add_state(tab_btn[i], LV_STATE_CHECKED);
+		} else {
+			lv_obj_add_flag(tab_panel[i], LV_OBJ_FLAG_HIDDEN);
+			lv_obj_remove_state(tab_btn[i], LV_STATE_CHECKED);
+		}
+		lv_obj_set_style_text_color(tab_icon[i], lv_color_hex(i == t ? C_ACCENT : C_TEXT), 0);
+	}
+	lv_obj_scroll_to_y(tab_panel[t], 0, LV_ANIM_OFF);
+}
+
+static void tab_clicked(lv_event_t *e) { settings_show_tab((int)(intptr_t)lv_event_get_user_data(e)); }
+
+// A tab: its glyph and name, the whole row pressable. The chosen one is a lighter box (white
+// at 10%) with its glyph in the accent colour; a press is white at 20%, as everywhere.
+static lv_obj_t *settings_tab_new(lv_obj_t *rail, int t, const char *glyph, const char *name) {
+	lv_obj_t *b = lv_obj_create(rail);
+	lv_obj_remove_style_all(b);
+	lv_obj_set_size(b, LV_PCT(100), TAB_H);
+	lv_obj_set_flex_flow(b, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(b, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_hor(b, 14, 0);
+	lv_obj_set_style_pad_column(b, 14, 0);
+	lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
+	lv_obj_remove_flag(b, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_set_style_bg_color(b, lv_color_white(), LV_STATE_CHECKED);
+	lv_obj_set_style_bg_opa(b, LV_OPA_10, LV_STATE_CHECKED);
+	lv_obj_set_style_bg_color(b, lv_color_white(), LV_STATE_PRESSED);
+	lv_obj_set_style_bg_opa(b, LV_OPA_20, LV_STATE_PRESSED);
+	rounded(b);
+	tab_icon[t] = lv_label_create(b);
+	lv_label_set_text(tab_icon[t], glyph);
+	lv_obj_set_style_text_font(tab_icon[t], &sprite_ui_24, 0);
+	lv_obj_t *l = lv_label_create(b);
+	lv_label_set_text(l, name);
+	lv_obj_set_style_text_font(l, &lv_font_montserrat_20, 0);
+	lv_obj_set_style_text_color(l, lv_color_hex(C_TEXT), 0);
+	lv_obj_add_event_cb(b, tab_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)t);
+	tab_btn[t] = b;
+	return b;
+}
+
+static lv_obj_t *settings_panel_new(int t) {
+	lv_obj_t *p = lv_obj_create(page_settings);
+	lv_obj_remove_style_all(p);
+	lv_obj_set_size(p, SPRITE_W - RAIL_W, SPRITE_H - BAR_H);
+	lv_obj_set_pos(p, RAIL_W, 0);
+	lv_obj_set_flex_flow(p, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_style_pad_left(p, CONTENT_X - 8, 0);
+	lv_obj_set_style_pad_right(p, CONTENT_X, 0);
+	lv_obj_set_style_pad_ver(p, CONTENT_TOP, 0);
+	lv_obj_set_style_pad_row(p, ROW_GAP, 0);
+	lv_obj_set_scroll_dir(p, LV_DIR_VER);
+	lv_obj_set_scrollbar_mode(p, LV_SCROLLBAR_MODE_OFF);
+	tab_panel[t] = p;
+	return p;
+}
+
+static void build_settings(lv_obj_t *scr) {
+	page_settings = lv_obj_create(scr);
+	lv_obj_remove_style_all(page_settings);
+	lv_obj_set_size(page_settings, SPRITE_W, SPRITE_H - BAR_H);
+	lv_obj_set_pos(page_settings, 0, BAR_H);
+	lv_obj_remove_flag(page_settings, LV_OBJ_FLAG_SCROLLABLE);
+
+	lv_obj_t *rail = lv_obj_create(page_settings);
+	lv_obj_remove_style_all(rail);
+	lv_obj_set_size(rail, RAIL_W, SPRITE_H - BAR_H);
+	lv_obj_set_style_bg_color(rail, lv_color_hex(C_RAIL), 0);
+	lv_obj_set_style_bg_opa(rail, LV_OPA_COVER, 0);
+	lv_obj_set_flex_flow(rail, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_style_pad_hor(rail, RAIL_PAD, 0);
+	lv_obj_set_style_pad_ver(rail, CONTENT_TOP, 0);
+	lv_obj_set_style_pad_row(rail, 4, 0);
+	lv_obj_remove_flag(rail, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_t *home = button(rail, LV_SYMBOL_LEFT "  Home", BUTTON_MAIN, back_clicked, NULL);
+	lv_obj_set_style_margin_bottom(home, HEADING_SPACE, 0);
+	settings_tab_new(rail, TAB_NETWORK, UI_ICON_WIFI, "Network");
+	settings_tab_new(rail, TAB_DISPLAY, UI_ICON_SUN, "Display");
+	settings_tab_new(rail, TAB_TIME, UI_ICON_CLOCK, "Time");
+	settings_tab_new(rail, TAB_ABOUT, UI_ICON_INFO, "About");
+	settings_tab_new(rail, TAB_POWER, UI_ICON_POWER, "Power");
+
+	// Network: Wi-Fi (on units with a card) and remote access
+	lv_obj_t *pn = settings_panel_new(TAB_NETWORK);
 	struct sprite_net net;
 	sysinfo_net(&net);
-	if (net.wifi_present) { // the unit has a Wi-Fi card
-		section(page_settings, "WI-FI");
-		lv_obj_t *r = lv_obj_create(page_settings);
+	if (net.wifi_present) {
+		section(pn, "WI-FI");
+		lv_obj_t *r = lv_obj_create(pn);
 		lv_obj_remove_style_all(r);
 		lv_obj_set_size(r, LV_PCT(100), ROW_H);
 		lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
@@ -2228,20 +2326,20 @@ static void build_settings(lv_obj_t *scr) {
 		lv_label_set_text(wifi_status_label, "Not connected");
 		lv_label_set_long_mode(wifi_status_label, LV_LABEL_LONG_DOT);
 		lv_obj_set_flex_grow(wifi_status_label, 1);
+		lv_obj_set_height(wifi_status_label, lv_font_get_line_height(lv_obj_get_style_text_font(wifi_status_label, 0))); // one line
 		lv_obj_set_style_text_color(wifi_status_label, lv_color_hex(C_TEXT), 0);
 		wifi_detail_label = lv_label_create(r);
 		lv_label_set_text(wifi_detail_label, "");
 		lv_obj_set_style_text_color(wifi_detail_label, lv_color_hex(C_DIM), 0);
-		lv_obj_t *br = button_row(page_settings);
+		lv_obj_t *br = button_row(pn);
 		button(br, LV_SYMBOL_WIFI "  Choose network", BUTTON_MAIN, wifi_choose_clicked, NULL);
 		wifi_forget_btn = button(br, "Forget", BUTTON_OTHER, wifi_forget_ask, NULL);
 		lv_obj_add_flag(wifi_forget_btn, LV_OBJ_FLAG_HIDDEN);
 	}
-
 	// Logging in over SSH as "of": images give it no password (every unit used to have the
 	// same one), so this is where an owner sets one, through the helper.
-	section(page_settings, "REMOTE ACCESS");
-	lv_obj_t *sr = lv_obj_create(page_settings);
+	section(pn, "REMOTE ACCESS");
+	lv_obj_t *sr = lv_obj_create(pn);
 	lv_obj_remove_style_all(sr);
 	lv_obj_set_size(sr, LV_PCT(100), ROW_H);
 	lv_obj_set_flex_flow(sr, LV_FLEX_FLOW_ROW);
@@ -2252,22 +2350,27 @@ static void build_settings(lv_obj_t *scr) {
 	lv_label_set_text(ssh_status_label, "");
 	lv_label_set_long_mode(ssh_status_label, LV_LABEL_LONG_DOT);
 	lv_obj_set_flex_grow(ssh_status_label, 1);
+	lv_obj_set_height(ssh_status_label, lv_font_get_line_height(lv_obj_get_style_text_font(ssh_status_label, 0)));
 	lv_obj_set_style_text_color(ssh_status_label, lv_color_hex(C_TEXT), 0);
 	ssh_detail_label = lv_label_create(sr);
 	lv_label_set_text(ssh_detail_label, "");
 	lv_obj_set_style_text_color(ssh_detail_label, lv_color_hex(C_DIM), 0);
-	lv_obj_t *srow = button_row(page_settings);
+	lv_obj_t *srow = button_row(pn);
 	button(srow, LV_SYMBOL_KEYBOARD "  Set password", BUTTON_MAIN, ssh_set_clicked, NULL);
 
-	section(page_settings, "BRIGHTNESS");
-	lv_obj_t *row = lv_obj_create(page_settings);
+	// Display: brightness and touch
+	lv_obj_t *pd = settings_panel_new(TAB_DISPLAY);
+	section(pd, "BRIGHTNESS");
+	lv_obj_t *row = lv_obj_create(pd);
 	lv_obj_remove_style_all(row);
 	lv_obj_set_size(row, LV_PCT(100), ROW_H);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_style_pad_column(row, 24, 0);
+	lv_obj_set_style_pad_hor(row, 12, 0); // room for the slider's knob at either end
 	bl_slider = lv_slider_create(row);
-	lv_obj_set_size(bl_slider, 520, 24);
+	lv_obj_set_height(bl_slider, 24);
+	lv_obj_set_flex_grow(bl_slider, 1);
 	lv_slider_set_range(bl_slider, 5, 100);
 	lv_obj_set_ext_click_area(bl_slider, 20); // easier to grab with a finger
 	lv_obj_add_event_cb(bl_slider, bl_released, LV_EVENT_RELEASED, NULL);
@@ -2278,26 +2381,35 @@ static void build_settings(lv_obj_t *scr) {
 	bl_auto = lv_switch_create(row);
 	lv_obj_set_size(bl_auto, 72, 38);
 	lv_obj_add_event_cb(bl_auto, bl_auto_changed, LV_EVENT_VALUE_CHANGED, NULL);
-
-	section(page_settings, "CLOCK");
-	switch_row(page_settings, "24-hour clock", clock_24, clock24_changed);
-	switch_row(page_settings, "Show seconds", clock_secs, seconds_changed);
-
-	section(page_settings, "TOUCH");
-	lv_obj_t *trow = button_row(page_settings);
+	section(pd, "TOUCH");
+	lv_obj_t *trow = button_row(pd);
 	button(trow, LV_SYMBOL_EDIT "  Calibrate touch", BUTTON_MAIN, cal_start, NULL);
 	button(trow, LV_SYMBOL_REFRESH "  Reset", BUTTON_OTHER, cal_reset, NULL);
 
-	section(page_settings, "ABOUT");
-	about_label = lv_label_create(page_settings);
+	// Time: the clock's format (and, later, the time zone)
+	lv_obj_t *pt = settings_panel_new(TAB_TIME);
+	section(pt, "CLOCK");
+	switch_row(pt, "24-hour clock", clock_24, clock24_changed);
+	switch_row(pt, "Show seconds", clock_secs, seconds_changed);
+
+	// About
+	lv_obj_t *pa = settings_panel_new(TAB_ABOUT);
+	section(pa, "ABOUT");
+	about_label = lv_label_create(pa);
 	lv_obj_set_style_text_font(about_label, &lv_font_montserrat_20, 0);
 	lv_obj_set_style_text_color(about_label, lv_color_hex(C_TEXT), 0);
 	lv_obj_set_style_text_line_space(about_label, 4, 0);
 
-	section(page_settings, "POWER");
-	lv_obj_t *prow = button_row(page_settings);
+	// Power
+	lv_obj_t *pp = settings_panel_new(TAB_POWER);
+	section(pp, "POWER");
+	lv_obj_t *prow = button_row(pp);
 	button(prow, LV_SYMBOL_REFRESH "  Restart", BUTTON_OTHER, power_clicked, "reboot");
 	button(prow, LV_SYMBOL_POWER "  Switch off", BUTTON_DANGER, power_clicked, "poweroff");
+
+	// the first heading of each panel sits at its top, not a heading's space below it
+	for (int t = 0; t < N_TABS; t++) lv_obj_set_style_margin_top(lv_obj_get_child(tab_panel[t], 0), 0, 0);
+	settings_show_tab(TAB_NETWORK);
 	lv_timer_create(refresh_settings, 3000, NULL);
 	lv_obj_add_flag(page_settings, LV_OBJ_FLAG_HIDDEN);
 }

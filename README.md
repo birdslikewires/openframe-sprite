@@ -36,11 +36,12 @@ The ground rules for how it looks, feels and performs are in [docs/design.md](do
   and reopens 2 s after it closes or crashes, unless it was closed from the sheet. After three
   exits within a minute it stops reopening and says so. It's `startup=` in the settings
   file (see Settings below).
-- **Settings:** Wi-Fi (choosing a network, typing its password on sprite's own keyboard,
-  and forgetting it), remote access (the password for logging in as `of` over SSH, which
-  images leave unset; it warns while a unit still has the old shared one), brightness (through `of-backlight`, including automatic brightness),
-  the clock's format, touch calibration, information about the system, and Restart and
-  Switch off.
+- **Settings,** in tabs down the left: Network (Wi-Fi: choosing a network, typing its
+  password on sprite's own keyboard, and forgetting it; and remote access: the password for
+  logging in as `of` over SSH, which images leave unset, with a warning while a unit still
+  has the old shared one), Display (brightness, through `of-backlight`, including automatic
+  brightness; and touch calibration), Time (the clock's format), About (the system) and
+  Power (Restart and Switch off).
 
 ## Apps
 
