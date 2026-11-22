@@ -14,7 +14,7 @@
 /* clang-format off */
 /* sprite: generated from LVGL 9.3.0 lv_conf_template.h; changes are software
  * rendering for 800x480 XRGB8888 with two draw threads, libc allocation, and the
- * Montserrat sizes the shell uses (14, 16, 20, 28, 40, 48). */
+ * Montserrat sizes the shell uses (14, 16, 20, 28, 40), as docs/design.md sets out. */
 #if 1
 
 #ifndef LV_CONF_H
@@ -606,7 +606,7 @@
 #define LV_FONT_MONTSERRAT_42 0
 #define LV_FONT_MONTSERRAT_44 0
 #define LV_FONT_MONTSERRAT_46 0
-#define LV_FONT_MONTSERRAT_48 1
+#define LV_FONT_MONTSERRAT_48 0
 
 /* Demonstrate special features */
 #define LV_FONT_MONTSERRAT_28_COMPRESSED    0  /**< bpp = 3 */

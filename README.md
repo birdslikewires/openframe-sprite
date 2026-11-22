@@ -14,6 +14,8 @@ Measured on the test OF1: 10.5 MB of RAM for sprite, and 0.2% of the CPU when no
 is changing. The display stack it needs (wlroots, Xwayland, SDL2) is about 10 MB on disk. See
 `spike/README.md` for the measurements behind the design.
 
+The ground rules for how it looks, feels and performs are in [docs/design.md](docs/design.md).
+
 ## Using it
 
 - **Home screen:** tap a tile to open its app. A green dot means the app is running in the
