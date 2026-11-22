@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install a locally built sprite package on an OpenFrame, with the demo apps.
+# Install a locally built sprite package on an OpenFrame.
 #   scripts/build.sh package && OFH=of@192.168.11.131 scripts/deploy.sh
 #   OFH=... scripts/deploy.sh noboot     back to the tty1 login at boot (and now)
 #   OFH=... scripts/deploy.sh boot       sprite at boot again (and now)
@@ -10,10 +10,9 @@ cd "$(dirname "$0")/.."
 : "${OFH:?set OFH to user@address of the OpenFrame}"
 deb=$(ls -t out/openframe-sprite_*_i386.deb 2>/dev/null | head -1)
 T=/tmp/sprite-deploy
-ssh $SSH_OPTS "$OFH" "rm -rf $T && mkdir -p $T/demo" </dev/null
+ssh $SSH_OPTS "$OFH" "rm -rf $T && mkdir -p $T" </dev/null
 [ -z "$1" ] && { [ -n "$deb" ] || { echo "no package in out/: scripts/build.sh package"; exit 1; }; }
 [ -z "$1" ] && scp $SSH_OPTS -q "$deb" "$OFH":$T/ </dev/null
-scp $SSH_OPTS -q apps/demo/*.app "$OFH":$T/demo/ </dev/null
 ssh $SSH_OPTS "$OFH" "MODE='$1' T=$T sh -s" </dev/null <<'REMOTE'
 set -e
 # units installed by hand before sprite was packaged would hide the package's
@@ -23,8 +22,6 @@ if [ -e /etc/systemd/system/sprite.service ]; then
 		/etc/systemd/system/sockets.target.wants/sprite-helper.socket
 	sudo systemctl daemon-reload
 fi
-sudo install -d /usr/local/share/sprite/apps
-sudo install -m 644 $T/demo/*.app /usr/local/share/sprite/apps/
 case "$MODE" in
 	boot)
 		sudo systemctl disable getty@tty1.service >/dev/null 2>&1

@@ -53,7 +53,7 @@ handle=faint      # home pill: normal (default), faint or hidden while the app s
 
 Apps run as the `of` user. sprite tells them to draw through X11 for SDL
 (`SDL_VIDEODRIVER=x11`), because SDL's Wayland support needs EGL, which this hardware lacks.
-`apps/` has the demo apps the prototype ships with.
+The package brings only Settings: every other app comes in its own package, as HamClock does.
 
 ## Building
 
@@ -88,14 +88,13 @@ The first time it's installed, it takes tty1 from the login prompt (marked in
 ## Running on an OpenFrame
 
 ```
-scripts/build.sh package && OFH=of@<address> scripts/deploy.sh   # install the package, and the demo apps
+scripts/build.sh package && OFH=of@<address> scripts/deploy.sh   # install the package
 OFH=of@<address> scripts/deploy.sh noboot                        # back to the tty1 login
 OFH=of@<address> scripts/deploy.sh boot                          # sprite at boot again
 ```
 
-The demo apps (`apps/demo/`) go in `/usr/local/share/sprite/apps`, for test units. sprite reads
-manifests from `/opt/sprite/share/sprite/apps`, then `/usr/share/sprite/apps` (packages), then
-`/usr/local/share/sprite/apps`.
+sprite reads manifests from `/opt/sprite/share/sprite/apps`, then `/usr/share/sprite/apps`
+(packages), then `/usr/local/share/sprite/apps`, which is the place to try out an app by hand.
 
 sprite runs as `sprite.service` (in `system/`), on tty1 in place of the login prompt, as
 the `of` user in a logind session, so libseat gets the display and input through logind.
