@@ -58,7 +58,14 @@ glyph). From left to right:
     −55, two from −67, one from −75, below that the dot alone;
   - **ethernet** while a cable is connected, faint until it has an address.
 
-  Together they're **one touch target**, the bar's height and as wide as the icons showing
+  - **an update sign**, left of them all: a spinner while updates are checked for, downloaded
+    or installed (in the background too, so it catches the eye), and a restart arrow once one
+    needs a restart (until the unit's had it, at about 4am or when the owner chooses), with
+    an exclamation mark inside when that restart will flash new firmware. It's drawn like the
+    network icons (a ring with one arrowhead, roomy enough for the mark). It opens Settings
+    at Updates, where "Restart now" is, and the firmware's explanation.
+
+  Together the network icons are **one touch target**, the bar's height and as wide as the icons showing
   plus 8 px each side (so it meets the gear's box), lit white at 20% when pressed. It opens
   Settings at the Network tab, from any screen, whichever tab was open last;
 - **the Settings gear**: a 48 px-wide box, the bar's height, hard against the top and right
@@ -166,10 +173,17 @@ boxes get it from Sprite's theme layer, so new ones can't drift from it.
 darker than the background (`#0d1217`), with Home at its top and then a tab per group,
 each 52 px tall with a 24 px glyph (Lucide, like the tiles) and its name. The chosen tab
 is a lighter box (white at 10%) with its glyph in the accent colour; the panel beside it
-holds that group's settings, which should fit without scrolling (a panel that outgrows the
-screen scrolls on its own). The groups: **Network** (Wi-Fi, Ethernet, remote access),
-**Display** (brightness, touch), **Time** (the clock; the time zone to come), **About** and **Power**.
+holds that group's settings, and scrolls when they outgrow the screen (that's fine: it was
+one long page of everything that wasn't). The groups: **Network** (Wi-Fi, Ethernet, remote
+access), **Display** (brightness, touch), **Time** (the clock; the time zone to come),
+**Updates** (what the automatic updates are doing, what's waiting, and asking for them now),
+**About** and **Power**.
 Sound will be a tab of its own. A status line in a panel is one line, ending in "...".
+**While something slow runs, there are no buttons to press**: its status line says what's
+happening ("Installing updates...", with "2 of 3" on the right), with a progress bar under
+it when there's something to measure; the spinner is in the status bar. The buttons come
+back when it's done. **What's new** opens from an update's row (the chevron): its notes for
+owners, newest first, under each part's name and version, or "Bug fixes and improvements".
 More than fits goes on a page of its own, opened by tapping a row that ends in a chevron
 (the Wi-Fi row opens Wi-Fi's details, the Ethernet row Ethernet's). The chevron sits in a
 32 px accent box, so it reads as something to touch; the whole row takes the touch, and

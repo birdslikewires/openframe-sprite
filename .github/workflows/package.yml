@@ -108,9 +108,12 @@ jobs:
           mkdir -p "$rel"
           cp "out/openframe-sprite_${version}_i386.deb" "$rel/"
           cp "out/openframe-sprite_${version}_i386.deb" "$rel/openframe-sprite_i386.deb"
-          (cd "$rel" && sha256sum openframe-sprite_*.deb > SHA256SUMS)
-          notes="sprite ${version}, the OpenFrame touch shell, for Debian Trixie (i386).
+          # The owners' notes for every version (commits' News: trailers), which openframe-linux
+          # publishes beside the package for of-update and Settings' Updates tab.
+          bash package/version.sh --news > "$rel/openframe-sprite.news"
+          (cd "$rel" && sha256sum openframe-sprite_*.deb openframe-sprite.news > SHA256SUMS)
+          notes="Sprite ${version}, the OpenFrame touch shell, for Debian Trixie (i386).
 
           \`sudo apt install ./openframe-sprite_${version}_i386.deb\` (it needs the OpenFrame repository, linux.openbeak.net, for openframe-scripts). Installing it puts sprite on tty1 in place of the login prompt."
           gh release create "$tag" --title "openframe-sprite ${version}" --notes "$notes" --latest \
-            "$rel/openframe-sprite_${version}_i386.deb" "$rel/openframe-sprite_i386.deb" "$rel/SHA256SUMS"
+            "$rel/openframe-sprite_${version}_i386.deb" "$rel/openframe-sprite_i386.deb" "$rel/openframe-sprite.news" "$rel/SHA256SUMS"

@@ -3,5 +3,6 @@
 #define UI_ICON_WIFI "\xee\x86\xae"
 #define UI_ICON_SUN "\xee\x85\xbc"
 #define UI_ICON_CLOCK "\xee\x82\x8b"
+#define UI_ICON_REFRESH_CW "\xee\x85\x89"
 #define UI_ICON_INFO "\xee\x83\xbe"
 #define UI_ICON_POWER "\xee\x85\x84"

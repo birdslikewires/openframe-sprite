@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-## sprite-helper v26.11.27 (22nd November 2026)
+## sprite-helper v26.11.28 (22nd November 2026)
 ##  Does the few things sprite (which runs as its own user, sprite) can't do itself. systemd
 ##  starts one of these per connection to /run/sprite-helper.sock, with the connection
 ##  as stdin and stdout. It reads one request, answers "ok" or "error: <reason>", and
@@ -36,6 +36,16 @@
 ##    ssh-password          set the password of "of": the request line, then a line with the
 ##                            password (8 to 64 characters, no control characters), and start
 ##                            the SSH server, which images keep off until someone can log in
+##    update-status         the automatic updates (openframe-scripts' of-update), as its status
+##                            prints them, key=value lines, then "ok": state (idle, checking,
+##                            downloading, installing), last, result, message, pending,
+##                            checked, restart (yes when an update needs one)
+##    update-check          look for updates now, without installing (answers at once; the
+##                            state says when it's done)
+##    update-now            install what's waiting now, as the night would
+##    update-news           what's new in OpenBeak's waiting updates, as of-update news prints
+##                            it (part= and news= lines), then "ok"
+##    after-update <what>   reboot or poweroff once the update being installed has finished
 ##
 ##  Wi-Fi is set up the OpenFrame way (see of-netplan): settings/wifi.txt on the boot volume,
 ##  editable from any computer, turned into a netplan configuration. Only name= and
@@ -378,6 +388,32 @@ case "$CMD" in
 		unset PASS
 		# The SSH server waits for a way in (openframe-linux's ssh.service.d): there is one now.
 		systemctl --no-block start ssh.service 2>/dev/null
+		answer ok
+		;;
+	update-status)
+		[ -x /usr/local/sbin/of-update ] || answer "error: this system doesn't update itself"
+		/usr/local/sbin/of-update status
+		answer ok
+		;;
+	update-check|update-now)
+		[ -x /usr/local/sbin/of-update ] || answer "error: this system doesn't update itself"
+		if [ "$CMD" = update-now ]; then
+			systemctl --no-block start of-update@now.service || answer "error: the update didn't start"
+		else
+			systemd-run --no-block --quiet --collect --unit=of-update-check -p Nice=10 -p IOSchedulingClass=idle \
+				/usr/local/sbin/of-update check >/dev/null 2>&1 || answer "error: the check didn't start"
+		fi
+		answer ok
+		;;
+	update-news)
+		[ -x /usr/local/sbin/of-update ] || answer "error: this system doesn't update itself"
+		/usr/local/sbin/of-update news
+		answer ok
+		;;
+	after-update)
+		case "$ARG" in reboot|poweroff) ;; *) answer "error: after-update reboot or poweroff" ;; esac
+		systemd-run --no-block --quiet --collect --unit=of-update-after /usr/local/sbin/of-update after "$ARG" >/dev/null 2>&1 ||
+			answer "error: couldn't wait for the update"
 		answer ok
 		;;
 	*)

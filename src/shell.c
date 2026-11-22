@@ -2,6 +2,7 @@
 // The shell: status bar, home screen of app tiles, settings. LVGL, rendered in software
 // into the buffer the compositor shows whenever no app is on screen.
 #define _GNU_SOURCE
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <math.h>
@@ -9,6 +10,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -72,8 +74,8 @@ static lv_display_t *disp;
 static lv_indev_t *indev;
 static int ptr_x, ptr_y;
 static bool ptr_pressed;
-static lv_obj_t *bar_clock, *bar_date, *bar_title, *net_eth, *net_wifi, *net_warn, *net_box, *net_tab_dot;
-static lv_obj_t *page_home, *pager, *strip, *page_settings, *page_wifi, *page_entry, *page_netinfo, *toast;
+static lv_obj_t *bar_clock, *bar_date, *bar_title, *net_eth, *net_wifi, *net_warn, *net_box, *net_tab_dot, *upd_box;
+static lv_obj_t *page_home, *pager, *strip, *page_settings, *page_wifi, *page_entry, *page_netinfo, *page_news, *toast;
 enum { NETINFO_ETH, NETINFO_WIFI };
 static int netinfo_kind; // the interface page_netinfo is about: the row tapped
 static lv_obj_t *dots, *gear;         // page dots and the Settings gear, in the status bar
@@ -83,7 +85,7 @@ static int cur_page, n_pages;
 #define RAIL_PAD BACK_X
 #define TAB_H 52
 #define C_RAIL 0x0d1217   // a step between the bar and the background
-enum { TAB_NETWORK, TAB_DISPLAY, TAB_TIME, TAB_ABOUT, TAB_POWER, N_TABS };
+enum { TAB_NETWORK, TAB_DISPLAY, TAB_TIME, TAB_UPDATES, TAB_ABOUT, TAB_POWER, N_TABS };
 static lv_obj_t *tab_btn[N_TABS], *tab_icon[N_TABS], *tab_panel[N_TABS];
 static int settings_tab;
 static void settings_show_tab(int t);
@@ -360,8 +362,8 @@ static void clock_settings_changed(void) {
 /* ---- network icons: drawn once, anti-aliased, as alpha masks the text colour fills ---- */
 
 static uint8_t eth_px[NET_ICON * NET_ICON], wifi_px[5][NET_ICON * NET_ICON], lock_px[NET_ICON * NET_ICON];
-static uint8_t warn_px[NET_ICON * NET_ICON];
-static lv_image_dsc_t eth_img, wifi_img[5], lock_img, warn_img;
+static uint8_t warn_px[NET_ICON * NET_ICON], restart_px[2][NET_ICON * NET_ICON];
+static lv_image_dsc_t eth_img, wifi_img[5], lock_img, warn_img, restart_img[2];
 
 static bool in_rect(double x, double y, double x0, double y0, double x1, double y1) {
 	return x >= x0 && x < x1 && y >= y0 && y < y1;
@@ -374,9 +376,10 @@ static bool eth_shape(double x, double y, int unused) {
 	       in_rect(x, y, 15, 11, 16.5, 13.5) || in_rect(x, y, 1, 13.5, 8, 18.5) || in_rect(x, y, 12, 13.5, 19, 18.5);
 }
 
-// Wi-Fi: a dot and three arcs; returns which part a point is in (1 dot, 2-4 arcs), 0 if none
+// Wi-Fi: a dot and three arcs; returns which part a point is in (1 dot, 2-4 arcs), 0 if none.
+// Centred a pixel higher than Ethernet's boxes end, as a round dot looks lower than a flat edge.
 static int wifi_part(double x, double y) {
-	double dx = x - 10, dy = 16.5 - y, r = sqrt(dx * dx + dy * dy);
+	double dx = x - 10, dy = 15.5 - y, r = sqrt(dx * dx + dy * dy);
 	if (r <= 2.1) return 1;
 	if (dy <= 0 || fabs(dx) > dy) return 0; // within 45 degrees of straight up
 	if (r >= 5.2 && r <= 7.3) return 2;
@@ -398,6 +401,35 @@ static bool warn_shape(double x, double y) {
 	return !(in_rect(x, y, 9, 6.5, 11, 12.5) || in_rect(x, y, 9, 14, 11, 16));
 }
 
+static bool in_triangle(double x, double y, const double t[6]) {
+	double d1 = (x - t[2]) * (t[1] - t[3]) - (t[0] - t[2]) * (y - t[3]);
+	double d2 = (x - t[4]) * (t[3] - t[5]) - (t[2] - t[4]) * (y - t[5]);
+	double d3 = (x - t[0]) * (t[5] - t[1]) - (t[4] - t[0]) * (y - t[1]);
+	return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
+}
+
+// Restart: a clockwise ring arrow, its gap at the top right and its head at the top pointing
+// right, its bottom in line with the other icons'; bang puts an exclamation mark inside (the
+// restart flashes firmware).
+static bool restart_shape(double x, double y, bool bang) {
+	const double cx = 10, cy = 10.8, r0 = 5.7, r1 = 7.7, gap0 = 25, gap1 = 95;
+	static double head[6];
+	if (!head[0]) {
+		double t = gap1 * M_PI / 180, mid = (r0 + r1) / 2;
+		double ex = cx + mid * cos(t), ey = cy - mid * sin(t);
+		double dx = sin(t), dy = cos(t), nx = cos(t), ny = -sin(t); // clockwise, and outward
+		double l = 3.8, w = 3.3;
+		double h[6] = { ex + dx * l, ey + dy * l, ex + nx * w, ey + ny * w, ex - nx * w, ey - ny * w };
+		memcpy(head, h, sizeof h);
+	}
+	double dx = x - cx, dy = cy - y, r = sqrt(dx * dx + dy * dy);
+	double a = atan2(dy, dx) * 180 / M_PI;
+	if (a < 0) a += 360;
+	if (r >= r0 && r <= r1 && !(a > gap0 && a < gap1)) return true;
+	if (in_triangle(x, y, head)) return true;
+	return bang && x >= 9 && x <= 11 && ((y >= 7.2 && y <= 11.9) || (y >= 13.3 && y <= 15.2));
+}
+
 // lit: how many parts are bright (the rest are faint); 0 = all faint (not connected)
 static void draw_icon(uint8_t *px, int lit, bool wifi) {
 	for (int y = 0; y < NET_ICON; y++)
@@ -406,7 +438,9 @@ static void draw_icon(uint8_t *px, int lit, bool wifi) {
 			for (int sy = 0; sy < 4; sy++) // 4x4 samples a pixel
 				for (int sx = 0; sx < 4; sx++) {
 					double fx = x + (sx + 0.5) / 4, fy = y + (sy + 0.5) / 4;
-					if (lit == -2) {
+					if (lit == -3 || lit == -4) {
+						if (restart_shape(fx, fy, lit == -4)) a += 1.0;
+					} else if (lit == -2) {
 						if (warn_shape(fx, fy)) a += 1.0;
 					} else if (lit < 0) {
 						if (lock_shape(fx, fy)) a += 1.0;
@@ -443,6 +477,10 @@ static void make_net_icons(void) {
 	make_img(&lock_img, lock_px);
 	draw_icon(warn_px, -2, false);
 	make_img(&warn_img, warn_px);
+	for (int i = 0; i < 2; i++) { // restart; restart flashing firmware
+		draw_icon(restart_px[i], -3 - i, false);
+		make_img(&restart_img[i], restart_px[i]);
+	}
 }
 
 // Ethernet shows while a cable is connected, faint until it has an address. Wi-Fi shows unless
@@ -454,6 +492,42 @@ static void make_net_icons(void) {
 #define NET_PAD 8
 static bool wifi_scanning;
 static struct wifi_status wifi_now;                       // what the helper last said
+
+/* ---- automatic updates (openframe-scripts' of-update): what it's doing now ---- */
+
+static void set_text(lv_obj_t *l, const char *t);
+static void show_if(lv_obj_t *o, bool show);
+
+enum upd_state { UPD_IDLE, UPD_CHECKING, UPD_DOWNLOADING, UPD_INSTALLING };
+
+// What of-update is doing: its state file, if one holds its lock (a state left by a run that
+// was killed doesn't count). Read straight from /run: it's the bar's to show, every 5 s.
+static enum upd_state update_state(void) {
+	int fd = open("/run/of-update.lock", O_RDONLY | O_CLOEXEC);
+	if (fd < 0) return UPD_IDLE;
+	bool busy = flock(fd, LOCK_SH | LOCK_NB) != 0;
+	close(fd);
+	if (!busy) return UPD_IDLE;
+	char line[64] = "";
+	FILE *f = fopen("/run/of-update/state", "r");
+	if (f) { if (!fgets(line, sizeof line, f)) line[0] = 0; fclose(f); }
+	if (!strncmp(line, "state=installing", 16)) return UPD_INSTALLING;
+	if (!strncmp(line, "state=downloading", 17)) return UPD_DOWNLOADING;
+	return UPD_CHECKING;
+}
+
+// True if the next restart flashes firmware (openframe-firmware said so, in the list of what
+// needs the restart).
+static bool firmware_at_restart(void) {
+	bool flash = false;
+	FILE *f = fopen("/run/reboot-required.pkgs", "r");
+	if (f) {
+		char line[64];
+		while (fgets(line, sizeof line, f)) flash |= !strncmp(line, "openframe-firmware", 18);
+		fclose(f);
+	}
+	return flash;
+}
 
 static void update_net(lv_timer_t *t) {
 	struct sprite_net n;
@@ -488,11 +562,32 @@ static void update_net(lv_timer_t *t) {
 	} else {
 		lv_obj_add_flag(net_box, LV_OBJ_FLAG_HIDDEN);
 	}
+	// While updates are checked for, downloaded or installed: a spinner left of the network
+	// icons (opening Settings at Updates), so nobody's surprised it's busy, or switches it off
+	// without thinking.
+	enum upd_state us = update_state();
+	bool updating = us != UPD_IDLE;
+	// ... and once an update needs a restart, a restart sign there instead, until it's had one
+	// (at about 4am, or from Settings' Updates tab, where this goes)
+	bool restart = !updating && access("/run/reboot-required", F_OK) == 0;
+	if (updating || restart) {
+		lv_obj_t *sign = lv_obj_get_child(upd_box, 0);
+		show_if(sign, restart); // the restart sign, with "!" when the restart flashes firmware
+		if (restart) lv_image_set_src(sign, &restart_img[firmware_at_restart()]);
+		show_if(lv_obj_get_child(upd_box, 1), updating); // the spinner
+		lv_obj_update_layout(net_box);
+		if (shown) lv_obj_align_to(upd_box, net_box, LV_ALIGN_OUT_LEFT_MID, 0, 0);
+		else lv_obj_align(upd_box, LV_ALIGN_RIGHT_MID, -GEAR_W, 0);
+		lv_obj_remove_flag(upd_box, LV_OBJ_FLAG_HIDDEN);
+	} else {
+		lv_obj_add_flag(upd_box, LV_OBJ_FLAG_HIDDEN);
+	}
 }
 
 static void gear_clicked(lv_event_t *e);
 static void dots_clicked(lv_event_t *e);
 static void net_clicked(lv_event_t *e);
+static void upd_box_clicked(lv_event_t *e);
 
 static void build_bar(lv_obj_t *scr) {
 	lv_obj_t *bar = lv_obj_create(scr);
@@ -601,6 +696,34 @@ static void build_bar(lv_obj_t *scr) {
 		lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
 	}
 
+	// The update sign, as tall a target as the bar, put in place by update_net: a spinner while
+	// updating, a restart arrow when an update needs a restart.
+	upd_box = lv_obj_create(bar);
+	lv_obj_remove_style_all(upd_box);
+	lv_obj_set_size(upd_box, NET_ICON + 2 * NET_PAD, BAR_H);
+	lv_obj_add_flag(upd_box, LV_OBJ_FLAG_CLICKABLE);
+	lv_obj_remove_flag(upd_box, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_set_style_bg_color(upd_box, lv_color_white(), LV_STATE_PRESSED);
+	lv_obj_set_style_bg_opa(upd_box, LV_OPA_20, LV_STATE_PRESSED);
+	rounded(upd_box);
+	lv_obj_add_event_cb(upd_box, upd_box_clicked, LV_EVENT_CLICKED, NULL);
+	lv_obj_t *ul = lv_image_create(upd_box);
+	lv_image_set_src(ul, &restart_img[0]);
+	lv_obj_set_style_image_recolor(ul, lv_color_hex(C_TEXT), 0);
+	lv_obj_set_style_image_recolor_opa(ul, LV_OPA_COVER, 0);
+	lv_obj_center(ul);
+	lv_obj_t *usp = lv_spinner_create(upd_box);
+	lv_spinner_set_anim_params(usp, 1000, 270);
+	lv_obj_set_size(usp, NET_ICON, NET_ICON);
+	lv_obj_center(usp);
+	lv_obj_remove_flag(usp, LV_OBJ_FLAG_CLICKABLE);
+	lv_obj_set_style_arc_width(usp, 3, 0);
+	lv_obj_set_style_arc_width(usp, 3, LV_PART_INDICATOR);
+	lv_obj_set_style_arc_color(usp, lv_color_hex(C_TEXT), 0);
+	lv_obj_set_style_arc_opa(usp, LV_OPA_30, 0);
+	lv_obj_set_style_arc_color(usp, lv_color_hex(C_TEXT), LV_PART_INDICATOR);
+	lv_obj_add_flag(upd_box, LV_OBJ_FLAG_HIDDEN);
+
 	update_net(NULL);
 	clock_timer = lv_timer_create(update_clock, 1000, NULL);
 	update_clock(NULL);
@@ -616,11 +739,12 @@ static bool showing(lv_obj_t *page) { return page && !lv_obj_has_flag(page, LV_O
 
 static void show_page(lv_obj_t *page) {
 	if (page != page_entry && showing(page_entry)) entry_clear(); // never leave a password lying about
-	lv_obj_t *pages[] = { page_home, page_settings, page_wifi, page_entry, page_netinfo };
+	lv_obj_t *pages[] = { page_home, page_settings, page_wifi, page_entry, page_netinfo, page_news };
 	for (size_t i = 0; i < sizeof pages / sizeof pages[0]; i++)
 		if (pages[i]) lv_obj_add_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
 	lv_obj_remove_flag(page, LV_OBJ_FLAG_HIDDEN);
 	lv_label_set_text(bar_title, page == page_settings ? "Settings" : page == page_netinfo ? (netinfo_kind == NETINFO_WIFI ? "Wi-Fi" : "Ethernet") :
+			  page == page_news ? "What's new" :
 			  page == page_wifi || page == page_entry ? "Wi-Fi" : "");
 	update_dots();
 }
@@ -647,6 +771,7 @@ void shell_notice(const char *text) {
 
 static void wifi_refresh(void);
 static void ssh_refresh(void);
+static void upd_refresh(void);
 static void eth_show(void);
 static void netinfo_show(void);
 static void net_notes_show(void);
@@ -659,6 +784,7 @@ static void refresh_settings(lv_timer_t *t) {
 	if (!showing(page_settings)) return;
 	if (wifi_status_label) wifi_refresh();
 	if (!t) ssh_refresh(); // as Settings opens: it changes only when it's set
+	if (settings_tab == TAB_UPDATES) upd_refresh();
 	eth_show();
 	net_notes_show();
 	static char text[768];
@@ -703,6 +829,13 @@ static void gear_clicked(lv_event_t *e) {
 // The network icons (and the warning): Settings, at the Network tab, from wherever we are.
 static void net_clicked(lv_event_t *e) {
 	settings_show_tab(TAB_NETWORK);
+	show_page(page_settings);
+	refresh_settings(NULL);
+}
+
+// The updating sign: Settings, at Updates.
+static void upd_box_clicked(lv_event_t *e) {
+	settings_show_tab(TAB_UPDATES);
 	show_page(page_settings);
 	refresh_settings(NULL);
 }
@@ -1022,6 +1155,7 @@ static lv_obj_t *scrolling_screen(void) {
 	if (showing(page_settings)) return tab_panel[settings_tab];
 	if (showing(page_wifi)) return page_wifi;
 	if (showing(page_netinfo)) return page_netinfo;
+	if (showing(page_news)) return page_news;
 	return NULL;
 }
 
@@ -1433,11 +1567,37 @@ static void confirm_cb(lv_event_t *e) {
 
 static void dialog_cancel(lv_event_t *e) { dialog_close(); }
 
+static void after_update_cb(lv_event_t *e) {
+	const char *what = lv_event_get_user_data(e);
+	dialog_close();
+	char req[48];
+	snprintf(req, sizeof req, "after-update %s", what);
+	sysinfo_helper(req);
+	show_toast(!strcmp(what, "reboot") ? "It will restart once the update has finished"
+					   : "It will switch off once the update has finished", 4000);
+}
+
 static void power_clicked(lv_event_t *e) {
 	bool reboot = !strcmp(lv_event_get_user_data(e), "reboot");
+	enum upd_state us = update_state();
+	if (us == UPD_DOWNLOADING || us == UPD_INSTALLING) {
+		// Not halfway through installing something: once it's done.
+		lv_obj_t *card = dialog_open(NULL, "An update is being installed",
+					     reboot ? "The OpenFrame can restart as soon as it's finished, usually within a few minutes."
+						    : "The OpenFrame can switch off as soon as it's finished, usually within a few minutes.", true);
+		dialog_button(card, reboot ? LV_SYMBOL_REFRESH "  Restart when done" : LV_SYMBOL_POWER "  Switch off when done",
+			      reboot ? BUTTON_MAIN : BUTTON_DANGER, after_update_cb, reboot ? "reboot" : "poweroff");
+		dialog_button(card, "Cancel", BUTTON_OTHER, dialog_cancel, NULL);
+		return;
+	}
+	// firmware to flash at this restart: say so, so nobody's alarmed
+	bool flash = firmware_at_restart();
 	lv_obj_t *card = dialog_open(NULL, reboot ? "Restart the OpenFrame?" : "Switch off the OpenFrame?",
-				     reboot ? "It will be back in about half a minute."
-					    : "After shutdown, turn it off at the plug.", true);
+				     reboot ? (flash ? "It updates its firmware as it restarts: the screen shows the progress for a minute or "
+						       "two, then it restarts once more by itself. Don't switch it off while that happens."
+						     : "It will be back in about half a minute.")
+					    : flash ? "After shutdown, turn it off at the plug. The firmware update waiting happens the next time it starts."
+						    : "After shutdown, turn it off at the plug.", true);
 	dialog_button(card, reboot ? LV_SYMBOL_REFRESH "  Restart" : LV_SYMBOL_POWER "  Switch off",
 		      reboot ? BUTTON_MAIN : BUTTON_DANGER, confirm_cb, reboot ? "reboot" : "poweroff");
 	dialog_button(card, "Cancel", BUTTON_OTHER, dialog_cancel, NULL);
@@ -2266,14 +2426,19 @@ static void netinfo_open(lv_event_t *e);
 // A status row that opens its interface's details: pressable across its width, its highlight
 // reaching past the text as a list row's does, with a chevron at its end in the accent colour,
 // so it's plain there's more behind it.
-static void net_row_pressable(lv_obj_t *r, int kind) {
+static void row_pressable(lv_obj_t *r, lv_event_cb_t cb, void *data);
+static void net_row_pressable(lv_obj_t *r, int kind) { row_pressable(r, netinfo_open, (void *)(intptr_t)kind); }
+
+// A row that opens more about itself: pressable across its width, its highlight reaching past
+// the text as a list row's does, with a chevron at its end in the accent colour.
+static void row_pressable(lv_obj_t *r, lv_event_cb_t cb, void *data) {
 	lv_obj_set_width(r, PANEL_TEXT_W + 2 * LIST_ROW_PAD);
 	lv_obj_set_style_translate_x(r, -LIST_ROW_PAD, 0);
 	lv_obj_set_style_pad_hor(r, LIST_ROW_PAD, 0);
 	lv_obj_set_style_bg_color(r, lv_color_white(), LV_STATE_PRESSED);
 	lv_obj_set_style_bg_opa(r, LV_OPA_20, LV_STATE_PRESSED);
 	lv_obj_add_flag(r, LV_OBJ_FLAG_CLICKABLE);
-	lv_obj_add_event_cb(r, netinfo_open, LV_EVENT_CLICKED, (void *)(intptr_t)kind);
+	lv_obj_add_event_cb(r, cb, LV_EVENT_CLICKED, data);
 	rounded(r);
 	lv_obj_t *box = lv_obj_create(r);
 	lv_obj_remove_style_all(box);
@@ -2448,6 +2613,394 @@ static void ssh_set_now(const char *password) {
 
 static void ssh_set_clicked(lv_event_t *e) { open_entry(ENTRY_SSH, ""); }
 
+/* ---- updates: the Updates tab (sprite-helper's update-* requests, of-update) ---- */
+
+static lv_obj_t *upd_status_label, *upd_detail_label, *upd_note_label, *upd_now_btn, *upd_restart_btn, *upd_check_btn;
+static lv_obj_t *upd_bar, *upd_buttons, *upd_list;
+static bool upd_asking;
+static void show_if(lv_obj_t *o, bool show);
+static char upd_listed[2048]; // what the list shows now, to redraw it only when that changes
+
+// A part of the OpenFrame tier, by what it is, for its small print.
+static const char *upd_part(const char *pkg) {
+	if (!strcmp(pkg, "openframe-sprite")) return "Sprite";
+	if (!strcmp(pkg, "openframe-scripts")) return "System";
+	if (!strcmp(pkg, "openframe-crystalhd")) return "Crystal HD";
+	if (!strncmp(pkg, "linux-image-", 12)) return "Kernel";
+	return pkg;
+}
+
+static lv_obj_t *upd_small(const char *text) {
+	lv_obj_t *l = lv_label_create(upd_list);
+	lv_label_set_text(l, text);
+	lv_obj_set_width(l, LV_PCT(100));
+	lv_obj_set_style_text_font(l, &lv_font_montserrat_16, 0);
+	lv_obj_set_style_text_color(l, lv_color_hex(C_DIM), 0);
+	return l;
+}
+
+static const char *no_epoch(const char *v) { const char *c = strchr(v, ':'); return c ? c + 1 : v; }
+
+// A row of the list: a name, and on the right what it brings (or a tick once it's in).
+static lv_obj_t *upd_row(const char *name, const char *what, bool done) {
+	lv_obj_t *r = lv_obj_create(upd_list);
+	lv_obj_remove_style_all(r);
+	lv_obj_set_size(r, LV_PCT(100), LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(r, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_remove_flag(r, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_t *n = lv_label_create(r);
+	lv_label_set_text(n, name);
+	lv_obj_set_style_text_color(n, lv_color_hex(done ? C_DIM : C_TEXT), 0);
+	lv_obj_t *v = lv_label_create(r);
+	lv_label_set_text(v, done ? LV_SYMBOL_OK : what);
+	lv_obj_set_style_text_color(v, lv_color_hex(done ? C_ACCENT : C_DIM), 0);
+	if (!done) lv_obj_set_style_text_font(v, &lv_font_montserrat_16, 0);
+	lv_obj_set_flex_grow(n, 1); // the name takes the room, so the rest sits at the right
+	lv_obj_set_style_pad_column(r, 20, 0);
+	return r;
+}
+
+/* ---- What's new: an update's notes (of-update news), from the Updates tab's rows ---- */
+
+static lv_obj_t *news_body;
+static char news_which[64]; // "openframe", "firmware", or an app's package
+
+static void news_open(lv_event_t *e);
+
+// The notes, for the row that was tapped: each of its parts (the OpenFrame's are Sprite, the
+// System and the Kernel), its version, and what's new since the one in, by version.
+static void news_done(char *reply, void *data) {
+	const char *st = helper_reply_status(reply);
+	lv_obj_clean(news_body);
+	if (strcmp(st, "ok")) {
+		lv_obj_t *l = lv_label_create(news_body);
+		lv_label_set_text(l, strncmp(st, "error: ", 7) ? "Can't tell" : st + 7);
+		return;
+	}
+	static char lines[256][200];
+	int n = 0;
+	char *save = NULL;
+	for (char *l = strtok_r(reply, "\n", &save); l && n < 256; l = strtok_r(NULL, "\n", &save))
+		snprintf(lines[n++], sizeof lines[0], "%s", l);
+	bool any = false;
+	for (int i = 0; i < n; i++) {
+		char pkg[64], ver[48], tier[12];
+		if (strncmp(lines[i], "part=", 5) || sscanf(lines[i] + 5, "%63s %47s %11s", pkg, ver, tier) != 3) continue;
+		if (strcmp(news_which, "openframe") && strcmp(news_which, "firmware") ? strcmp(pkg, news_which) : strcmp(tier, news_which)) continue;
+		if (!strncmp(pkg, "linux-image-openframe-", 22)) continue; // the kernel's metapackage
+		any = true;
+		char head[128], up[64];
+		const char *name = strcmp(tier, "openframe") ? (strcmp(tier, "firmware") ? (strncmp(pkg, "ofapp-", 6) ? pkg : pkg + 6) : "Firmware") : upd_part(pkg);
+		snprintf(up, sizeof up, "%s", name);
+		for (char *c = up; *c; c++) *c = (char)toupper((unsigned char)*c);
+		snprintf(head, sizeof head, "%s, VERSION %s", up, no_epoch(ver));
+		section(news_body, head);
+		// its notes: news=<pkg>\t<version>\t<note>, newest first
+		int notes = 0;
+		for (int j = 0; j < n; j++) {
+			if (strncmp(lines[j], "news=", 5)) continue;
+			char *f1 = lines[j] + 5, *f2 = strchr(f1, '\t'), *f3 = f2 ? strchr(f2 + 1, '\t') : NULL;
+			if (!f3 || (size_t)(f2 - f1) != strlen(pkg) || strncmp(f1, pkg, f2 - f1)) continue;
+			// (not by version: only the last of a push is ever released, so the ones in between
+			// would be versions nobody saw)
+			char t[220];
+			snprintf(t, sizeof t, "- %s", f3 + 1);
+			lv_obj_t *l = lv_label_create(news_body);
+			lv_label_set_text(l, t);
+			lv_obj_set_width(l, LV_PCT(100));
+			lv_obj_set_style_text_color(l, lv_color_hex(C_TEXT), 0);
+			notes++;
+		}
+		if (!notes) {
+			lv_obj_t *l = lv_label_create(news_body);
+			lv_label_set_text(l, "Bug fixes and improvements.");
+			lv_obj_set_style_text_color(l, lv_color_hex(C_TEXT), 0);
+		}
+	}
+	if (!any) {
+		lv_obj_t *l = lv_label_create(news_body);
+		lv_label_set_text(l, "Nothing waiting now.");
+		lv_obj_set_style_text_color(l, lv_color_hex(C_DIM), 0);
+	}
+}
+
+static void news_open(lv_event_t *e) {
+	snprintf(news_which, sizeof news_which, "%s", (const char *)lv_event_get_user_data(e));
+	lv_obj_clean(news_body);
+	lv_obj_t *l = lv_label_create(news_body);
+	lv_label_set_text(l, "Loading...");
+	lv_obj_set_style_text_color(l, lv_color_hex(C_DIM), 0);
+	show_page(page_news);
+	lv_obj_scroll_to_y(page_news, 0, LV_ANIM_OFF);
+	helper_request("update-news\n", news_done, NULL);
+}
+
+static void news_back(lv_event_t *e) {
+	show_page(page_settings);
+	refresh_settings(NULL);
+}
+
+static void build_news(lv_obj_t *scr) {
+	page_news = list_page(scr);
+	lv_obj_t *br = button_row(page_news);
+	lv_obj_set_style_translate_x(br, BACK_X - CONTENT_X, 0); // the back button's place (BACK_X)
+	lv_obj_set_width(button(br, LV_SYMBOL_LEFT "  Settings", BUTTON_MAIN, news_back, NULL), BACK_W);
+	news_body = lv_obj_create(page_news);
+	lv_obj_remove_style_all(news_body);
+	lv_obj_set_size(news_body, LV_PCT(100), LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(news_body, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_style_pad_row(news_body, 8, 0);
+	lv_obj_remove_flag(news_body, LV_OBJ_FLAG_SCROLLABLE);
+}
+
+
+// The updates waiting (of-update's item= lines: package, version, tier, done, old version), by
+// tier: the firmware first, with what its restart will look like; then the OpenFrame's own as
+// one row, its parts (the kernel too) in small print; then each app; then Debian's, together.
+// firmware_pending: firmware already installed, to be flashed at the next restart.
+static void upd_show_list(char items[][96], int n, bool firmware_pending) {
+	char sig[sizeof upd_listed] = "";
+	for (int i = 0; i < n; i++) { strncat(sig, items[i], sizeof sig - strlen(sig) - 2); strcat(sig, ";"); }
+	if (firmware_pending) strncat(sig, "fw", sizeof sig - strlen(sig) - 1);
+	if (!strcmp(sig, upd_listed)) return;
+	snprintf(upd_listed, sizeof upd_listed, "%s", sig);
+	lv_obj_clean(upd_list);
+	show_if(upd_list, n > 0 || firmware_pending);
+	if (!n && !firmware_pending) return;
+	struct { char pkg[64], ver[48], tier[12], old[48]; int done; } it[64];
+	int m = 0;
+	for (int i = 0; i < n && m < 64; i++) {
+		strcpy(it[m].old, "none");
+		if (sscanf(items[i], "%63s %47s %11s %d %47s", it[m].pkg, it[m].ver, it[m].tier, &it[m].done, it[m].old) >= 4) m++;
+	}
+	char t[160];
+	// the firmware
+	bool fw_shown = false;
+	for (int i = 0; i < m; i++) {
+		if (strcmp(it[i].tier, "firmware")) continue;
+		section(upd_list, "FIRMWARE");
+		snprintf(t, sizeof t, "Version %s", no_epoch(it[i].ver));
+		row_pressable(upd_row(t, "", false), news_open, "firmware"); // flashed at the restart, so never ticked here
+		fw_shown = true;
+	}
+	if (firmware_pending && !fw_shown) {
+		section(upd_list, "FIRMWARE");
+		upd_row("At the next restart", "", false);
+		fw_shown = true;
+	}
+	if (fw_shown)
+		upd_small("At the next restart, the OpenFrame updates its firmware. The screen shows the progress for "
+			  "a minute or two, then it restarts once more by itself. Don't switch it off while that happens.");
+	// the OpenFrame's own
+	char parts[400] = "", partnames[6][16];
+	int n_of = 0, of_done = 0, n_names = 0;
+	for (int i = 0; i < m; i++) {
+		if (strcmp(it[i].tier, "openframe")) continue;
+		if (!strncmp(it[i].pkg, "linux-image-openframe-", 22)) continue; // the kernel's metapackage
+		n_of++;
+		of_done += it[i].done;
+		size_t at = strlen(parts);
+		snprintf(parts + at, sizeof parts - at, "%s%.63s %.47s", at ? ", " : "", upd_part(it[i].pkg), no_epoch(it[i].ver));
+		if (n_names < 6) snprintf(partnames[n_names++], sizeof partnames[0], "%.15s", upd_part(it[i].pkg));
+	}
+	if (n_of) {
+		// the row says what's in it ("Sprite, System and Kernel"), the heading that it's the OpenFrame's
+		char what[120] = "";
+		for (int i = 0; i < n_names; i++) {
+			size_t at = strlen(what);
+			snprintf(what + at, sizeof what - at, "%s%s", i == 0 ? "" : i == n_names - 1 ? " and " : ", ", partnames[i]);
+		}
+		section(upd_list, "OPENFRAME");
+		row_pressable(upd_row(what, "", of_done == n_of), news_open, "openframe");
+		upd_small(parts);
+	}
+	// apps
+	bool apps = false;
+	static char app_pkgs[32][64]; // what their rows open (the list is redrawn, these stay)
+	int n_app_pkgs = 0;
+	for (int i = 0; i < m; i++) {
+		if (strcmp(it[i].tier, "apps")) continue;
+		if (!apps) { section(upd_list, "APPS"); apps = true; }
+		snprintf(t, sizeof t, "version %s", no_epoch(it[i].ver));
+		if (n_app_pkgs >= 32) continue;
+		snprintf(app_pkgs[n_app_pkgs], sizeof app_pkgs[0], "%.63s", it[i].pkg);
+		row_pressable(upd_row(strncmp(it[i].pkg, "ofapp-", 6) ? it[i].pkg : it[i].pkg + 6, t, it[i].done),
+			      news_open, app_pkgs[n_app_pkgs++]);
+	}
+	// Debian's
+	char names[700] = "";
+	int n_deb = 0, deb_done = 0;
+	for (int i = 0; i < m; i++) {
+		if (strcmp(it[i].tier, "debian")) continue;
+		n_deb++;
+		deb_done += it[i].done;
+		size_t at = strlen(names);
+		snprintf(names + at, sizeof names - at, "%s%.63s", at ? ", " : "", it[i].pkg);
+	}
+	if (n_deb) {
+		section(upd_list, "FROM DEBIAN");
+		snprintf(t, sizeof t, n_deb == 1 ? "1 package" : "%d packages", n_deb);
+		upd_row("Security and bug fixes", t, deb_done == n_deb);
+		upd_small(names);
+	}
+	lv_obj_set_style_margin_top(lv_obj_get_child(upd_list, 0), 0, 0);
+}
+
+// Busy (checking, downloading, installing): no buttons, as there's nothing to press; the
+// status line says what's happening, the progress bar how far, and the bar's spinner that
+// something is. Idle: the buttons again.
+static void upd_busy(bool busy) {
+	show_if(upd_buttons, !busy);
+}
+
+// A time for the Updates tab: the time today, "yesterday", or the date.
+static void upd_when(long t, char *buf, size_t len) {
+	time_t now = time(NULL), tt = t;
+	struct tm a, b;
+	localtime_r(&now, &a);
+	localtime_r(&tt, &b);
+	if (a.tm_year == b.tm_year && a.tm_yday == b.tm_yday)
+		strftime(buf, len, clock_24 ? "%H:%M" : "%-I:%M %P", &b);
+	else if (now - tt < 2 * 86400 && (a.tm_yday - b.tm_yday == 1 || (a.tm_yday == 0 && b.tm_mon == 11 && b.tm_mday == 31)))
+		snprintf(buf, len, "yesterday");
+	else strftime(buf, len, "%e %b", &b);
+}
+
+static void show_if(lv_obj_t *o, bool show) {
+	if (show) lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN);
+	else lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void upd_started(char *reply, void *data);
+
+static void upd_status_done(char *reply, void *data) {
+	upd_asking = false;
+	const char *st = helper_reply_status(reply);
+	if (!upd_status_label) return;
+	if (strcmp(st, "ok")) {
+		set_text(upd_status_label, strncmp(st, "error: ", 7) ? "Can't tell" : st + 7);
+		set_text(upd_detail_label, "");
+		show_if(upd_now_btn, false);
+		show_if(upd_restart_btn, false);
+		show_if(upd_check_btn, false);
+		return;
+	}
+	char state[16] = "idle", result[16] = "", message[160] = "", restart[8] = "", firmware[12] = "";
+	long last = 0, checked = 0, got = 0, size = 0;
+	int pending = 0, n_items = 0, n_done = 0;
+	static char items[64][96];
+	char *save = NULL;
+	for (char *l = strtok_r(reply, "\n", &save); l; l = strtok_r(NULL, "\n", &save)) {
+		if (!strncmp(l, "item=", 5) && n_items < 64) {
+			snprintf(items[n_items], sizeof items[0], "%s", l + 5);
+			size_t len = strlen(l);
+			n_done += len > 2 && !strcmp(l + len - 2, " 1");
+			n_items++;
+		}
+		else if (!strncmp(l, "got=", 4)) got = atol(l + 4);
+		else if (!strncmp(l, "size=", 5)) size = atol(l + 5);
+		else if (!strncmp(l, "state=", 6)) snprintf(state, sizeof state, "%s", l + 6);
+		else if (!strncmp(l, "result=", 7)) snprintf(result, sizeof result, "%s", l + 7);
+		else if (!strncmp(l, "message=", 8)) snprintf(message, sizeof message, "%s", l + 8);
+		else if (!strncmp(l, "restart=", 8)) snprintf(restart, sizeof restart, "%s", l + 8);
+		else if (!strncmp(l, "firmware=", 9)) snprintf(firmware, sizeof firmware, "%s", l + 9);
+		else if (!strncmp(l, "last=", 5)) last = atol(l + 5);
+		else if (!strncmp(l, "checked=", 8)) checked = atol(l + 8);
+		else if (!strncmp(l, "pending=", 8)) pending = atoi(l + 8);
+	}
+	bool idle = !strcmp(state, "idle"), needs_restart = !strcmp(restart, "yes"), failed = !strcmp(result, "failed");
+	char t[96] = "", d[48] = "", w[24];
+	uint32_t colour = C_TEXT;
+	int progress = -1; // percent, while downloading or installing
+	if (!strcmp(state, "checking")) snprintf(t, sizeof t, "Checking for updates...");
+	else if (!strcmp(state, "downloading")) {
+		snprintf(t, sizeof t, "Downloading updates...");
+		if (size > 0) {
+			progress = (int)(got * 100 / size);
+			if (size >= 1024 * 1024) snprintf(d, sizeof d, "%.1f of %.1f MB", got / 1048576.0, size / 1048576.0);
+			else snprintf(d, sizeof d, "%ld of %ld KB", got / 1024, size / 1024);
+		}
+	} else if (!strcmp(state, "installing") && n_items > 0 && n_done == n_items) {
+		// all in: unattended-upgrades tidies up for a few seconds more (what it left behind)
+		snprintf(t, sizeof t, "Finishing up...");
+		progress = 100;
+	} else if (!strcmp(state, "installing")) {
+		snprintf(t, sizeof t, "Installing updates...");
+		if (n_items > 0) {
+			progress = n_done * 100 / n_items;
+			snprintf(d, sizeof d, "%d of %d", n_done, n_items);
+		}
+	}
+	else if (needs_restart) { snprintf(t, sizeof t, "Restart to finish updating"); colour = C_WARN; }
+	else if (failed) { snprintf(t, sizeof t, "The last update didn't work"); colour = C_WARN; }
+	else if (pending > 0) snprintf(t, sizeof t, pending == 1 ? "1 update waiting" : "%d updates waiting", pending);
+	else if (last || checked) snprintf(t, sizeof t, "Up to date");
+	else snprintf(t, sizeof t, "Not checked yet");
+	if (idle) {
+		long when = failed ? checked : last > checked ? last : checked;
+		if (when) { upd_when(when, w, sizeof w); snprintf(d, sizeof d, "%s %s", failed || last < checked ? "checked" : "updated", w); }
+	}
+	set_text(upd_status_label, t);
+	lv_obj_set_style_text_color(upd_status_label, lv_color_hex(colour), 0);
+	set_text(upd_detail_label, d);
+	// what went wrong, as of-update put it, with a capital
+	if (idle && failed && message[0]) {
+		message[0] = (char)toupper((unsigned char)message[0]);
+		char m[176];
+		snprintf(m, sizeof m, "%s.", message);
+		set_text(upd_note_label, m);
+		show_if(upd_note_label, true);
+	} else show_if(upd_note_label, false);
+	show_if(upd_bar, progress >= 0);
+	if (progress >= 0) lv_bar_set_value(upd_bar, progress, LV_ANIM_ON);
+	upd_show_list(items, idle && needs_restart ? 0 : n_items, !strcmp(firmware, "pending"));
+	// A list older than six hours is looked at again as the tab shows it (a check, no more).
+	static time_t auto_asked;
+	time_t now = time(NULL);
+	if (idle && checked && now - checked > 6 * 3600 && now - auto_asked > 600 && settings_tab == TAB_UPDATES && showing(page_settings)) {
+		auto_asked = now;
+		upd_busy(true);
+		helper_request("update-check\n", upd_started, NULL);
+		return;
+	}
+	upd_busy(!idle);
+	if (!idle) return;
+	show_if(upd_now_btn, pending > 0 && !needs_restart);
+	show_if(upd_restart_btn, needs_restart);
+	show_if(upd_check_btn, true);
+}
+
+static void upd_refresh(void) {
+	if (!upd_status_label || upd_asking) return;
+	upd_asking = true;
+	helper_request("update-status\n", upd_status_done, NULL);
+}
+
+static void upd_started(char *reply, void *data) {
+	const char *st = helper_reply_status(reply);
+	if (strcmp(st, "ok")) {
+		lv_obj_t *card = dialog_open(NULL, "Couldn't start", strncmp(st, "error: ", 7) ? st : st + 7, true);
+		dialog_button(card, "OK", BUTTON_MAIN, dialog_cancel, NULL);
+	}
+	upd_refresh();
+	update_net(NULL); // the bar's spinner now, not at its next look
+}
+
+static void upd_check_clicked(lv_event_t *e) {
+	set_text(upd_status_label, "Checking for updates...");
+	set_text(upd_detail_label, "");
+	upd_busy(true);
+	helper_request("update-check\n", upd_started, NULL);
+}
+
+static void upd_now_clicked(lv_event_t *e) {
+	set_text(upd_status_label, "Checking for updates...");
+	set_text(upd_detail_label, "");
+	upd_busy(true);
+	helper_request("update-now\n", upd_started, NULL);
+}
+
 // Settings: tabs down the left (a rail), the chosen tab's settings on the right. Each panel
 // fits without scrolling as things stand; if one grows past the screen, it scrolls on its own.
 
@@ -2464,6 +3017,7 @@ static void settings_show_tab(int t) {
 		lv_obj_set_style_text_color(tab_icon[i], lv_color_hex(i == t ? C_ACCENT : C_TEXT), 0);
 	}
 	lv_obj_scroll_to_y(tab_panel[t], 0, LV_ANIM_OFF);
+	if (t == TAB_UPDATES) upd_refresh();
 }
 
 static void tab_clicked(lv_event_t *e) { settings_show_tab((int)(intptr_t)lv_event_get_user_data(e)); }
@@ -2547,6 +3101,7 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_add_flag(net_tab_dot, LV_OBJ_FLAG_HIDDEN);
 	settings_tab_new(rail, TAB_DISPLAY, UI_ICON_SUN, "Display");
 	settings_tab_new(rail, TAB_TIME, UI_ICON_CLOCK, "Time");
+	settings_tab_new(rail, TAB_UPDATES, UI_ICON_REFRESH_CW, "Updates");
 	settings_tab_new(rail, TAB_ABOUT, UI_ICON_INFO, "About");
 	settings_tab_new(rail, TAB_POWER, UI_ICON_POWER, "Power");
 
@@ -2659,6 +3214,61 @@ static void build_settings(lv_obj_t *scr) {
 	switch_row(pt, "24-hour clock", clock_24, clock24_changed);
 	switch_row(pt, "Show seconds", clock_secs, seconds_changed);
 
+	// Updates: what of-update's doing, and asking for a look, or for the updates, now
+	lv_obj_t *pu = settings_panel_new(TAB_UPDATES);
+	section(pu, "UPDATES");
+	lv_obj_t *ur = lv_obj_create(pu);
+	lv_obj_remove_style_all(ur);
+	lv_obj_set_size(ur, LV_PCT(100), ROW_H);
+	lv_obj_set_flex_flow(ur, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(ur, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_column(ur, 20, 0);
+	lv_obj_remove_flag(ur, LV_OBJ_FLAG_SCROLLABLE);
+	upd_status_label = lv_label_create(ur);
+	lv_label_set_text(upd_status_label, "");
+	lv_label_set_long_mode(upd_status_label, LV_LABEL_LONG_DOT);
+	lv_obj_set_flex_grow(upd_status_label, 1);
+	lv_obj_set_height(upd_status_label, lv_font_get_line_height(lv_obj_get_style_text_font(upd_status_label, 0)));
+	lv_obj_set_style_text_color(upd_status_label, lv_color_hex(C_TEXT), 0);
+	upd_detail_label = lv_label_create(ur);
+	lv_label_set_text(upd_detail_label, "");
+	lv_obj_set_style_text_color(upd_detail_label, lv_color_hex(C_DIM), 0);
+	upd_bar = lv_bar_create(pu); // while downloading or installing
+	lv_obj_set_size(upd_bar, LV_PCT(100), 8);
+	lv_bar_set_range(upd_bar, 0, 100);
+	lv_obj_set_style_radius(upd_bar, LV_RADIUS_CIRCLE, 0);
+	lv_obj_set_style_radius(upd_bar, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
+	lv_obj_set_style_bg_color(upd_bar, lv_color_hex(C_BUTTON_OTHER), 0);
+	lv_obj_set_style_bg_opa(upd_bar, LV_OPA_COVER, 0);
+	lv_obj_set_style_bg_color(upd_bar, lv_color_hex(C_ACCENT), LV_PART_INDICATOR);
+	lv_obj_add_flag(upd_bar, LV_OBJ_FLAG_HIDDEN);
+	upd_note_label = lv_label_create(pu);
+	lv_label_set_text(upd_note_label, "");
+	lv_obj_set_width(upd_note_label, LV_PCT(100));
+	lv_obj_set_style_text_color(upd_note_label, lv_color_hex(C_WARN), 0);
+	lv_obj_add_flag(upd_note_label, LV_OBJ_FLAG_HIDDEN);
+	lv_obj_t *ub = upd_buttons = button_row(pu);
+	upd_now_btn = button(ub, LV_SYMBOL_DOWNLOAD "  Update now", BUTTON_MAIN, upd_now_clicked, NULL);
+	upd_restart_btn = button(ub, LV_SYMBOL_REFRESH "  Restart now", BUTTON_MAIN, power_clicked, "reboot");
+	upd_check_btn = button(ub, LV_SYMBOL_REFRESH "  Check now", BUTTON_OTHER, upd_check_clicked, NULL);
+	lv_obj_add_flag(upd_now_btn, LV_OBJ_FLAG_HIDDEN);
+	lv_obj_add_flag(upd_restart_btn, LV_OBJ_FLAG_HIDDEN);
+	upd_list = lv_obj_create(pu); // what's waiting (upd_show_list)
+	lv_obj_remove_style_all(upd_list);
+	lv_obj_set_size(upd_list, LV_PCT(100), LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(upd_list, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_style_pad_row(upd_list, 8, 0);
+	lv_obj_set_style_margin_top(upd_list, HEADING_SPACE, 0);
+	lv_obj_remove_flag(upd_list, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_add_flag(upd_list, LV_OBJ_FLAG_HIDDEN);
+	lv_obj_t *uh = lv_label_create(pu);
+	lv_label_set_text(uh, "The OpenFrame updates itself at night, or soon after it starts if it was off. "
+			      "When an update needs a restart, it restarts at about 4am.");
+	lv_obj_set_width(uh, LV_PCT(100));
+	lv_obj_set_style_margin_top(uh, HEADING_SPACE, 0);
+	lv_obj_set_style_text_font(uh, &lv_font_montserrat_16, 0);
+	lv_obj_set_style_text_color(uh, lv_color_hex(C_DIM), 0);
+
 	// About
 	lv_obj_t *pa = settings_panel_new(TAB_ABOUT);
 	section(pa, "ABOUT");
@@ -2738,5 +3348,6 @@ void shell_init(void *pixels) {
 	build_settings(scr);
 	build_wifi(scr);
 	build_netinfo(scr);
+	build_news(scr);
 	build_entry(scr);
 }

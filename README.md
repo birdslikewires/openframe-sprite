@@ -44,7 +44,9 @@ The ground rules for how it looks, feels and performs are in [docs/design.md](do
   the tab; and remote access: the password for
   logging in as `of` over SSH, which images leave unset, with a warning while a unit still
   has the old shared one), Display (brightness, through `of-backlight`, including automatic
-  brightness; and touch calibration), Time (the clock's format), About (the system, and what the hourly ping sends) and
+  brightness; and touch calibration), Time (the clock's format), Updates (openframe-scripts'
+  automatic updates: what they're doing, with progress, what's waiting, OpenBeak's first, each
+  with its "What's new", and checking, updating or restarting now), About (the system, and what the hourly ping sends) and
   Power (Restart and Switch off).
 
 ## Apps
@@ -116,6 +118,22 @@ into `third_party/` and its checksum verified (`scripts/fetch-lvgl.sh`).
 CI (`.github/workflows/package.yml`) builds the package on every change to what goes into it,
 installs it on a clean Trixie with the OpenFrame repository to test it, and publishes a
 release. The version is year.month.N (`package/version.sh`).
+
+## What's new: notes for owners
+
+A commit that owners should hear about says so in a `News:` trailer, a plain sentence about
+what they'll notice, one per line, beside the `Co-Authored-By:` lines:
+
+```
+News: Tap the Wi-Fi or Ethernet line in Settings to see the network's details.
+```
+
+`package/version.sh --news` turns them into the notes for every version (the version each
+commit made, worked out as the version itself is), and the release carries them as
+`openframe-sprite.news`. openframe-linux publishes them beside the package
+(`news/openframe-sprite.news`), where `of-update` fetches them when it looks for updates, so
+Settings can show what's new before anything's installed. Most commits need none: a version
+without notes is "Bug fixes and improvements".
 
 ## The package
 
