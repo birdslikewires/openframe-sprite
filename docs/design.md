@@ -99,8 +99,8 @@ later page.
 
 ## 6. The look: flat
 
-**One rule for corner radii, for every box** (icons, buttons, cards, banners, the message box,
-pressed highlights): **the radius is the box's shorter side × 0.2045 (18/88, an app icon's
+**One rule for corner radii, for every box** (icons, buttons, dialogs, banners, pressed
+highlights): **the radius is the box's shorter side × 0.2045 (18/88, an app icon's
 proportion), rounded, up to 18 px.** A fixed radius would make small boxes look round.
 
 | Box | Shorter side | Radius |
@@ -109,7 +109,7 @@ proportion), rounded, up to 18 px.** A fixed radius would make small boxes look 
 | Gear, page-dot target | 40 px | 8 px |
 | Banner | about 48 px | 10 px |
 | Button | 52–56 px | 11 px |
-| App cell highlight, sheet card, message box | over 88 px | 18 px (the cap) |
+| App cell highlight, dialog card | over 88 px | 18 px (the cap) |
 
 Only circles and pills are rounder: dots, the home pill, switches and slider ends. In the code,
 `rounded()` applies the rule now and whenever the box is resized. LVGL's buttons and message
@@ -137,7 +137,26 @@ boxes get it from sprite's theme layer, so new ones can't drift from it.
 | 28 px | titles |
 | 40 px | icon glyphs |
 
-## 7. Touch
+## 7. Dialogs
+
+**Anything that asks something uses the one dialog** (`dialog_open()` and `dialog_button()`):
+the long-press sheet, the Restart and Switch off questions, and the calibration result.
+
+- **A card** (`#1c242c`) centred on the screen dimmed to 40%, with 24 px padding and 18 px
+  between its parts: a **title** (28 px), **text** (20 px, dimmed, wrapping inside the card;
+  never one long line), anything particular to it (the sheet's startup switch), then **a row
+  of buttons**.
+- **Dialog buttons are 200×56, 20 px apart,** left-aligned. The card is as wide as its
+  buttons need (three make it 688 px), and never narrower than two.
+- **Buttons are coloured by role:** the main action in the accent blue (Open, Save,
+  Restart), others grey `#3a4a5a` (Again, Cancel), destructive ones red `#b3403a` (Close,
+  Switch off). The main action comes first.
+- **A tap outside the card closes a dialog that only asks** (the sheet, the power questions),
+  as Cancel would. One that needs an answer (the calibration result) waits for a button.
+- Text says what happened or will happen in a sentence or two. Titles are short: the app's
+  name, or the question.
+
+## 8. Touch
 
 - **Targets are at least 48 px in their smaller dimension.** Calibrated taps land within
   about 10 px of where you aim, and on the bare factory calibration up to 16 px out. Never
@@ -149,7 +168,7 @@ boxes get it from sprite's theme layer, so new ones can't drift from it.
   strokes. Motion carries on through that wait, so nothing visibly stops.
 - **No hover:** the touchscreen only reports while it's touched.
 
-## 8. Apps
+## 9. Apps
 
 - **Full screen at 800×480,** drawn in software (no GL). Wayland apps connect directly; X11
   and SDL apps go through Xwayland.

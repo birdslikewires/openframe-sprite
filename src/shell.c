@@ -86,6 +86,7 @@ static lv_timer_t *hold_timer;        // polls input while a finger is down (lon
 static lv_obj_t *sheet;               // the long-press sheet for one app
 static struct sprite_app *sheet_app;
 static void sheet_dismiss(void);
+static void dialog_close(void);
 
 // Touch calibration: crosses at these points, tapped in turn.
 #define CAL_N 9
@@ -234,6 +235,7 @@ void shell_set_visible(bool v) {
 		if (hold_timer) { lv_timer_delete(hold_timer); hold_timer = NULL; }
 		opening = NULL;
 		sheet_dismiss();
+		dialog_close();
 	}
 }
 
@@ -572,15 +574,111 @@ static void gear_clicked(lv_event_t *e) {
 
 /* ---- long-press sheet: open, close, open at startup ---- */
 
+/* ---- dialogs: one kind for everything that asks something (the long-press sheet, the
+   power questions, the calibration result) ---- */
+
+// A card in the middle of a dimmed screen: a title, wrapping text, then a row of buttons, all
+// DIALOG_BUTTON_W by DIALOG_BUTTON_H. The card is as wide as its buttons need, and no narrower
+// than two buttons. Main actions are the accent colour, others grey, destructive ones red.
+#define DIALOG_BUTTON_W 200
+#define DIALOG_BUTTON_H 56
+#define DIALOG_GAP 20
+#define DIALOG_PAD 24
+#define C_CARD 0x1c242c
+#define C_BUTTON_OTHER 0x3a4a5a
+#define C_BUTTON_DANGER 0xb3403a
+enum button_role { BUTTON_MAIN, BUTTON_OTHER, BUTTON_DANGER };
+static lv_obj_t *dialog_backdrop;    // the open dialog's own dimmed backdrop, if it made one
+
+static void dialog_close(void) {
+	if (!dialog_backdrop) return;
+	lv_obj_delete_async(dialog_backdrop);
+	dialog_backdrop = NULL;
+}
+
+static void dialog_backdrop_clicked(lv_event_t *e) {
+	if (lv_event_get_target(e) == lv_event_get_current_target(e)) dialog_close(); // outside the card
+}
+
+// on: a screen to put the card on (the calibration screen), or NULL for a dimmed backdrop of
+// its own, which a tap outside the card closes if tap_out_closes.
+static lv_obj_t *dialog_open(lv_obj_t *on, const char *title, const char *body, bool tap_out_closes) {
+	if (!on) {
+		dialog_close();
+		on = dialog_backdrop = lv_obj_create(lv_layer_top());
+		lv_obj_remove_style_all(on);
+		lv_obj_set_size(on, SPRITE_W, SPRITE_H);
+		lv_obj_set_style_bg_color(on, lv_color_black(), 0);
+		lv_obj_set_style_bg_opa(on, LV_OPA_60, 0);
+		lv_obj_add_flag(on, LV_OBJ_FLAG_CLICKABLE); // nothing underneath takes a touch meanwhile
+		if (tap_out_closes) lv_obj_add_event_cb(on, dialog_backdrop_clicked, LV_EVENT_CLICKED, NULL);
+	}
+	lv_obj_t *card = lv_obj_create(on);
+	lv_obj_remove_style_all(card);
+	lv_obj_set_size(card, 2 * DIALOG_BUTTON_W + DIALOG_GAP + 2 * DIALOG_PAD, LV_SIZE_CONTENT);
+	lv_obj_center(card);
+	lv_obj_set_style_bg_color(card, lv_color_hex(C_CARD), 0);
+	lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+	lv_obj_set_style_pad_all(card, DIALOG_PAD, 0);
+	lv_obj_set_style_pad_row(card, 18, 0);
+	lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+	lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE); // a tap on the card isn't a tap outside it
+	lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+	rounded(card);
+	lv_obj_t *t = lv_label_create(card);
+	lv_label_set_text(t, title);
+	lv_label_set_long_mode(t, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(t, LV_PCT(100));
+	lv_obj_set_style_text_font(t, &lv_font_montserrat_28, 0);
+	lv_obj_set_style_text_color(t, lv_color_hex(C_TEXT), 0);
+	if (body) {
+		lv_obj_t *b = lv_label_create(card);
+		lv_label_set_text(b, body);
+		lv_label_set_long_mode(b, LV_LABEL_LONG_WRAP);
+		lv_obj_set_width(b, LV_PCT(100));
+		lv_obj_set_style_text_font(b, &lv_font_montserrat_20, 0);
+		lv_obj_set_style_text_color(b, lv_color_hex(C_DIM), 0);
+		lv_obj_set_style_text_line_space(b, 4, 0);
+	}
+	return card;
+}
+
+// A button on a dialog's card, in its row (made with the first), widening the card to fit.
+static lv_obj_t *dialog_button(lv_obj_t *card, const char *text, enum button_role role, lv_event_cb_t cb, void *data) {
+	lv_obj_t *row = lv_obj_get_user_data(card);
+	if (!row) {
+		row = lv_obj_create(card);
+		lv_obj_remove_style_all(row);
+		lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
+		lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+		lv_obj_set_style_pad_column(row, DIALOG_GAP, 0);
+		lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+		lv_obj_set_user_data(card, row);
+	}
+	lv_obj_t *b = lv_button_create(row);
+	lv_obj_set_size(b, DIALOG_BUTTON_W, DIALOG_BUTTON_H);
+	lv_obj_set_style_bg_color(b, lv_color_hex(role == BUTTON_MAIN ? C_ACCENT : role == BUTTON_DANGER ? C_BUTTON_DANGER : C_BUTTON_OTHER), 0);
+	lv_obj_t *l = lv_label_create(b);
+	lv_label_set_text(l, text);
+	lv_obj_center(l);
+	lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, data);
+	int n = lv_obj_get_child_count(row);
+	int w = n * DIALOG_BUTTON_W + (n - 1) * DIALOG_GAP + 2 * DIALOG_PAD;
+	if (w > lv_obj_get_style_width(card, 0)) lv_obj_set_width(card, w);
+	return b;
+}
+
 static void sheet_dismiss(void) {
 	if (!sheet) return;
-	lv_obj_delete_async(sheet);
+	dialog_close();
 	sheet = NULL;
 	sheet_app = NULL;
 }
 
-static void sheet_backdrop(lv_event_t *e) {
-	if (lv_event_get_target(e) == lv_event_get_current_target(e)) sheet_dismiss(); // a tap outside the card
+// The sheet's backdrop is going (closed by a tap outside, or by sheet_dismiss)
+static void sheet_gone(lv_event_t *e) {
+	sheet = NULL;
+	sheet_app = NULL;
 }
 
 static void sheet_open(lv_event_t *e) {
@@ -603,51 +701,14 @@ static void sheet_startup(lv_event_t *e) {
 	shell_apps_changed();
 }
 
-static lv_obj_t *sheet_button(lv_obj_t *parent, const char *text, uint32_t color, lv_event_cb_t cb) {
-	lv_obj_t *b = lv_button_create(parent);
-	lv_obj_set_size(b, 180, 56);
-	lv_obj_set_style_bg_color(b, lv_color_hex(color), 0);
-	lv_obj_t *l = lv_label_create(b);
-	lv_label_set_text(l, text);
-	lv_obj_center(l);
-	lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
-	return b;
-}
-
 static void open_sheet(struct sprite_app *a) {
 	if (a->builtin || sheet) return;
 	sheet_app = a;
-	sheet = lv_obj_create(lv_layer_top());
-	lv_obj_remove_style_all(sheet);
-	lv_obj_set_size(sheet, SPRITE_W, SPRITE_H);
-	lv_obj_set_style_bg_color(sheet, lv_color_black(), 0);
-	lv_obj_set_style_bg_opa(sheet, LV_OPA_60, 0);
-	lv_obj_add_flag(sheet, LV_OBJ_FLAG_CLICKABLE);
-	lv_obj_add_event_cb(sheet, sheet_backdrop, LV_EVENT_CLICKED, NULL);
-
-	lv_obj_t *card = lv_obj_create(sheet);
-	lv_obj_set_size(card, 460, LV_SIZE_CONTENT);
-	lv_obj_center(card);
-	lv_obj_set_style_bg_color(card, lv_color_hex(0x1c242c), 0);
-	lv_obj_set_style_border_width(card, 0, 0);
-	rounded(card);
-	lv_obj_set_style_pad_all(card, 24, 0);
-	lv_obj_set_style_pad_row(card, 18, 0);
-	lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
-	lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
-
-	lv_obj_t *title = lv_label_create(card);
-	lv_label_set_text(title, a->name);
-	lv_obj_set_style_text_font(title, &lv_font_montserrat_28, 0);
-	lv_obj_set_style_text_color(title, lv_color_hex(C_TEXT), 0);
-
-	lv_obj_t *row = lv_obj_create(card);
-	lv_obj_remove_style_all(row);
-	lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
-	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-	lv_obj_set_style_pad_column(row, 20, 0);
-	sheet_button(row, LV_SYMBOL_PLAY "  Open", C_ACCENT, sheet_open);
-	if (a->pid || a->pending) sheet_button(row, LV_SYMBOL_CLOSE "  Close", 0xb3403a, sheet_close_app);
+	lv_obj_t *card = dialog_open(NULL, a->name, NULL, true);
+	sheet = dialog_backdrop;
+	lv_obj_add_event_cb(sheet, sheet_gone, LV_EVENT_DELETE, NULL);
+	dialog_button(card, LV_SYMBOL_PLAY "  Open", BUTTON_MAIN, sheet_open, NULL);
+	if (a->pid || a->pending) dialog_button(card, LV_SYMBOL_CLOSE "  Close", BUTTON_DANGER, sheet_close_app, NULL);
 
 	lv_obj_t *srow = lv_obj_create(card);
 	lv_obj_remove_style_all(srow);
@@ -981,22 +1042,20 @@ static void bl_auto_changed(lv_event_t *e) {
 }
 
 static void confirm_cb(lv_event_t *e) {
+	dialog_close();
 	sysinfo_helper(lv_event_get_user_data(e)); // "reboot" or "poweroff"
 }
 
-static void cancel_cb(lv_event_t *e) { lv_msgbox_close(lv_event_get_user_data(e)); }
+static void dialog_cancel(lv_event_t *e) { dialog_close(); }
 
 static void power_clicked(lv_event_t *e) {
-	const char *what = lv_event_get_user_data(e);
-	bool reboot = !strcmp(what, "reboot");
-	lv_obj_t *mb = lv_msgbox_create(NULL);
-	lv_msgbox_add_title(mb, reboot ? "Restart the OpenFrame?" : "Switch off the OpenFrame?");
-	lv_msgbox_add_text(mb, reboot ? "It will be back in about half a minute."
-				       : "Unplug it and plug it back in to switch it on again.");
-	lv_obj_t *yes = lv_msgbox_add_footer_button(mb, reboot ? "Restart" : "Switch off");
-	lv_obj_add_event_cb(yes, confirm_cb, LV_EVENT_CLICKED, reboot ? "reboot" : "poweroff");
-	lv_obj_t *no = lv_msgbox_add_footer_button(mb, "Cancel");
-	lv_obj_add_event_cb(no, cancel_cb, LV_EVENT_CLICKED, mb);
+	bool reboot = !strcmp(lv_event_get_user_data(e), "reboot");
+	lv_obj_t *card = dialog_open(NULL, reboot ? "Restart the OpenFrame?" : "Switch off the OpenFrame?",
+				     reboot ? "It will be back in about half a minute."
+					    : "Unplug it and plug it back in to switch it on again.", true);
+	dialog_button(card, reboot ? LV_SYMBOL_REFRESH "  Restart" : LV_SYMBOL_POWER "  Switch off",
+		      reboot ? BUTTON_MAIN : BUTTON_DANGER, confirm_cb, reboot ? "reboot" : "poweroff");
+	dialog_button(card, "Cancel", BUTTON_OTHER, dialog_cancel, NULL);
 }
 
 static lv_obj_t *section(lv_obj_t *parent, const char *title) {
@@ -1075,55 +1134,30 @@ static void cal_save(lv_event_t *e) {
 	show_toast("Touch calibration saved", 3000);
 }
 
-static lv_obj_t *cal_button(lv_obj_t *parent, const char *text, uint32_t color, lv_event_cb_t cb) {
-	lv_obj_t *b = lv_button_create(parent);
-	lv_obj_set_size(b, 200, 60);
-	lv_obj_set_style_bg_color(b, lv_color_hex(color), 0);
-	lv_obj_t *l = lv_label_create(b);
-	lv_label_set_text(l, text);
-	lv_obj_center(l);
-	lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
-	return b;
-}
-
 static void cal_result(void) {
 	cal_collecting = false;
 	sprite_calibrating(false);
 	lv_obj_clean(cal);
-	lv_obj_t *box = lv_obj_create(cal);
-	lv_obj_remove_style_all(box);
-	lv_obj_set_size(box, 640, LV_SIZE_CONTENT);
-	lv_obj_center(box);
-	lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_flex_align(box, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-	lv_obj_set_style_pad_row(box, 22, 0);
-	lv_obj_t *l = lv_label_create(box);
-	lv_obj_set_style_text_color(l, lv_color_hex(C_TEXT), 0);
-	lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_t *row = lv_obj_create(box);
-	lv_obj_remove_style_all(row);
-	lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-	lv_obj_set_style_pad_column(row, 20, 0);
-
 	double before, before_worst, after, after_worst;
 	cal_errors(cal_prev, &before, &before_worst);
 	if (!cal_fit(cal_new)) after_worst = 1e9;
 	else cal_errors(cal_new, &after, &after_worst);
 	if (after_worst > 25) { // one tap well away from its cross, most likely
-		lv_label_set_text(l, "That didn't look right: one of the taps was probably off its cross.\n"
-				      "Nothing has changed.");
-		cal_button(row, LV_SYMBOL_REFRESH "  Again", C_ACCENT, cal_start);
-		cal_button(row, "Cancel", 0x3a4a5a, cal_cancel);
+		lv_obj_t *card = dialog_open(cal, "That didn't look right",
+					     "One of the taps was probably off its cross. Nothing has changed.", false);
+		dialog_button(card, LV_SYMBOL_REFRESH "  Again", BUTTON_MAIN, cal_start, NULL);
+		dialog_button(card, "Cancel", BUTTON_OTHER, cal_cancel, NULL);
 		return;
 	}
 	// Try the new calibration straight away, so the buttons below are tapped with it.
 	sprite_set_calibration(cal_new);
-	lv_label_set_text_fmt(l, "Touches were landing %.0f px from the crosses on average (%.0f at worst).\n"
-			      "With this calibration: %.0f px (%.0f at worst).", before, before_worst, after, after_worst);
-	cal_button(row, LV_SYMBOL_OK "  Save", 0x2e8b57, cal_save);
-	cal_button(row, LV_SYMBOL_REFRESH "  Again", 0x3a4a5a, cal_start);
-	cal_button(row, "Cancel", 0x3a4a5a, cal_cancel);
+	char body[200];
+	snprintf(body, sizeof body, "Touches were landing %.0f px from the crosses on average, %.0f at worst. "
+		 "With this calibration, %.0f px, %.0f at worst.", before, before_worst, after, after_worst);
+	lv_obj_t *card = dialog_open(cal, "Touch calibration", body, false);
+	dialog_button(card, LV_SYMBOL_OK "  Save", BUTTON_MAIN, cal_save, NULL);
+	dialog_button(card, LV_SYMBOL_REFRESH "  Again", BUTTON_OTHER, cal_start, NULL);
+	dialog_button(card, "Cancel", BUTTON_OTHER, cal_cancel, NULL);
 }
 
 static void cal_tap(double x, double y) {
@@ -1266,7 +1300,7 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_add_event_cb(tb, cal_start, LV_EVENT_CLICKED, NULL);
 	lv_obj_t *rb = lv_button_create(trow);
 	lv_obj_set_size(rb, 220, 56);
-	lv_obj_set_style_bg_color(rb, lv_color_hex(0x3a4a5a), 0);
+	lv_obj_set_style_bg_color(rb, lv_color_hex(C_BUTTON_OTHER), 0);
 	lv_obj_t *rl = lv_label_create(rb);
 	lv_label_set_text(rl, "Standard");
 	lv_obj_center(rl);
@@ -1289,7 +1323,7 @@ static void build_settings(lv_obj_t *scr) {
 	for (int i = 0; i < 2; i++) {
 		lv_obj_t *b = lv_button_create(prow);
 		lv_obj_set_size(b, 220, 56);
-		lv_obj_set_style_bg_color(b, lv_color_hex(i ? 0xb3403a : 0x3a4a5a), 0);
+		lv_obj_set_style_bg_color(b, lv_color_hex(i ? C_BUTTON_DANGER : C_BUTTON_OTHER), 0);
 		lv_obj_t *l = lv_label_create(b);
 		lv_label_set_text(l, labels[i]);
 		lv_obj_set_style_text_font(l, &lv_font_montserrat_20, 0);
