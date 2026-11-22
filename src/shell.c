@@ -11,9 +11,19 @@
 #include "sprite.h"
 
 #define BAR_H 40
-#define TILE_W 170
-#define TILE_H 186
-#define BADGE_H 140
+// The home grid: 6 columns by 3 rows of apps, as OpenPeak's own home screen had. Each app has a
+// cell (the whole cell takes the touch) with an icon and a label of up to two lines below it.
+#define GRID_COLS 6
+#define GRID_ROWS 3
+#define GRID_PAD_X 16                                       // 16 + 6 x 128 + 16 = 800
+#define GRID_PAD_TOP 14                                     // 40 + 14 + 3 x 140 = 474 of 480
+#define TILE_W ((SPRITE_W - 2 * GRID_PAD_X) / GRID_COLS)  // 128
+#define TILE_H 140
+#define ICON_SIZE 88
+#define ICON_RADIUS 18
+#define ICON_TOP 6
+#define LABEL_GAP 6
+#define LABEL_H 38                                          // two lines of 16 px Montserrat
 
 #define C_BG 0x0e1217
 #define C_BAR 0x070a0d
@@ -371,8 +381,9 @@ static void rebuild_grid(void *unused) {
 
 		lv_obj_t *badge = lv_obj_create(tile);
 		lv_obj_remove_style_all(badge);
-		lv_obj_set_size(badge, TILE_W, BADGE_H);
-		lv_obj_set_style_radius(badge, 22, 0);
+		lv_obj_set_size(badge, ICON_SIZE, ICON_SIZE);
+		lv_obj_align(badge, LV_ALIGN_TOP_MID, 0, ICON_TOP);
+		lv_obj_set_style_radius(badge, ICON_RADIUS, 0);
 		lv_obj_set_style_bg_color(badge, lv_color_hex(a->color), 0);
 		lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
 		lv_obj_remove_flag(badge, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
@@ -380,48 +391,48 @@ static void rebuild_grid(void *unused) {
 		char buf[8];
 		lv_obj_t *icon = lv_label_create(badge);
 		lv_label_set_text(icon, icon_text(a, buf, sizeof buf));
-		lv_obj_set_style_text_font(icon, &lv_font_montserrat_48, 0);
+		lv_obj_set_style_text_font(icon, &lv_font_montserrat_40, 0);
 		lv_obj_set_style_text_color(icon, lv_color_white(), 0);
 		lv_obj_center(icon);
 
 		if (a->pid || a->pending) { // running dot: green with a window, amber while starting
 			lv_obj_t *dot = lv_obj_create(badge);
 			lv_obj_remove_style_all(dot);
-			lv_obj_set_size(dot, 14, 14);
+			lv_obj_set_size(dot, 12, 12);
 			lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
 			lv_obj_set_style_bg_color(dot, lv_color_hex(a->view ? 0x45d483 : 0xf2b33d), 0);
 			lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
 			lv_obj_set_style_border_color(dot, lv_color_white(), 0);
 			lv_obj_set_style_border_width(dot, 2, 0);
-			lv_obj_align(dot, LV_ALIGN_TOP_RIGHT, -12, 12);
+			lv_obj_align(dot, LV_ALIGN_TOP_RIGHT, -6, 6);
 		}
 
-		if (a == apps_autostart()) { // a small label on the app that opens at startup
-			lv_obj_t *chip = lv_label_create(badge);
-			lv_label_set_text(chip, LV_SYMBOL_POWER " Startup");
-			lv_obj_set_style_text_font(chip, &lv_font_montserrat_14, 0);
-			lv_obj_set_style_text_color(chip, lv_color_white(), 0);
-			lv_obj_set_style_bg_color(chip, lv_color_black(), 0);
-			lv_obj_set_style_bg_opa(chip, LV_OPA_40, 0);
-			lv_obj_set_style_radius(chip, 10, 0);
-			lv_obj_set_style_pad_hor(chip, 8, 0);
-			lv_obj_set_style_pad_ver(chip, 3, 0);
-			lv_obj_align(chip, LV_ALIGN_BOTTOM_LEFT, 10, -10);
+		if (a == apps_autostart()) { // the app that opens at startup: a small power badge
+			lv_obj_t *mark = lv_label_create(badge);
+			lv_label_set_text(mark, LV_SYMBOL_POWER);
+			lv_obj_set_style_text_font(mark, &lv_font_montserrat_14, 0);
+			lv_obj_set_style_text_color(mark, lv_color_white(), 0);
+			lv_obj_set_style_bg_color(mark, lv_color_black(), 0);
+			lv_obj_set_style_bg_opa(mark, LV_OPA_40, 0);
+			lv_obj_set_style_radius(mark, LV_RADIUS_CIRCLE, 0);
+			lv_obj_set_style_pad_all(mark, 4, 0);
+			lv_obj_align(mark, LV_ALIGN_BOTTOM_LEFT, 5, -5);
 		}
 
 		lv_obj_t *name = lv_label_create(tile);
 		lv_label_set_text(name, a->name);
-		lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
-		lv_obj_set_width(name, TILE_W);
+		lv_label_set_long_mode(name, LV_LABEL_LONG_DOT); // wraps, and ends in ... past two lines
+		lv_obj_set_size(name, TILE_W - 4, LABEL_H);
 		lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
-		lv_obj_set_style_text_font(name, &lv_font_montserrat_20, 0);
+		lv_obj_set_style_text_font(name, &lv_font_montserrat_16, 0);
+		lv_obj_set_style_text_line_space(name, 0, 0);
 		lv_obj_set_style_text_color(name, lv_color_hex(C_TEXT), 0);
-		lv_obj_align(name, LV_ALIGN_BOTTOM_MID, 0, -6);
+		lv_obj_align(name, LV_ALIGN_TOP_MID, 0, ICON_TOP + ICON_SIZE + LABEL_GAP);
 
 		// pressed look on the whole tile
 		lv_obj_set_style_bg_color(tile, lv_color_white(), LV_STATE_PRESSED);
 		lv_obj_set_style_bg_opa(tile, LV_OPA_20, LV_STATE_PRESSED);
-		lv_obj_set_style_radius(tile, 22, 0);
+		lv_obj_set_style_radius(tile, ICON_RADIUS, 0);
 	}
 	if (opening && opening->pid == 0 && !opening->pending) { // it exited before showing a window
 		char s[96];
@@ -449,10 +460,11 @@ static void build_home(lv_obj_t *scr) {
 	lv_obj_remove_style_all(grid);
 	lv_obj_set_size(grid, SPRITE_W, SPRITE_H - BAR_H);
 	lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
-	lv_obj_set_style_pad_hor(grid, 30, 0);
-	lv_obj_set_style_pad_ver(grid, 24, 0);
-	lv_obj_set_style_pad_column(grid, 20, 0);
-	lv_obj_set_style_pad_row(grid, 20, 0);
+	lv_obj_set_style_pad_hor(grid, GRID_PAD_X, 0);
+	lv_obj_set_style_pad_top(grid, GRID_PAD_TOP, 0);
+	lv_obj_set_style_pad_bottom(grid, 0, 0);
+	lv_obj_set_style_pad_column(grid, 0, 0);
+	lv_obj_set_style_pad_row(grid, 0, 0);
 	lv_obj_set_scroll_dir(grid, LV_DIR_VER);
 	lv_obj_set_scrollbar_mode(grid, LV_SCROLLBAR_MODE_OFF);
 

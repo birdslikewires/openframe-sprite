@@ -830,6 +830,24 @@ static void new_output(struct wl_listener *l, void *data) {
 
 /* ---- children ---- */
 
+// SIGUSR1: save the shell as it's drawn (not apps) to $XDG_RUNTIME_DIR/sprite-shot.ppm, for
+// looking at the UI without a camera. 'pkill -USR1 -x sprite' as the of user.
+static int on_screenshot(int sig, void *data) {
+	char path[256];
+	snprintf(path, sizeof path, "%s/sprite-shot.ppm", getenv("XDG_RUNTIME_DIR") ? getenv("XDG_RUNTIME_DIR") : "/tmp");
+	FILE *f = fopen(path, "wb");
+	if (!f) return 0;
+	fprintf(f, "P6\n%d %d\n255\n", SPRITE_W, SPRITE_H);
+	for (int i = 0; i < SPRITE_W * SPRITE_H; i++) {
+		uint32_t p = S.shellbuf.pixels[i];
+		unsigned char rgb[3] = { (p >> 16) & 0xff, (p >> 8) & 0xff, p & 0xff };
+		fwrite(rgb, 1, 3, f);
+	}
+	fclose(f);
+	wlr_log(WLR_INFO, "screenshot: %s", path);
+	return 0;
+}
+
 static int on_terminate(int sig, void *data) {
 	wlr_log(WLR_INFO, "signal %d: stopping", sig);
 	wl_display_terminate(S.display);
@@ -859,6 +877,7 @@ int main(int argc, char **argv) {
 	sigaddset(&chld, SIGCHLD);
 	sigaddset(&chld, SIGTERM);
 	sigaddset(&chld, SIGINT);
+	sigaddset(&chld, SIGUSR1);
 	pthread_sigmask(SIG_BLOCK, &chld, NULL);
 	wlr_log_init(getenv("SPRITE_DEBUG") ? WLR_DEBUG : WLR_INFO, NULL);
 	const char *apps_dir = getenv("SPRITE_APPS");
@@ -978,6 +997,7 @@ int main(int argc, char **argv) {
 	S.sigchld = wl_event_loop_add_signal(S.loop, SIGCHLD, on_sigchld, NULL);
 	wl_event_loop_add_signal(S.loop, SIGTERM, on_terminate, NULL);
 	wl_event_loop_add_signal(S.loop, SIGINT, on_terminate, NULL);
+	wl_event_loop_add_signal(S.loop, SIGUSR1, on_screenshot, NULL);
 	S.release_timer = wl_event_loop_add_timer(S.loop, release_timer_cb, NULL);
 	S.handle_timer = wl_event_loop_add_timer(S.loop, handle_timer_cb, NULL);
 
