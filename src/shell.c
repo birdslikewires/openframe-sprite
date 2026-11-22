@@ -939,7 +939,8 @@ static lv_obj_t *scrolling_screen(void) {
 static void drag_input(int x, int y, bool pressed, bool was_pressed) {
 	bool free = !sheet && !cal && !lv_obj_get_child_count(lv_layer_top());
 	if (pressed && !was_pressed) { // a touch begins
-		drag_can_page = free && pager && !lv_obj_has_flag(page_home, LV_OBJ_FLAG_HIDDEN) && n_pages > 1;
+		// one page can be flicked too, against the ends: it shows there's paging to be had
+		drag_can_page = free && pager && !lv_obj_has_flag(page_home, LV_OBJ_FLAG_HIDDEN);
 		drag_scroll = free ? scrolling_screen() : NULL;
 		drag = (drag_can_page || drag_scroll) && y >= BAR_H ? DRAG_MAYBE : DRAG_NONE;
 		drag_x0 = x;

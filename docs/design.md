@@ -84,6 +84,8 @@ later page.
   dragging sideways. The dots in the bar turn them too.
 - **The page follows the finger.** Past the first or last page it moves a third as far as
   the finger, so you can feel the end.
+- **One page flicks too,** against both ends, and springs back: it shows there's paging to
+  be had, without anything having to say so.
 - **A touch becomes a page drag after 12 px sideways.** Until then it can still be a tap or a
   long press, and from then on it can't open an app.
 - **A page turns after 60 px of drag, or a flick of 0.4 px/ms.** Otherwise it settles back.
