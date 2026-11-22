@@ -131,6 +131,7 @@ struct sprite_net {
 	bool wifi_enabled;    // ... and it's switched on (interface up, radio not blocked)
 	char eth_ip[48], wifi_ip[48];
 	int wifi_dbm;         // the signal of the network joined, in dBm; 0 when unknown
+	bool notes;           // of-netplan has something to say about the settings files
 };
 void sysinfo_net(struct sprite_net *out);
 // Where an address is shown alone (to log in to, say), it's the wired one when there's both:

@@ -66,12 +66,13 @@ _Static_assert(GRID_PAD_TOP + ICON_TOP == CONTENT_TOP, "the grid's first icon is
 #define C_TEXT 0xe8edf2
 #define C_DIM 0x8b97a3
 #define C_ACCENT 0x3d9be9
+#define C_WARN 0xf2b33d    // something to put right (and an app starting)
 
 static lv_display_t *disp;
 static lv_indev_t *indev;
 static int ptr_x, ptr_y;
 static bool ptr_pressed;
-static lv_obj_t *bar_clock, *bar_date, *bar_title, *net_eth, *net_wifi;
+static lv_obj_t *bar_clock, *bar_date, *bar_title, *net_eth, *net_wifi, *net_warn, *net_box, *net_tab_dot;
 static lv_obj_t *page_home, *pager, *strip, *page_settings, *page_wifi, *page_entry, *page_netinfo, *toast;
 enum { NETINFO_ETH, NETINFO_WIFI };
 static int netinfo_kind; // the interface page_netinfo is about: the row tapped
@@ -359,7 +360,8 @@ static void clock_settings_changed(void) {
 /* ---- network icons: drawn once, anti-aliased, as alpha masks the text colour fills ---- */
 
 static uint8_t eth_px[NET_ICON * NET_ICON], wifi_px[5][NET_ICON * NET_ICON], lock_px[NET_ICON * NET_ICON];
-static lv_image_dsc_t eth_img, wifi_img[5], lock_img;
+static uint8_t warn_px[NET_ICON * NET_ICON];
+static lv_image_dsc_t eth_img, wifi_img[5], lock_img, warn_img;
 
 static bool in_rect(double x, double y, double x0, double y0, double x1, double y1) {
 	return x >= x0 && x < x1 && y >= y0 && y < y1;
@@ -390,6 +392,12 @@ static bool lock_shape(double x, double y) {
 	return (dy <= 0 && r >= 3.4 && r <= 5.2) || (dy > 0 && dy < 1 && fabs(dx) >= 3.4 && fabs(dx) <= 5.2);
 }
 
+// A warning: a solid triangle with an exclamation mark cut out of it
+static bool warn_shape(double x, double y) {
+	if (y < 1.5 || y > 18.5 || fabs(x - 10) > (y - 1.5) * (9.5 / 17)) return false;
+	return !(in_rect(x, y, 9, 6.5, 11, 12.5) || in_rect(x, y, 9, 14, 11, 16));
+}
+
 // lit: how many parts are bright (the rest are faint); 0 = all faint (not connected)
 static void draw_icon(uint8_t *px, int lit, bool wifi) {
 	for (int y = 0; y < NET_ICON; y++)
@@ -398,7 +406,9 @@ static void draw_icon(uint8_t *px, int lit, bool wifi) {
 			for (int sy = 0; sy < 4; sy++) // 4x4 samples a pixel
 				for (int sx = 0; sx < 4; sx++) {
 					double fx = x + (sx + 0.5) / 4, fy = y + (sy + 0.5) / 4;
-					if (lit < 0) {
+					if (lit == -2) {
+						if (warn_shape(fx, fy)) a += 1.0;
+					} else if (lit < 0) {
 						if (lock_shape(fx, fy)) a += 1.0;
 					} else if (wifi) {
 						int part = wifi_part(fx, fy);
@@ -431,10 +441,17 @@ static void make_net_icons(void) {
 	}
 	draw_icon(lock_px, -1, false);
 	make_img(&lock_img, lock_px);
+	draw_icon(warn_px, -2, false);
+	make_img(&warn_img, warn_px);
 }
 
 // Ethernet shows while a cable is connected, faint until it has an address. Wi-Fi shows unless
-// it's switched off or missing: bars by signal, all faint while not connected.
+// it's switched off or missing: bars by signal, all faint while not connected. An amber
+// warning shows left of them while of-netplan has something to say about the settings files,
+// and the Network tab in Settings has an amber dot. The icons are one touch target, sized to
+// those showing, that opens Settings at the Network tab.
+#define NET_GAP 12
+#define NET_PAD 8
 static bool wifi_scanning;
 static struct wifi_status wifi_now;                       // what the helper last said
 
@@ -456,10 +473,26 @@ static void update_net(lv_timer_t *t) {
 	} else {
 		lv_obj_add_flag(net_wifi, LV_OBJ_FLAG_HIDDEN);
 	}
+	if (n.notes) lv_obj_remove_flag(net_warn, LV_OBJ_FLAG_HIDDEN);
+	else lv_obj_add_flag(net_warn, LV_OBJ_FLAG_HIDDEN);
+	if (net_tab_dot) {
+		if (n.notes) lv_obj_remove_flag(net_tab_dot, LV_OBJ_FLAG_HIDDEN);
+		else lv_obj_add_flag(net_tab_dot, LV_OBJ_FLAG_HIDDEN);
+	}
+	int shown = 0;
+	for (lv_obj_t *o = net_warn; o; o = o == net_warn ? net_wifi : o == net_wifi ? net_eth : NULL)
+		shown += !lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN);
+	if (shown) {
+		lv_obj_set_width(net_box, shown * NET_ICON + (shown - 1) * NET_GAP + 2 * NET_PAD);
+		lv_obj_remove_flag(net_box, LV_OBJ_FLAG_HIDDEN);
+	} else {
+		lv_obj_add_flag(net_box, LV_OBJ_FLAG_HIDDEN);
+	}
 }
 
 static void gear_clicked(lv_event_t *e);
 static void dots_clicked(lv_event_t *e);
+static void net_clicked(lv_event_t *e);
 
 static void build_bar(lv_obj_t *scr) {
 	lv_obj_t *bar = lv_obj_create(scr);
@@ -535,17 +568,29 @@ static void build_bar(lv_obj_t *scr) {
 
 	// ... and to its left, the network icons
 	make_net_icons();
-	lv_obj_t *net = lv_obj_create(bar);
+	lv_obj_t *net = net_box = lv_obj_create(bar);
 	lv_obj_remove_style_all(net);
-	// A fixed width for both icons, packed to the right: sized to its content, it didn't grow
-	// when Wi-Fi appeared beside Ethernet, which was pushed out of it and lost.
-	lv_obj_set_size(net, 2 * NET_ICON + 12, BAR_H);
+	// Its width is set by update_net, for the icons showing (sized to its content, it didn't
+	// grow when Wi-Fi appeared beside Ethernet, which was pushed out of it and lost). Pressed,
+	// it lights as the gear does, which it sits against.
+	lv_obj_set_size(net, 2 * NET_ICON + NET_GAP + 2 * NET_PAD, BAR_H);
 	lv_obj_set_flex_flow(net, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(net, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-	lv_obj_set_style_pad_column(net, 12, 0);
-	lv_obj_align(net, LV_ALIGN_RIGHT_MID, -(GEAR_W + 8), 0);
-	lv_obj_remove_flag(net, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-	// Wi-Fi on the left and Ethernet on the right, always: the flex row keeps creation order.
+	lv_obj_set_style_pad_column(net, NET_GAP, 0);
+	lv_obj_set_style_pad_hor(net, NET_PAD, 0);
+	lv_obj_align(net, LV_ALIGN_RIGHT_MID, -GEAR_W, 0);
+	lv_obj_remove_flag(net, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_add_flag(net, LV_OBJ_FLAG_CLICKABLE);
+	lv_obj_set_style_bg_color(net, lv_color_white(), LV_STATE_PRESSED);
+	lv_obj_set_style_bg_opa(net, LV_OPA_20, LV_STATE_PRESSED);
+	rounded(net);
+	lv_obj_add_event_cb(net, net_clicked, LV_EVENT_CLICKED, NULL);
+	// The warning, then Wi-Fi, then Ethernet, always: the flex row keeps creation order.
+	net_warn = lv_image_create(net);
+	lv_image_set_src(net_warn, &warn_img);
+	lv_obj_set_style_image_recolor(net_warn, lv_color_hex(C_WARN), 0);
+	lv_obj_set_style_image_recolor_opa(net_warn, LV_OPA_COVER, 0);
+	lv_obj_add_flag(net_warn, LV_OBJ_FLAG_HIDDEN);
 	net_wifi = lv_image_create(net);
 	lv_image_set_src(net_wifi, &wifi_img[0]);
 	net_eth = lv_image_create(net);
@@ -651,6 +696,13 @@ static void gear_clicked(lv_event_t *e) {
 		show_page(page_home);
 		return;
 	}
+	show_page(page_settings);
+	refresh_settings(NULL);
+}
+
+// The network icons (and the warning): Settings, at the Network tab, from wherever we are.
+static void net_clicked(lv_event_t *e) {
+	settings_show_tab(TAB_NETWORK);
 	show_page(page_settings);
 	refresh_settings(NULL);
 }
@@ -888,7 +940,7 @@ static lv_obj_t *make_cell(lv_obj_t *page, struct sprite_app *a) {
 		lv_obj_remove_style_all(dot);
 		lv_obj_set_size(dot, 12, 12);
 		lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-		lv_obj_set_style_bg_color(dot, lv_color_hex(a->view ? 0x45d483 : 0xf2b33d), 0);
+		lv_obj_set_style_bg_color(dot, lv_color_hex(a->view ? 0x45d483 : C_WARN), 0);
 		lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
 		lv_obj_set_style_border_color(dot, lv_color_white(), 0);
 		lv_obj_set_style_border_width(dot, 2, 0);
@@ -2206,7 +2258,6 @@ static void eth_show(void) {
 /* ---- network details: a page of its own from the Wi-Fi and Ethernet rows (read-only) ---- */
 
 #define PANEL_TEXT_W (SPRITE_W - RAIL_W - (CONTENT_X - 8) - CONTENT_X) // a Settings panel's content
-#define C_WARN 0xf2b33d
 static lv_obj_t *net_notes_label, *netinfo_body;
 static char netinfo_shown[sizeof(struct sprite_netinfo)];
 
@@ -2483,7 +2534,17 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_t *home = button(rail, LV_SYMBOL_LEFT "  Home", BUTTON_MAIN, back_clicked, NULL);
 	lv_obj_set_width(home, BACK_W); // the tabs' width: its arrow and colour set it apart
 	lv_obj_set_style_margin_bottom(home, HEADING_SPACE, 0);
-	settings_tab_new(rail, TAB_NETWORK, UI_ICON_WIFI, "Network");
+	lv_obj_t *nt = settings_tab_new(rail, TAB_NETWORK, UI_ICON_WIFI, "Network");
+	net_tab_dot = lv_obj_create(nt); // there while the network settings have a problem
+	lv_obj_remove_style_all(net_tab_dot);
+	lv_obj_add_flag(net_tab_dot, LV_OBJ_FLAG_IGNORE_LAYOUT); // at the end, taking no room from the name
+	lv_obj_set_size(net_tab_dot, 10, 10);
+	lv_obj_align(net_tab_dot, LV_ALIGN_RIGHT_MID, 0, 0);
+	lv_obj_set_style_radius(net_tab_dot, LV_RADIUS_CIRCLE, 0);
+	lv_obj_set_style_bg_color(net_tab_dot, lv_color_hex(C_WARN), 0);
+	lv_obj_set_style_bg_opa(net_tab_dot, LV_OPA_COVER, 0);
+	lv_obj_remove_flag(net_tab_dot, LV_OBJ_FLAG_CLICKABLE);
+	lv_obj_add_flag(net_tab_dot, LV_OBJ_FLAG_HIDDEN);
 	settings_tab_new(rail, TAB_DISPLAY, UI_ICON_SUN, "Display");
 	settings_tab_new(rail, TAB_TIME, UI_ICON_CLOCK, "Time");
 	settings_tab_new(rail, TAB_ABOUT, UI_ICON_INFO, "About");
@@ -2617,6 +2678,7 @@ static void build_settings(lv_obj_t *scr) {
 	for (int t = 0; t < N_TABS; t++) lv_obj_set_style_margin_top(lv_obj_get_child(tab_panel[t], 0), 0, 0);
 	lv_obj_set_style_margin_top(lv_obj_get_child(pn, 1), 0, 0); // under the notes, while there are none
 	settings_show_tab(TAB_NETWORK);
+	update_net(NULL); // the Network tab's dot, now there is one
 	lv_timer_create(refresh_settings, 3000, NULL);
 	lv_obj_add_flag(page_settings, LV_OBJ_FLAG_HIDDEN);
 }

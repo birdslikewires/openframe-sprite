@@ -192,6 +192,14 @@ void sysinfo_net(struct sprite_net *n) {
 		freeifaddrs(ifa);
 	}
 	if (n->wifi_up) n->wifi_dbm = wifi_signal("wlan0");
+	// of-netplan's notes for the login prompt (sysinfo_netinfo reads them): any at all?
+	FILE *f = fopen("/var/lib/of-netplan/issue.note", "r");
+	if (f) {
+		char b[64];
+		size_t len = fread(b, 1, sizeof b, f);
+		for (size_t i = 0; i < len && !n->notes; i++) n->notes = b[i] > ' ';
+		fclose(f);
+	}
 }
 
 // Each interface's IPv4 address (the first with global scope), and whether it's permanent:

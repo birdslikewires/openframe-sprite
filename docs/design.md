@@ -47,20 +47,28 @@ glyph). From left to right:
   changes, just after each second begins;
 - **the page dots** in the centre, only when there's more than one page. In Settings, the
   title goes there instead;
-- **network icons** (20 px), ending 8 px before the gear, Wi-Fi always on the left of ethernet:
+- **network icons** (20 px), ending 8 px before the gear, in this order:
+  - **a warning**, an amber triangle, while of-netplan has something to say about the
+    settings files (a fixed address in ethernet.txt that isn't one, say). It used to be on
+    the login prompt, which sprite covers; it stays until the file's put right and the
+    unit restarted, and the Network tab in Settings has an amber dot beside its name;
   - **Wi-Fi**, unless it's switched off (interface down, or radio blocked) or missing. It shows
     the signal as a dot and up to three arcs, all faint while it isn't connected. The
     bars go by the signal in dBm, by the same rule as the list of networks: three arcs from
     −55, two from −67, one from −75, below that the dot alone;
-  - **ethernet** while a cable is connected, faint until it has an address;
+  - **ethernet** while a cable is connected, faint until it has an address.
+
+  Together they're **one touch target**, the bar's height and as wide as the icons showing
+  plus 8 px each side (so it meets the gear's box), lit white at 20% when pressed. It opens
+  Settings at the Network tab, from any screen, whichever tab was open last;
 - **the Settings gear**: a 48 px-wide box, the bar's height, hard against the top and right
   edges, with the 18 px radius on all four corners like any other box.
 
 The bar is the same on every sprite screen. The **page dots are one touch target**, as tall as
 the bar: each tap turns to the next page, wrapping round from the last to the first. They're
 too small to tap one by one, and dragging is the main way of turning pages anyway.
-**Settings is reached only from the gear**, never from a tile, so it can't be pushed onto a
-later page.
+**Settings is reached from the bar**, never from a tile, so it can't be pushed onto a later
+page: from the gear, or the network icons for its Network tab.
 
 ## 4. Home grid
 
