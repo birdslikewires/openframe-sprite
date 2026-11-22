@@ -162,6 +162,14 @@ holds that group's settings, which should fit without scrolling (a panel that ou
 screen scrolls on its own). The groups: **Network** (Wi-Fi, Ethernet, remote access),
 **Display** (brightness, touch), **Time** (the clock; the time zone to come), **About** and **Power**.
 Sound will be a tab of its own. A status line in a panel is one line, ending in "...".
+More than fits goes on a page of its own, opened by tapping a row that ends in a chevron
+(the Wi-Fi row opens Wi-Fi's details, the Ethernet row Ethernet's). The chevron sits in a
+32 px accent box, so it reads as something to touch; the whole row takes the touch, and
+lights as a list row does, its highlight reaching 12 px past the text. Problems to put right are amber, at
+the top of their tab.
+
+**Where one address is shown alone** (to log in to, say), it's the wired one when there
+are both: it's faster and steadier, so that's where people are pointed.
 
 **Back buttons are always in one place and one size**, top left: 16 px from the left edge
 and 20 px below the bar, 176 px wide (the width of Settings' tabs) and 48 px tall (Home in

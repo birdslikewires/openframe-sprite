@@ -133,6 +133,28 @@ struct sprite_net {
 	int wifi_dbm;         // the signal of the network joined, in dBm; 0 when unknown
 };
 void sysinfo_net(struct sprite_net *out);
+// Where an address is shown alone (to log in to, say), it's the wired one when there's both:
+// faster and steadier, so that's where people are pointed.
+static inline const char *sprite_net_best_ip(const struct sprite_net *n) {
+	return n->eth_ip[0] ? n->eth_ip : n->wifi_ip;
+}
+// The details behind them, for Settings' network page: read-only, from the kernel,
+// systemd-resolved and of-netplan (never the settings files, which hold the Wi-Fi password).
+struct sprite_netif {
+	char ip[48];          // the IPv4 address with its prefix, 192.168.1.50/24, or ""
+	bool fixed;           // set in ethernet.txt or wifi.txt (a permanent address), not handed out
+	char gateway[16];     // the default gateway through it, or ""
+	char mac[18];
+};
+#define NET_DNS_MAX 3
+struct sprite_netinfo {
+	char host[65];
+	struct sprite_netif eth, wifi;
+	char dns[NET_DNS_MAX][46];  // the DNS servers asked, IPv4 first
+	int n_dns;
+	char notes[640];      // of-netplan's problems with the settings files, a line each, or ""
+};
+void sysinfo_netinfo(struct sprite_netinfo *out);
 int wifi_signal(const char *ifname);          // dBm of the network joined (nl80211), 0 if unknown
 int sysinfo_backlight(void);                  // 0-100, -1 if unknown
 bool sysinfo_backlight_auto(void);

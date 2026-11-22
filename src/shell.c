@@ -72,7 +72,9 @@ static lv_indev_t *indev;
 static int ptr_x, ptr_y;
 static bool ptr_pressed;
 static lv_obj_t *bar_clock, *bar_date, *bar_title, *net_eth, *net_wifi;
-static lv_obj_t *page_home, *pager, *strip, *page_settings, *page_wifi, *page_entry, *toast;
+static lv_obj_t *page_home, *pager, *strip, *page_settings, *page_wifi, *page_entry, *page_netinfo, *toast;
+enum { NETINFO_ETH, NETINFO_WIFI };
+static int netinfo_kind; // the interface page_netinfo is about: the row tapped
 static lv_obj_t *dots, *gear;         // page dots and the Settings gear, in the status bar
 static int cur_page, n_pages;
 // Settings' tabs (see build_settings)
@@ -569,11 +571,12 @@ static bool showing(lv_obj_t *page) { return page && !lv_obj_has_flag(page, LV_O
 
 static void show_page(lv_obj_t *page) {
 	if (page != page_entry && showing(page_entry)) entry_clear(); // never leave a password lying about
-	lv_obj_t *pages[] = { page_home, page_settings, page_wifi, page_entry };
+	lv_obj_t *pages[] = { page_home, page_settings, page_wifi, page_entry, page_netinfo };
 	for (size_t i = 0; i < sizeof pages / sizeof pages[0]; i++)
 		if (pages[i]) lv_obj_add_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
 	lv_obj_remove_flag(page, LV_OBJ_FLAG_HIDDEN);
-	lv_label_set_text(bar_title, page == page_settings ? "Settings" : page == page_wifi || page == page_entry ? "Wi-Fi" : "");
+	lv_label_set_text(bar_title, page == page_settings ? "Settings" : page == page_netinfo ? (netinfo_kind == NETINFO_WIFI ? "Wi-Fi" : "Ethernet") :
+			  page == page_wifi || page == page_entry ? "Wi-Fi" : "");
 	update_dots();
 }
 
@@ -600,15 +603,19 @@ void shell_notice(const char *text) {
 static void wifi_refresh(void);
 static void ssh_refresh(void);
 static void eth_show(void);
+static void netinfo_show(void);
+static void net_notes_show(void);
 static lv_obj_t *wifi_status_label;
 
 static void refresh_settings(lv_timer_t *t) {
 	if (!visible) return;
 	if (showing(page_wifi)) { wifi_refresh(); return; }
+	if (showing(page_netinfo)) { netinfo_show(); return; }
 	if (!showing(page_settings)) return;
 	if (wifi_status_label) wifi_refresh();
 	if (!t) ssh_refresh(); // as Settings opens: it changes only when it's set
 	eth_show();
+	net_notes_show();
 	static char text[768];
 	sysinfo_summary(text, sizeof text);
 	lv_label_set_text(about_label, text);
@@ -962,6 +969,7 @@ static void scroll_glide(lv_obj_t *obj, int from, int to, uint32_t ms) {
 static lv_obj_t *scrolling_screen(void) {
 	if (showing(page_settings)) return tab_panel[settings_tab];
 	if (showing(page_wifi)) return page_wifi;
+	if (showing(page_netinfo)) return page_netinfo;
 	return NULL;
 }
 
@@ -2195,6 +2203,151 @@ static void eth_show(void) {
 	set_text(eth_detail_label, n.eth_up ? n.eth_ip : "");
 }
 
+/* ---- network details: a page of its own from the Wi-Fi and Ethernet rows (read-only) ---- */
+
+#define PANEL_TEXT_W (SPRITE_W - RAIL_W - (CONTENT_X - 8) - CONTENT_X) // a Settings panel's content
+#define C_WARN 0xf2b33d
+static lv_obj_t *net_notes_label, *netinfo_body;
+static char netinfo_shown[sizeof(struct sprite_netinfo)];
+
+static void netinfo_open(lv_event_t *e);
+
+// A status row that opens its interface's details: pressable across its width, its highlight
+// reaching past the text as a list row's does, with a chevron at its end in the accent colour,
+// so it's plain there's more behind it.
+static void net_row_pressable(lv_obj_t *r, int kind) {
+	lv_obj_set_width(r, PANEL_TEXT_W + 2 * LIST_ROW_PAD);
+	lv_obj_set_style_translate_x(r, -LIST_ROW_PAD, 0);
+	lv_obj_set_style_pad_hor(r, LIST_ROW_PAD, 0);
+	lv_obj_set_style_bg_color(r, lv_color_white(), LV_STATE_PRESSED);
+	lv_obj_set_style_bg_opa(r, LV_OPA_20, LV_STATE_PRESSED);
+	lv_obj_add_flag(r, LV_OBJ_FLAG_CLICKABLE);
+	lv_obj_add_event_cb(r, netinfo_open, LV_EVENT_CLICKED, (void *)(intptr_t)kind);
+	rounded(r);
+	lv_obj_t *box = lv_obj_create(r);
+	lv_obj_remove_style_all(box);
+	lv_obj_set_size(box, 32, 32);
+	lv_obj_set_style_bg_color(box, lv_color_hex(C_ACCENT), 0);
+	lv_obj_set_style_bg_opa(box, LV_OPA_COVER, 0);
+	lv_obj_remove_flag(box, LV_OBJ_FLAG_CLICKABLE); // the row takes the touch
+	lv_obj_remove_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_set_style_margin_left(box, -8, 0); // nearer the address than the row's gaps
+	rounded(box);
+	lv_obj_t *c = lv_label_create(box);
+	lv_label_set_text(c, LV_SYMBOL_RIGHT);
+	lv_obj_set_style_text_font(c, &lv_font_montserrat_16, 0);
+	lv_obj_set_style_text_color(c, lv_color_white(), 0);
+	lv_obj_center(c);
+}
+
+// of-netplan's notes on the settings files (a bad address in ethernet.txt, say): they used
+// to be on the login prompt, which sprite covers, so the Network tab says them at its top.
+static void net_notes_show(void) {
+	if (!net_notes_label) return;
+	struct sprite_netinfo ni;
+	sysinfo_netinfo(&ni);
+	lv_obj_t *first = lv_obj_get_child(lv_obj_get_parent(net_notes_label), 1); // the first heading
+	if (ni.notes[0]) {
+		set_text(net_notes_label, ni.notes);
+		lv_obj_remove_flag(net_notes_label, LV_OBJ_FLAG_HIDDEN);
+		lv_obj_set_style_margin_top(first, HEADING_SPACE, 0);
+	} else {
+		lv_obj_add_flag(net_notes_label, LV_OBJ_FLAG_HIDDEN);
+		lv_obj_set_style_margin_top(first, 0, 0);
+	}
+}
+
+// One line of the details: a name, dimmed, then its value.
+static void info_row(lv_obj_t *parent, const char *name, const char *value) {
+	lv_obj_t *r = lv_obj_create(parent);
+	lv_obj_remove_style_all(r);
+	lv_obj_set_size(r, LV_PCT(100), LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
+	lv_obj_set_style_pad_column(r, 20, 0);
+	lv_obj_remove_flag(r, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_t *k = lv_label_create(r);
+	lv_label_set_text(k, name);
+	lv_obj_set_width(k, 200);
+	lv_obj_set_style_text_color(k, lv_color_hex(C_DIM), 0);
+	lv_obj_t *v = lv_label_create(r);
+	lv_label_set_text(v, value);
+	lv_obj_set_flex_grow(v, 1);
+	lv_obj_set_style_text_color(v, lv_color_hex(C_TEXT), 0);
+}
+
+static void netif_rows(lv_obj_t *p, const struct sprite_netif *nif, const char *file) {
+	char t[96];
+	if (nif->ip[0]) snprintf(t, sizeof t, "%s", nif->ip);
+	else snprintf(t, sizeof t, "None");
+	info_row(p, "Address", t);
+	if (nif->ip[0]) {
+		if (nif->fixed) snprintf(t, sizeof t, "%s (a fixed address)", file);
+		else snprintf(t, sizeof t, "The router (DHCP)");
+		info_row(p, "Set by", t);
+		info_row(p, "Gateway", nif->gateway[0] ? nif->gateway : "None");
+	}
+	if (nif->mac[0]) info_row(p, "MAC address", nif->mac);
+}
+
+// The page again, if anything on it has changed.
+static void netinfo_show(void) {
+	struct sprite_netinfo ni;
+	sysinfo_netinfo(&ni);
+	if (!memcmp(&ni, netinfo_shown, sizeof ni)) return;
+	memcpy(netinfo_shown, &ni, sizeof ni);
+	lv_obj_t *p = netinfo_body;
+	lv_obj_clean(p);
+	bool wifi = netinfo_kind == NETINFO_WIFI;
+	// of-netplan's notes about this interface ("Wi-Fi: ...", "Ethernet: ..."), and those
+	// about neither (network.yaml's)
+	char notes[sizeof ni.notes] = "", *save = NULL;
+	for (char *l = strtok_r(ni.notes, "\n", &save); l; l = strtok_r(NULL, "\n", &save)) {
+		bool w = !strncmp(l, "Wi-Fi:", 6), e = !strncmp(l, "Ethernet:", 9);
+		if ((w || e) && w != wifi) continue;
+		size_t at = strlen(notes);
+		snprintf(notes + at, sizeof notes - at, "%s%s", at ? "\n" : "", l);
+	}
+	if (notes[0]) {
+		lv_obj_t *l = lv_label_create(p);
+		lv_label_set_text(l, notes);
+		lv_obj_set_width(l, LV_PCT(100));
+		lv_obj_set_style_text_color(l, lv_color_hex(C_WARN), 0);
+	}
+	section(p, wifi ? "WI-FI" : "ETHERNET");
+	netif_rows(p, wifi ? &ni.wifi : &ni.eth, wifi ? "wifi.txt" : "ethernet.txt");
+	section(p, "DNS");
+	if (!ni.n_dns) info_row(p, "Servers", "None");
+	for (int i = 0; i < ni.n_dns; i++) info_row(p, i ? "" : "Servers", ni.dns[i]);
+	section(p, "THIS OPENFRAME");
+	info_row(p, "Name", ni.host[0] ? ni.host : "None");
+}
+
+static void netinfo_open(lv_event_t *e) {
+	netinfo_kind = (int)(intptr_t)lv_event_get_user_data(e);
+	memset(netinfo_shown, 0, sizeof netinfo_shown);
+	netinfo_show();
+	show_page(page_netinfo);
+	lv_obj_scroll_to_y(page_netinfo, 0, LV_ANIM_OFF);
+}
+
+static void netinfo_back(lv_event_t *e) {
+	show_page(page_settings);
+	refresh_settings(NULL);
+}
+
+static void build_netinfo(lv_obj_t *scr) {
+	page_netinfo = list_page(scr);
+	lv_obj_t *br = button_row(page_netinfo);
+	lv_obj_set_style_translate_x(br, BACK_X - CONTENT_X, 0); // the back button's place (BACK_X)
+	lv_obj_set_width(button(br, LV_SYMBOL_LEFT "  Settings", BUTTON_MAIN, netinfo_back, NULL), BACK_W);
+	netinfo_body = lv_obj_create(page_netinfo);
+	lv_obj_remove_style_all(netinfo_body);
+	lv_obj_set_size(netinfo_body, LV_PCT(100), LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(netinfo_body, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_style_pad_row(netinfo_body, 8, 0);
+	lv_obj_remove_flag(netinfo_body, LV_OBJ_FLAG_SCROLLABLE);
+}
+
 static void ssh_status_done(char *reply, void *data) {
 	const char *st = helper_reply_status(reply);
 	if (!ssh_status_label) return;
@@ -2211,10 +2364,10 @@ static void ssh_status_done(char *reply, void *data) {
 	else if (keys) snprintf(t, sizeof t, "By key only (no password)");
 	else snprintf(t, sizeof t, "Off: set a password to log in");
 	set_text(ssh_status_label, t);
-	lv_obj_set_style_text_color(ssh_status_label, lv_color_hex(!strcmp(pw, "shared") ? 0xf2b33d : C_TEXT), 0);
+	lv_obj_set_style_text_color(ssh_status_label, lv_color_hex(!strcmp(pw, "shared") ? C_WARN : C_TEXT), 0);
 	struct sprite_net n;
 	sysinfo_net(&n);
-	const char *ip = n.eth_ip[0] ? n.eth_ip : n.wifi_ip;
+	const char *ip = sprite_net_best_ip(&n); // Ethernet's, with both
 	snprintf(t, sizeof t, "%s%s", ip[0] ? "ssh of@" : "", ip);
 	set_text(ssh_detail_label, strcmp(pw, "none") || keys ? t : "");
 }
@@ -2338,6 +2491,11 @@ static void build_settings(lv_obj_t *scr) {
 
 	// Network: Wi-Fi (on units with a card) and remote access
 	lv_obj_t *pn = settings_panel_new(TAB_NETWORK);
+	net_notes_label = lv_label_create(pn);
+	lv_label_set_text(net_notes_label, "");
+	lv_obj_set_width(net_notes_label, LV_PCT(100));
+	lv_obj_set_style_text_color(net_notes_label, lv_color_hex(C_WARN), 0);
+	lv_obj_add_flag(net_notes_label, LV_OBJ_FLAG_HIDDEN);
 	struct sprite_net net;
 	sysinfo_net(&net);
 	if (net.wifi_present) {
@@ -2358,6 +2516,7 @@ static void build_settings(lv_obj_t *scr) {
 		wifi_detail_label = lv_label_create(r);
 		lv_label_set_text(wifi_detail_label, "");
 		lv_obj_set_style_text_color(wifi_detail_label, lv_color_hex(C_DIM), 0);
+		net_row_pressable(r, NETINFO_WIFI);
 		lv_obj_t *br = button_row(pn);
 		button(br, LV_SYMBOL_WIFI "  Choose network", BUTTON_MAIN, wifi_choose_clicked, NULL);
 		wifi_forget_btn = button(br, "Forget", BUTTON_OTHER, wifi_forget_ask, NULL);
@@ -2381,6 +2540,7 @@ static void build_settings(lv_obj_t *scr) {
 		eth_detail_label = lv_label_create(er);
 		lv_label_set_text(eth_detail_label, "");
 		lv_obj_set_style_text_color(eth_detail_label, lv_color_hex(C_DIM), 0);
+		net_row_pressable(er, NETINFO_ETH);
 	}
 	// Logging in over SSH as "of": images give it no password (every unit used to have the
 	// same one), so this is where an owner sets one, through the helper.
@@ -2455,6 +2615,7 @@ static void build_settings(lv_obj_t *scr) {
 
 	// the first heading of each panel sits at its top, not a heading's space below it
 	for (int t = 0; t < N_TABS; t++) lv_obj_set_style_margin_top(lv_obj_get_child(tab_panel[t], 0), 0, 0);
+	lv_obj_set_style_margin_top(lv_obj_get_child(pn, 1), 0, 0); // under the notes, while there are none
 	settings_show_tab(TAB_NETWORK);
 	lv_timer_create(refresh_settings, 3000, NULL);
 	lv_obj_add_flag(page_settings, LV_OBJ_FLAG_HIDDEN);
@@ -2504,5 +2665,6 @@ void shell_init(void *pixels) {
 	build_home(scr);
 	build_settings(scr);
 	build_wifi(scr);
+	build_netinfo(scr);
 	build_entry(scr);
 }

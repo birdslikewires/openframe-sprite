@@ -7,8 +7,10 @@
 #include <dirent.h>
 #include <ifaddrs.h>
 #include <linux/genetlink.h>
+#include <linux/if_addr.h>
 #include <linux/netlink.h>
 #include <linux/nl80211.h>
+#include <linux/rtnetlink.h>
 #include <net/if.h>
 #include <signal.h>
 #include <stdio.h>
@@ -190,6 +192,109 @@ void sysinfo_net(struct sprite_net *n) {
 		freeifaddrs(ifa);
 	}
 	if (n->wifi_up) n->wifi_dbm = wifi_signal("wlan0");
+}
+
+// Each interface's IPv4 address (the first with global scope), and whether it's permanent:
+// networkd gives a fixed address (ethernet.txt, wifi.txt) no lifetime, so the kernel marks it
+// permanent, and one from DHCP the lease's.
+static void addresses(struct sprite_netinfo *o) {
+	int fd = socket(AF_NETLINK, SOCK_RAW | SOCK_CLOEXEC, NETLINK_ROUTE);
+	if (fd < 0) return;
+	struct timeval tv = { 0, 300000 };
+	setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+	struct { struct nlmsghdr h; struct ifaddrmsg a; } req = {
+		.h = { .nlmsg_len = sizeof req, .nlmsg_type = RTM_GETADDR, .nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP, .nlmsg_seq = 1 },
+		.a = { .ifa_family = AF_INET },
+	};
+	unsigned eth = if_nametoindex("eth0"), wifi = if_nametoindex("wlan0");
+	if (send(fd, &req, sizeof req, 0) < 0) { close(fd); return; }
+	char buf[8192] __attribute__((aligned(4)));
+	for (bool done = false; !done;) {
+		ssize_t len = recv(fd, buf, sizeof buf, 0);
+		if (len <= 0) break;
+		for (struct nlmsghdr *h = (void *)buf; NLMSG_OK(h, (size_t)len); h = NLMSG_NEXT(h, len)) {
+			if (h->nlmsg_type == NLMSG_DONE || h->nlmsg_type == NLMSG_ERROR) { done = true; break; }
+			if (h->nlmsg_type != RTM_NEWADDR) continue;
+			struct ifaddrmsg *a = NLMSG_DATA(h);
+			struct sprite_netif *nif = a->ifa_index == eth ? &o->eth : a->ifa_index == wifi ? &o->wifi : NULL;
+			if (!nif || nif->ip[0] || a->ifa_scope != RT_SCOPE_UNIVERSE) continue;
+			uint32_t flags = a->ifa_flags;
+			struct in_addr addr = { 0 };
+			bool have = false;
+			int rlen = IFA_PAYLOAD(h);
+			for (struct rtattr *r = IFA_RTA(a); RTA_OK(r, rlen); r = RTA_NEXT(r, rlen)) {
+				if (r->rta_type == IFA_FLAGS) memcpy(&flags, RTA_DATA(r), sizeof flags);
+				else if (r->rta_type == IFA_LOCAL) { memcpy(&addr, RTA_DATA(r), sizeof addr); have = true; }
+			}
+			if (!have) continue;
+			char ip[INET_ADDRSTRLEN];
+			inet_ntop(AF_INET, &addr, ip, sizeof ip);
+			snprintf(nif->ip, sizeof nif->ip, "%s/%u", ip, a->ifa_prefixlen);
+			nif->fixed = flags & IFA_F_PERMANENT;
+		}
+	}
+	close(fd);
+}
+
+// The default gateway through each interface (the lowest metric's), from the routing table.
+static void gateways(struct sprite_netinfo *o) {
+	FILE *f = fopen("/proc/net/route", "r");
+	if (!f) return;
+	char line[256], name[IFNAMSIZ];
+	unsigned dest, gw, flags, metric;
+	unsigned best_eth = ~0u, best_wifi = ~0u;
+	if (!fgets(line, sizeof line, f)) { fclose(f); return; } // the heading
+	while (fgets(line, sizeof line, f)) {
+		if (sscanf(line, "%15s %x %x %x %*d %*d %u", name, &dest, &gw, &flags, &metric) != 5) continue;
+		if (dest || !(flags & 0x2)) continue; // RTF_GATEWAY on the default route
+		struct sprite_netif *nif = !strcmp(name, "eth0") ? &o->eth : !strcmp(name, "wlan0") ? &o->wifi : NULL;
+		unsigned *best = nif == &o->eth ? &best_eth : &best_wifi;
+		if (!nif || metric >= *best) continue;
+		*best = metric;
+		struct in_addr a = { gw }; // as the kernel holds it, network order
+		inet_ntop(AF_INET, &a, nif->gateway, sizeof nif->gateway);
+	}
+	fclose(f);
+}
+
+// The DNS servers in use: systemd-resolved's list of them (its own resolv.conf), IPv4 first.
+static void dns_servers(struct sprite_netinfo *o) {
+	FILE *f = fopen("/run/systemd/resolve/resolv.conf", "r");
+	if (!f) f = fopen("/etc/resolv.conf", "r");
+	if (!f) return;
+	char line[160], all[8][46];
+	int n = 0;
+	while (n < 8 && fgets(line, sizeof line, f))
+		if (sscanf(line, "nameserver %45s", all[n]) == 1 && strcmp(all[n], "127.0.0.53")) n++;
+	fclose(f);
+	for (int pass = 0; pass < 2; pass++)
+		for (int i = 0; i < n && o->n_dns < NET_DNS_MAX; i++)
+			if (!strchr(all[i], ':') == !pass)
+				snprintf(o->dns[o->n_dns++], sizeof o->dns[0], "%.45s", all[i]);
+}
+
+void sysinfo_netinfo(struct sprite_netinfo *o) {
+	memset(o, 0, sizeof *o);
+	gethostname(o->host, sizeof o->host - 1);
+	addresses(o);
+	gateways(o);
+	dns_servers(o);
+	const char *names[] = { "eth0", "wlan0" };
+	struct sprite_netif *ifs[] = { &o->eth, &o->wifi };
+	for (int i = 0; i < 2; i++) {
+		char path[64];
+		snprintf(path, sizeof path, "/sys/class/net/%s/address", names[i]);
+		FILE *f = fopen(path, "r");
+		if (f) { if (fscanf(f, "%17s", ifs[i]->mac) != 1) ifs[i]->mac[0] = 0; fclose(f); }
+	}
+	// What of-netplan couldn't use in the settings files (it used to be on the login prompt).
+	FILE *f = fopen("/var/lib/of-netplan/issue.note", "r");
+	if (f) {
+		size_t n = fread(o->notes, 1, sizeof o->notes - 1, f);
+		o->notes[n] = 0;
+		fclose(f);
+		while (n && (o->notes[n - 1] == '\n' || o->notes[n - 1] == ' ')) o->notes[--n] = 0;
+	}
 }
 
 // The first backlight's sysfs directory. (Read directly: a child process here would end in a

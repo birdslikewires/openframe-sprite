@@ -38,7 +38,10 @@ The ground rules for how it looks, feels and performs are in [docs/design.md](do
   file (see Settings below).
 - **Settings,** in tabs down the left: Network (Wi-Fi: choosing a network, typing its
   password on sprite's own keyboard, and forgetting it; Ethernet: whether a cable's in, its
-  speed and address; and remote access: the password for
+  speed and address; tapping either opens its details, read-only: its address and whether
+  the router or a settings file set it, the gateway, MAC address, the DNS servers and the
+  unit's name; of-netplan's complaints about the settings files show in amber at the top of
+  the tab; and remote access: the password for
   logging in as `of` over SSH, which images leave unset, with a warning while a unit still
   has the old shared one), Display (brightness, through `of-backlight`, including automatic
   brightness; and touch calibration), Time (the clock's format), About (the system) and
