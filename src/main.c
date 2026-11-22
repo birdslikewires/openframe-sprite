@@ -1034,11 +1034,11 @@ int main(int argc, char **argv) {
 	apps_set_env(socket, S.xwayland ? S.xwayland->display_name : NULL);
 
 	// LVGL: the shell renders into the buffer above, on this thread, from the event loop.
+	settings_load(); // the shell reads some (the clock's format) as it's built
+	load_calibration();
 	shell_init(S.shellbuf.pixels);
 	S.lv_timer = wl_event_loop_add_timer(S.loop, lv_timer_cb, NULL);
 	wl_event_source_timer_update(S.lv_timer, 1);
-	settings_load();
-	load_calibration();
 	apps_load(apps_dir);
 	shell_apps_changed();
 	S.hold_timer = wl_event_loop_add_timer(S.loop, hold_timeout, NULL);

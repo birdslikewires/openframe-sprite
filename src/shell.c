@@ -22,6 +22,7 @@
 #define CONTENT_X 36
 #define CONTENT_TOP 20
 #define NET_ICON 20                                         // the network icons in the bar
+#define GEAR_W 48                                           // the Settings gear's touch area
 // The home grid: 6 columns by 3 rows of apps, as OpenPeak's own home screen had. Each app has a
 // cell (the whole cell takes the touch) with an icon and a label of up to two lines below it.
 #define GRID_COLS 6
@@ -39,8 +40,8 @@
 _Static_assert(GRID_PAD_X + (TILE_W - ICON_SIZE) / 2 == CONTENT_X, "the grid's first icon is at CONTENT_X");
 _Static_assert(GRID_PAD_TOP + ICON_TOP == CONTENT_TOP, "the grid's first icon is at CONTENT_TOP");
 
-#define C_BG 0x0e1217
-#define C_BAR 0x070a0d
+#define C_BG 0x131920
+#define C_BAR 0x050709
 #define C_TEXT 0xe8edf2
 #define C_DIM 0x8b97a3
 #define C_ACCENT 0x3d9be9
@@ -62,9 +63,18 @@ static int cur_page, n_pages;
 #define PAGE_TURN_PX 60
 #define PAGE_FLICK_SPEED 0.4       // px/ms
 #define PAGE_SLIDE_MS 180
-static enum { DRAG_NONE, DRAG_MAYBE, DRAG_PAGING } drag;
+// Scrolling (Settings, and any screen taller than the display) works the same way: the content
+// follows the finger, a third as far past either end, carries on through the release hold,
+// glides on after a flick (as far as SCROLL_GLIDE_MS at the flick's speed, easing out), and
+// springs back from past an end in PAGE_SLIDE_MS.
+#define SCROLL_GLIDE_MS 300
+#define SCROLL_GLIDE_MIN_SPEED 0.15  // px/ms
+static enum { DRAG_NONE, DRAG_MAYBE, DRAG_PAGING, DRAG_SCROLL } drag;
 static int drag_x0, drag_y0;
-static void pager_input(int x, int y, bool pressed, bool was_pressed);
+static bool drag_can_page;           // the touch began where a sideways drag turns pages
+static lv_obj_t *drag_scroll;        // ... or where an up/down drag scrolls this
+static int scroll_y0, scroll_max;
+static void drag_input(int x, int y, bool pressed, bool was_pressed);
 static lv_obj_t *bl_slider, *bl_auto, *about_label;
 static bool visible = true, rebuild_pending;
 static struct sprite_app *opening;
@@ -143,8 +153,9 @@ void shell_pointer(int x, int y, bool pressed) {
 	x = x < 0 ? 0 : x >= SPRITE_W ? SPRITE_W - 1 : x;
 	y = y < 0 ? 0 : y >= SPRITE_H ? SPRITE_H - 1 : y;
 	double now = now_ms();
-	// While paging, the frames move the strip, from interpolated positions (shell_frame)
-	if (!(drag == DRAG_PAGING && pressed && ptr_pressed)) pager_input(x, y, pressed, ptr_pressed);
+	// While dragging, the frames move things, from interpolated positions (shell_frame)
+	bool dragging = (drag == DRAG_PAGING || drag == DRAG_SCROLL) && pressed && ptr_pressed;
+	if (!dragging) drag_input(x, y, pressed, ptr_pressed);
 	if (pressed && ptr_pressed) { // the finger moving: used by the next frames (shell_frame)
 		smp[0] = smp[1];
 		smp[1].x = x; smp[1].y = y; smp[1].t = now;
@@ -171,14 +182,15 @@ void shell_frame(void) {
 	if (ptr_pressed && nsmp == 2 && smp[1].t > smp[0].t) {
 		double k = (now_ms() - INTERP_DELAY_MS - smp[0].t) / (smp[1].t - smp[0].t);
 		if (k < 0) k = 0;
-		// Page drags carry on at the finger's last speed past its last report, for at most
+		// Our drags carry on at the finger's last speed past its last report, for at most
 		// SPRITE_DEBOUNCE_MS: a lifting finger's release is held that long (it may be a
 		// contact bounce), and the strip shouldn't stop dead while it waits.
-		double kmax = drag == DRAG_PAGING ? 1 + SPRITE_DEBOUNCE_MS / (smp[1].t - smp[0].t) : 1;
+		bool ours = drag == DRAG_PAGING || drag == DRAG_SCROLL;
+		double kmax = ours ? 1 + SPRITE_DEBOUNCE_MS / (smp[1].t - smp[0].t) : 1;
 		if (k > kmax) k = kmax;
 		ptr_x = (int)(smp[0].x + (smp[1].x - smp[0].x) * k + 0.5);
 		ptr_y = (int)(smp[0].y + (smp[1].y - smp[0].y) * k + 0.5);
-		if (drag == DRAG_PAGING) pager_input(ptr_x, ptr_y, true, true); // the strip, smoothly
+		if (ours) drag_input(ptr_x, ptr_y, true, true); // the strip or the screen, smoothly
 		else lv_indev_read(indev);
 		if (k < kmax) sprite_request_frame(); // still catching up, or carrying on
 	}
@@ -226,15 +238,50 @@ static const char *icon_text(const struct sprite_app *a, char *buf, size_t len) 
 
 /* ---- status bar ---- */
 
+// The clock: 24-hour or 12-hour, with or without seconds (clock= and seconds= in the settings).
+// Its label has a fixed width, that of the widest time the format can show, so nothing after it
+// in the bar moves as the time changes. It's updated just after each second begins, and only
+// redrawn when what it shows changes.
+static bool clock_24 = true, clock_secs = false;
+static lv_timer_t *clock_timer;
+
+static int text_w(const char *txt, const lv_font_t *f) {
+	lv_point_t p;
+	lv_text_get_size(&p, txt, f, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+	return p.x;
+}
+
+static void clock_layout(void) {
+	const lv_font_t *f = &lv_font_montserrat_20;
+	char widest = '0', sample[32];
+	for (char c = '0'; c <= '9'; c++) {
+		char a[2] = { c, 0 }, b[2] = { widest, 0 };
+		if (text_w(a, f) > text_w(b, f)) widest = c;
+	}
+	snprintf(sample, sizeof sample, clock_secs ? "%c%c:%c%c:%c%c" : "%c%c:%c%c", widest, widest, widest, widest,
+		 widest, widest);
+	int w = text_w(sample, f);
+	if (!clock_24) w += text_w(" am", f) > text_w(" pm", f) ? text_w(" am", f) : text_w(" pm", f);
+	lv_obj_set_width(bar_clock, w);
+}
+
 static void update_clock(lv_timer_t *t) {
-	time_t now = time(NULL);
+	struct timespec ts;
+	clock_gettime(CLOCK_REALTIME, &ts);
 	struct tm tm;
-	localtime_r(&now, &tm);
+	localtime_r(&ts.tv_sec, &tm);
 	char s[32];
-	strftime(s, sizeof s, "%H:%M", &tm);
-	lv_label_set_text(bar_clock, s);
+	strftime(s, sizeof s, clock_24 ? (clock_secs ? "%H:%M:%S" : "%H:%M") : (clock_secs ? "%-I:%M:%S %P" : "%-I:%M %P"), &tm);
+	if (strcmp(s, lv_label_get_text(bar_clock))) lv_label_set_text(bar_clock, s);
 	strftime(s, sizeof s, "%a %e %b", &tm);
-	lv_label_set_text(bar_date, s);
+	if (strcmp(s, lv_label_get_text(bar_date))) lv_label_set_text(bar_date, s);
+	// next: just after the next second begins
+	if (clock_timer) lv_timer_set_period(clock_timer, 1000 - ts.tv_nsec / 1000000 + 5);
+}
+
+static void clock_settings_changed(void) {
+	clock_layout();
+	update_clock(NULL);
 }
 
 /* ---- network icons: drawn once, anti-aliased, as alpha masks the text colour fills ---- */
@@ -338,22 +385,31 @@ static void build_bar(lv_obj_t *scr) {
 	lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
 	lv_obj_remove_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
 
-	// Everything in the bar is centred on its midline. Left: the time and date, starting at
-	// CONTENT_X like the content below.
+	// Everything in the bar is centred on its midline. Left: the time and date, as far in from
+	// the left edge as the gear's glyph is from the right.
+	int inset = (GEAR_W - text_w(LV_SYMBOL_SETTINGS, &lv_font_montserrat_20)) / 2;
 	lv_obj_t *left = lv_obj_create(bar);
 	lv_obj_remove_style_all(left);
 	lv_obj_set_size(left, LV_SIZE_CONTENT, BAR_H);
 	lv_obj_set_flex_flow(left, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(left, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_style_pad_column(left, 10, 0);
-	lv_obj_align(left, LV_ALIGN_LEFT_MID, CONTENT_X, 0);
+	lv_obj_align(left, LV_ALIGN_LEFT_MID, inset, 0);
 	lv_obj_remove_flag(left, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 	bar_clock = lv_label_create(left);
 	lv_obj_set_style_text_font(bar_clock, &lv_font_montserrat_20, 0);
 	lv_obj_set_style_text_color(bar_clock, lv_color_hex(C_TEXT), 0);
+	lv_label_set_long_mode(bar_clock, LV_LABEL_LONG_CLIP);
+	lv_label_set_text(bar_clock, "");
 	bar_date = lv_label_create(left);
 	lv_obj_set_style_text_font(bar_date, &lv_font_montserrat_14, 0);
 	lv_obj_set_style_text_color(bar_date, lv_color_hex(C_DIM), 0);
+	lv_label_set_text(bar_date, "");
+	const char *v = settings_get("clock");
+	clock_24 = !v || strcmp(v, "12h");
+	v = settings_get("seconds");
+	clock_secs = v && !strcmp(v, "yes");
+	clock_layout();
 
 	bar_title = lv_label_create(bar);
 	lv_obj_set_style_text_font(bar_title, &lv_font_montserrat_14, 0);
@@ -377,13 +433,11 @@ static void build_bar(lv_obj_t *scr) {
 	lv_obj_add_flag(dots, LV_OBJ_FLAG_CLICKABLE);
 	lv_obj_add_event_cb(dots, dots_clicked, LV_EVENT_CLICKED, NULL);
 
-	// Right: Settings, a gear hard against the top and right edges, the bar's height to touch.
-	// The box runs UI_RADIUS past the top and right of the screen, so those rounded corners are
-	// cut off: its pressed highlight is a tab flush with both edges, rounded only inside.
+	// Right: Settings, a gear hard against the top and right edges, the bar's height to touch
 	gear = lv_obj_create(bar);
 	lv_obj_remove_style_all(gear);
-	lv_obj_set_size(gear, 48 + UI_RADIUS, BAR_H + UI_RADIUS);
-	lv_obj_align(gear, LV_ALIGN_TOP_RIGHT, UI_RADIUS, -UI_RADIUS);
+	lv_obj_set_size(gear, GEAR_W, BAR_H);
+	lv_obj_align(gear, LV_ALIGN_TOP_RIGHT, 0, 0);
 	lv_obj_add_flag(gear, LV_OBJ_FLAG_CLICKABLE);
 	lv_obj_set_style_bg_color(gear, lv_color_white(), LV_STATE_PRESSED);
 	lv_obj_set_style_bg_opa(gear, LV_OPA_20, LV_STATE_PRESSED);
@@ -392,7 +446,7 @@ static void build_bar(lv_obj_t *scr) {
 	lv_label_set_text(gl, LV_SYMBOL_SETTINGS);
 	lv_obj_set_style_text_font(gl, &lv_font_montserrat_20, 0);
 	lv_obj_set_style_text_color(gl, lv_color_hex(C_TEXT), 0);
-	lv_obj_align(gl, LV_ALIGN_CENTER, -UI_RADIUS / 2, UI_RADIUS / 2); // the centre of the part on screen
+	lv_obj_center(gl);
 	lv_obj_add_event_cb(gear, gear_clicked, LV_EVENT_CLICKED, NULL);
 
 	// ... and to its left, the network icons
@@ -403,7 +457,7 @@ static void build_bar(lv_obj_t *scr) {
 	lv_obj_set_flex_flow(net, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(net, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_style_pad_column(net, 12, 0);
-	lv_obj_align(net, LV_ALIGN_RIGHT_MID, -56, 0);
+	lv_obj_align(net, LV_ALIGN_RIGHT_MID, -(GEAR_W + 8), 0);
 	lv_obj_remove_flag(net, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 	net_eth = lv_image_create(net);
 	lv_image_set_src(net_eth, &eth_img);
@@ -415,9 +469,9 @@ static void build_bar(lv_obj_t *scr) {
 		lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
 	}
 
-	update_clock(NULL);
 	update_net(NULL);
-	lv_timer_create(update_clock, 1000, NULL);
+	clock_timer = lv_timer_create(update_clock, 1000, NULL);
+	update_clock(NULL);
 	lv_timer_create(update_net, 5000, NULL);
 }
 
@@ -703,36 +757,91 @@ static void dots_clicked(lv_event_t *e) {
 }
 
 // Called with each position the shell is given, before LVGL sees it.
-static void pager_input(int x, int y, bool pressed, bool was_pressed) {
-	bool home = pager && !lv_obj_has_flag(page_home, LV_OBJ_FLAG_HIDDEN) && !sheet && !cal && n_pages > 1;
+static void scroll_exec(void *obj, int32_t y) { lv_obj_scroll_to_y(obj, y, LV_ANIM_OFF); }
+
+static void scroll_glide(lv_obj_t *obj, int from, int to, uint32_t ms) {
+	lv_anim_delete(obj, scroll_exec);
+	if (from == to) return;
+	lv_anim_t a;
+	lv_anim_init(&a);
+	lv_anim_set_var(&a, obj);
+	lv_anim_set_exec_cb(&a, scroll_exec);
+	lv_anim_set_values(&a, from, to);
+	lv_anim_set_duration(&a, ms);
+	lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+	lv_anim_start(&a);
+}
+
+// The scrolling screen showing, if any: sprite does its scrolling itself (see drag_input).
+static lv_obj_t *scrolling_screen(void) {
+	if (page_settings && !lv_obj_has_flag(page_settings, LV_OBJ_FLAG_HIDDEN)) return page_settings;
+	return NULL;
+}
+
+// Called with each position the shell is given, before LVGL sees it: page turning and
+// scrolling, the same way everywhere.
+static void drag_input(int x, int y, bool pressed, bool was_pressed) {
+	bool free = !sheet && !cal && !lv_obj_get_child_count(lv_layer_top());
 	if (pressed && !was_pressed) { // a touch begins
-		drag = home && y >= BAR_H ? DRAG_MAYBE : DRAG_NONE;
+		drag_can_page = free && pager && !lv_obj_has_flag(page_home, LV_OBJ_FLAG_HIDDEN) && n_pages > 1;
+		drag_scroll = free ? scrolling_screen() : NULL;
+		drag = (drag_can_page || drag_scroll) && y >= BAR_H ? DRAG_MAYBE : DRAG_NONE;
 		drag_x0 = x;
 		drag_y0 = y;
+		if (drag_scroll) lv_anim_delete(drag_scroll, scroll_exec); // a touch stops a glide
 		return;
 	}
 	if (drag == DRAG_NONE) return;
-	int dx = x - drag_x0;
+	int dx = x - drag_x0, dy = y - drag_y0;
 	if (pressed) {
 		if (drag == DRAG_MAYBE) {
-			if (abs(dx) < PAGE_DRAG_START || abs(dx) < abs(y - drag_y0)) return;
-			drag = DRAG_PAGING; // from here on it's the pager's: no tap or long press on an app
-			lv_anim_delete(strip, slide_exec);
+			if (drag_can_page && abs(dx) >= PAGE_DRAG_START && abs(dx) >= abs(dy)) {
+				drag = DRAG_PAGING;
+				lv_anim_delete(strip, slide_exec);
+			} else if (drag_scroll && abs(dy) >= PAGE_DRAG_START && abs(dy) > abs(dx)) {
+				drag = DRAG_SCROLL;
+				scroll_y0 = lv_obj_get_scroll_y(drag_scroll);
+				scroll_max = scroll_y0 + lv_obj_get_scroll_bottom(drag_scroll);
+				if (scroll_max < 0) scroll_max = 0;
+			} else {
+				return;
+			}
+			// from here on the drag is ours: no tap, long press or LVGL scrolling
 			lv_indev_reset(indev, NULL);
 			lv_indev_wait_release(indev);
 		}
-		// past the first or last page, the strip moves a third as far as the finger
-		bool edge = (cur_page == 0 && dx > 0) || (cur_page == n_pages - 1 && dx < 0);
-		lv_obj_set_x(strip, -cur_page * SPRITE_W + (edge ? dx / 3 : dx));
+		if (drag == DRAG_PAGING) {
+			// past the first or last page, the strip moves a third as far as the finger
+			bool edge = (cur_page == 0 && dx > 0) || (cur_page == n_pages - 1 && dx < 0);
+			lv_obj_set_x(strip, -cur_page * SPRITE_W + (edge ? dx / 3 : dx));
+		} else {
+			int t = scroll_y0 - dy;
+			if (t < 0) t /= 3;
+			else if (t > scroll_max) t = scroll_max + (t - scroll_max) / 3;
+			lv_obj_scroll_to_y(drag_scroll, t, LV_ANIM_OFF);
+		}
 		return;
 	}
+	double vx = 0, vy = 0; // px/ms over the last two reports
+	if (nsmp == 2 && smp[1].t > smp[0].t) {
+		vx = (smp[1].x - smp[0].x) / (smp[1].t - smp[0].t);
+		vy = (smp[1].y - smp[0].y) / (smp[1].t - smp[0].t);
+	}
 	if (drag == DRAG_PAGING) { // released: turn the page, or settle back (from where the strip is)
-		double v = 0; // px/ms over the last two reports
-		if (nsmp == 2 && smp[1].t > smp[0].t) v = (smp[1].x - smp[0].x) / (smp[1].t - smp[0].t);
 		int p = cur_page;
-		if (dx <= -PAGE_TURN_PX || v <= -PAGE_FLICK_SPEED) p++;
-		else if (dx >= PAGE_TURN_PX || v >= PAGE_FLICK_SPEED) p--;
+		if (dx <= -PAGE_TURN_PX || vx <= -PAGE_FLICK_SPEED) p++;
+		else if (dx >= PAGE_TURN_PX || vx >= PAGE_FLICK_SPEED) p--;
 		go_to_page(p, true);
+	} else if (drag == DRAG_SCROLL) { // released: spring back from past an end, or glide on
+		int cur = lv_obj_get_scroll_y(drag_scroll);
+		if (cur < 0) scroll_glide(drag_scroll, cur, 0, PAGE_SLIDE_MS);
+		else if (cur > scroll_max) scroll_glide(drag_scroll, cur, scroll_max, PAGE_SLIDE_MS);
+		else if (fabs(vy) >= SCROLL_GLIDE_MIN_SPEED) {
+			int to = cur - (int)(vy * SCROLL_GLIDE_MS);
+			if (to < 0) to = 0;
+			if (to > scroll_max) to = scroll_max;
+			scroll_glide(drag_scroll, cur, to, 2 * SCROLL_GLIDE_MS);
+		}
 	}
 	drag = DRAG_NONE;
 }
@@ -808,7 +917,7 @@ static void build_home(lv_obj_t *scr) {
 	lv_obj_set_size(page_home, SPRITE_W, SPRITE_H - BAR_H);
 	lv_obj_set_pos(page_home, 0, BAR_H);
 
-	// The pages of the grid, side by side on a strip that the pager moves (see pager_input)
+	// The pages of the grid, side by side on a strip that the pager moves (see drag_input)
 	pager = lv_obj_create(page_home);
 	lv_obj_remove_style_all(pager);
 	lv_obj_set_size(pager, SPRITE_W, SPRITE_H - BAR_H);
@@ -1048,6 +1157,35 @@ static void cal_reset(lv_event_t *e) {
 	show_toast("Standard touch calibration", 3000);
 }
 
+static void clock24_changed(lv_event_t *e) {
+	clock_24 = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+	settings_set("clock", clock_24 ? "24h" : "12h");
+	clock_settings_changed();
+}
+
+static void seconds_changed(lv_event_t *e) {
+	clock_secs = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+	settings_set("seconds", clock_secs ? "yes" : "no");
+	clock_settings_changed();
+}
+
+// A row of Settings: text on the left, a switch on the right.
+static void switch_row(lv_obj_t *parent, const char *text, bool on, lv_event_cb_t cb) {
+	lv_obj_t *row = lv_obj_create(parent);
+	lv_obj_remove_style_all(row);
+	lv_obj_set_size(row, LV_PCT(100), 48);
+	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_t *l = lv_label_create(row);
+	lv_label_set_text(l, text);
+	lv_obj_set_style_text_color(l, lv_color_hex(C_TEXT), 0);
+	lv_obj_t *sw = lv_switch_create(row);
+	lv_obj_set_size(sw, 72, 38);
+	if (on) lv_obj_add_state(sw, LV_STATE_CHECKED);
+	lv_obj_add_event_cb(sw, cb, LV_EVENT_VALUE_CHANGED, NULL);
+}
+
 static void build_settings(lv_obj_t *scr) {
 	page_settings = lv_obj_create(scr);
 	lv_obj_remove_style_all(page_settings);
@@ -1058,6 +1196,7 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_pad_ver(page_settings, CONTENT_TOP, 0);
 	lv_obj_set_style_pad_row(page_settings, 12, 0);
 	lv_obj_set_scroll_dir(page_settings, LV_DIR_VER);
+	lv_obj_set_scrollbar_mode(page_settings, LV_SCROLLBAR_MODE_OFF);
 
 	lv_obj_t *back = lv_button_create(page_settings);
 	lv_obj_set_size(back, 160, 52);
@@ -1086,6 +1225,10 @@ static void build_settings(lv_obj_t *scr) {
 	bl_auto = lv_switch_create(row);
 	lv_obj_set_size(bl_auto, 72, 38);
 	lv_obj_add_event_cb(bl_auto, bl_auto_changed, LV_EVENT_VALUE_CHANGED, NULL);
+
+	section(page_settings, "CLOCK");
+	switch_row(page_settings, "24-hour clock", clock_24, clock24_changed);
+	switch_row(page_settings, "Show seconds", clock_secs, seconds_changed);
 
 	section(page_settings, "TOUCH");
 	lv_obj_t *trow = lv_obj_create(page_settings);
@@ -1172,6 +1315,7 @@ void shell_init(void *pixels) {
 	lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
 	lv_indev_set_read_cb(indev, indev_read);
 	lv_indev_set_mode(indev, LV_INDEV_MODE_EVENT); // read when the compositor has input, not on a timer
+	lv_indev_set_scroll_limit(indev, 24); // above PAGE_DRAG_START: sprite's drags take over first
 
 	lv_obj_t *scr = lv_screen_active();
 	lv_obj_set_style_bg_color(scr, lv_color_hex(C_BG), 0);

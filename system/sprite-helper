@@ -8,7 +8,8 @@
 ##  exits. Requests:
 ##
 ##    set <key> <value>     set a setting in settings/sprite.txt (an empty value clears it):
-##                            startup (an app name) or calibration (six numbers)
+##                            startup (an app name), calibration (six numbers), clock
+##                            (24h or 12h) or seconds (yes or no)
 ##    reboot                restart the OpenFrame
 ##    poweroff              switch it off
 
@@ -28,6 +29,8 @@ case "$CMD" in
 		case "$KEY" in
 			startup) RE='^[A-Za-z0-9 ._()+-]{0,63}$' ;;
 			calibration) RE='^(-?[0-9]+(\.[0-9]+)?(,-?[0-9]+(\.[0-9]+)?){5})?$' ;;
+			clock) RE='^(24h|12h)?$' ;;
+			seconds) RE='^(yes|no)?$' ;;
 			*) answer "error: unknown setting" ;;
 		esac
 		[[ "$VAL" =~ $RE ]] || answer "error: bad value for $KEY"

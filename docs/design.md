@@ -32,22 +32,27 @@ couldn't redraw a page at 60 fps.
 | Apps | the whole 800×480, full screen, one at a time |
 
 **Every screen starts its content at the same point:** 36 px from the left, 20 px below the
-bar, at (36, 60). The home grid's first icon and Settings' first control both start there, and
-the clock in the bar lines up with that left edge. The right margin matches: 36 px. Screens
-that scroll keep a 20 px margin at the bottom of the content too.
+bar, at (36, 60). The home grid's first icon and Settings' first control both start there. The
+right margin matches, 36 px, and screens that scroll keep 20 px below their content too.
 
 ## 3. Status bar
 
-Everything in the bar is centred on its midline. From left to right:
-- **the time** (20 px), then **the date** (14 px, dimmed), 10 px apart, from x = 36;
+Everything in the bar is centred on its midline. Its ends are symmetrical: the time starts as
+far from the left edge as the gear's glyph ends from the right (about 14 px, worked out from the
+glyph). From left to right:
+- **the time** (20 px), then **the date** (14 px, dimmed), 10 px apart. The time is 24-hour by
+  default, or 12-hour, and without seconds by default (`clock=`, `seconds=` in the settings
+  file, and two switches in Settings). Its label is as wide as the widest time its format can
+  show, so nothing after it moves as the time changes. It redraws only when what it shows
+  changes, just after each second begins;
 - **the page dots** in the centre, only when there's more than one page. In Settings, the
   title goes there instead;
 - **network icons** (20 px), ending 8 px before the gear:
   - **ethernet** while a cable is connected, faint until it has an address;
   - **Wi-Fi**, unless it's switched off (interface down, or radio blocked) or missing. It shows
     the signal as a dot and up to three arcs, all faint while it isn't connected;
-- **the Settings gear**, 48 px wide, hard against the top and right edges. Its pressed
-  highlight is a tab flush with both edges, rounded only on the inside corner.
+- **the Settings gear**: a 48 px-wide box, the bar's height, hard against the top and right
+  edges, with the 18 px radius on all four corners like any other box.
 
 The bar is the same on every sprite screen. The **page dots are one touch target**, as tall as
 the bar: each tap turns to the next page, wrapping round from the last to the first. They're
@@ -80,20 +85,30 @@ later page.
   250 ms) and ease out. Nothing waits for an animation to finish.
 - **Drags are smoothed:** the touchscreen reports 36 times a second, so each frame gets a
   position interpolated between the last two reports, one report (28 ms) behind.
+- **Scrolling behaves the same as paging,** and sprite does it, not LVGL, so there's one swipe
+  behaviour everywhere:
+  - an up/down drag takes over after 12 px (LVGL's own scrolling waits for 24, so it never
+    starts first);
+  - the content follows the finger, a third as far past either end;
+  - a flick glides on as far as 300 ms at its speed would take it, easing out over 600 ms,
+    and stops at the ends;
+  - past an end, it springs back in 180 ms;
+  - a touch stops a glide.
+
+  No scrollbars.
 
 ## 6. The look: flat
 
 **One corner radius, 18 px, for every box:** icons, buttons, cards, banners, the message box and
 pressed highlights. Only circles and pills are rounder: dots, the home pill, switches and slider
-ends. A box flush with the screen's edges hangs its outer corners off-screen, so only its
-inside corners show rounded (see the gear). LVGL's buttons and message boxes get the radius
-from sprite's theme layer, so new ones can't drift from it.
+ends. LVGL's buttons and message boxes get the radius from sprite's theme layer, so new ones
+can't drift from it.
 
 
 | Role | Colour |
 |---|---|
-| Background | `#0e1217` |
-| Status bar | `#070a0d` |
+| Background | `#131920` |
+| Status bar | `#050709` (a step darker than the background, to set it apart) |
 | Text | `#e8edf2` |
 | Dimmed text | `#8b97a3` |
 | Accent (buttons, switches) | `#3d9be9` |
