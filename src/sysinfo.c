@@ -146,7 +146,6 @@ void sysinfo_run(const char *cmd) {
 }
 
 // sprite's root helper listens here (systemd socket activation, one connection per request).
-#define HELPER_SOCKET "/run/sprite-helper.sock"
 
 void sysinfo_helper(const char *line) {
 	pid_t pid = fork();

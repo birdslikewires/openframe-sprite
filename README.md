@@ -27,12 +27,14 @@ The ground rules for how it looks, feels and performs are in [docs/design.md](do
 - **Long press on a tile** opens a sheet with Open, Close (when the app is running) and
   **Open at startup**. Close asks the app's window to close, then sends SIGTERM after 2 s and
   SIGKILL after 4 s if it's still running.
-- **The startup app** (one at most, labelled "Startup" on its tile) opens when sprite starts,
+- **The startup app** (one at most, with a blue ring round its icon) opens when sprite starts,
   and reopens 2 s after it closes or crashes, unless it was closed from the sheet. After three
   exits within a minute it stops reopening and says so. It's `startup=` in the settings
   file (see Settings below).
-- **Settings:** brightness (through `of-backlight`, including automatic brightness),
-  information about the system, and Restart and Switch off.
+- **Settings:** Wi-Fi (choosing a network, typing its password on sprite's own keyboard,
+  and forgetting it), brightness (through `of-backlight`, including automatic brightness),
+  the clock's format, touch calibration, information about the system, and Restart and
+  Switch off.
 
 ## Apps
 
@@ -105,8 +107,9 @@ app.
 
 A few things need root, and go through `sprite-helper` (`system/`), which systemd starts
 for each connection to `/run/sprite-helper.sock` (group `of`). It takes one request and
-validates it: `set <key> <value>` for `startup` and `calibration` in the settings file,
-`reboot` and `poweroff`.
+validates it: `set <key> <value>` for `startup`, `calibration`, `clock` and `seconds` in the
+settings file, `reboot` and `poweroff`, and for Wi-Fi `wifi-scan`, `wifi-status`, `wifi-join`
+and `wifi-forget` (see Wi-Fi below). The header of `system/sprite-helper` describes each.
 
 It also expects the touchscreen calibration in `spike/touch/` to be installed.
 
@@ -131,12 +134,31 @@ makes `/boot` writable with `bootrw` just while it replaces the file with a sync
 `deploy.sh` puts a copy there if there isn't one. When a startup app is set, sprite keeps the
 screen black until the app's window appears, rather than showing the home screen first.
 
+### Wi-Fi
+
+Wi-Fi is set up the OpenFrame way: `name=` and `password=` in `settings/wifi.txt` on OF-BOOT,
+which `of-netplan` (openframe-linux) turns into a netplan configuration. sprite never handles
+the file itself. Choosing a network in Settings sends its name and password to the helper,
+which checks them (a name of 1-32 bytes, a password of 8-63 characters or 64 hex digits or
+none, no control characters), writes them into `wifi.txt` in double quotes (so spaces,
+quotes and backslashes are kept exactly), keeps any fixed address in the file, and starts
+`of-netplan.service` to apply them. Settings then follows the connection, and says if it
+doesn't work out (wpa_supplicant giving up on the network, most often for a wrong password,
+or nothing after 45 s). Forget empties both.
+
+Looking for networks uses `wpa_cli scan_results`: from netplan's wpa_supplicant when a
+network is set up, or else from one the helper starts just for the scan (about 3 s), which
+leaves the card down again afterwards. Networks needing WEP or an enterprise login are listed
+but can't be joined from Settings (`wifi.txt` can't describe them; a `network.yaml` can).
+sprite's fonts are ASCII only, so a network name with other characters shows gaps, though it
+can still be joined.
+
 ## Not done yet
 
 - Starting faster: 2.4 s pass between systemd starting sprite and sprite running, cold
 - Letting apps change the home pill while they run (a small Wayland protocol), and screen
   blanking
-- Wi-Fi setup, sound, time zone
+- Sound and time zone in Settings
 - The app store: an index repository of app manifests, added to by pull request, with apps
   as i386 `.deb` packages
 

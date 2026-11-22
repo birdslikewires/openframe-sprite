@@ -11,7 +11,7 @@ CFLAGS += -DSPRITE_VERSION=\"$(VERSION)\" -std=gnu11 -Wall -Wno-unused-parameter
 LDLIBS = $(shell pkg-config --libs $(PKGS)) -lpthread -lm
 LDFLAGS += -Wl,-rpath,$(PREFIX)/lib/i386-linux-gnu
 
-SRC = src/main.c src/shell.c src/apps.c src/sysinfo.c src/settings.c
+SRC = src/main.c src/shell.c src/apps.c src/sysinfo.c src/settings.c src/wifi.c
 LVGL_SRC = $(shell find third_party/lvgl/src -name '*.c' 2>/dev/null)
 OBJ = $(SRC:%.c=out/obj/%.o)
 LVGL_OBJ = $(LVGL_SRC:%.c=out/obj/%.o)

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-## sprite-helper v26.11.1 (21st November 2026)
+## sprite-helper v26.11.22 (22nd November 2026)
 ##  Does the few things sprite (which runs as the 'of' user) can't do itself. systemd
 ##  starts one of these per connection to /run/sprite-helper.sock, with the connection
 ##  as stdin and stdout. It reads one request, answers "ok" or "error: <reason>", and
@@ -12,11 +12,101 @@
 ##                            (24h or 12h) or seconds (yes or no)
 ##    reboot                restart the OpenFrame
 ##    poweroff              switch it off
+##    wifi-scan             look for Wi-Fi networks: wpa_cli's scan results, one network a
+##                            line (bssid, frequency, signal dBm, flags, SSID, tab-separated,
+##                            the SSID escaped as wpa_cli escapes it), then "ok"
+##    wifi-status           the Wi-Fi state, as key=value lines, then "ok": interface, saved
+##                            (the network named in settings/wifi.txt), wpa_state, ssid (the
+##                            one joined, escaped), address, and trouble=yes when
+##                            wpa_supplicant has given up on the network for now (most often
+##                            a wrong password). Never the password.
+##    wifi-join             join a network: the request line, then a line with its name (SSID)
+##                            and a line with its password (empty for an open network). They go
+##                            into settings/wifi.txt, as name= and password=, and of-netplan
+##                            applies them, as it would at boot. Answers once they're written.
+##    wifi-forget           empty name= and password= in settings/wifi.txt, and apply that
+##
+##  Wi-Fi is set up the OpenFrame way (see of-netplan): settings/wifi.txt on the boot volume,
+##  editable from any computer, turned into a netplan configuration. Only name= and
+##  password= are changed here: a fixed address in the file stays as it is.
 
 SETTINGS="/boot/settings/sprite.txt"
 TEMPLATE="/opt/sprite/share/sprite/sprite.txt"
+WIFITXT="/boot/settings/wifi.txt"
+WIFITEMPLATE="/usr/lib/openframe/settings/wifi.txt"
+WPACTRL="/run/wpa_supplicant"          # where netplan's wpa_supplicant listens
+SCANCTRL="/run/sprite-helper-wpa"      # ... and ours, when we start one to scan
 
 answer() { echo "$*"; exit 0; }
+
+# Replace $2 on the boot volume with the file $1. /boot is read-only (FAT, no journal):
+# open it with bootrw, and replace the file with a synced copy, so a power cut leaves the
+# old file or the new one.
+boot_write() {
+	/usr/lib/openframe/bootrw open || answer "error: /boot can't be made writable"
+	mkdir -p "${2%/*}" && sync && cp "$1" "$2.new" && sync && mv -f "$2.new" "$2" && sync
+	local OK=$?
+	/usr/lib/openframe/bootrw close
+	[ $OK -eq 0 ] || answer "error: writing $2 failed"
+}
+
+# The Wi-Fi interface (the first, as of-netplan uses wlan0), or nothing
+wifi_if() {
+	local d
+	for d in /sys/class/net/*/phy80211; do
+		[ -e "$d" ] && { d="${d%/phy80211}"; echo "${d##*/}"; return 0; }
+	done
+	return 1
+}
+
+# A value from settings/wifi.txt, read as of-netplan reads it: the last line for the key
+# (any case, spaces around it), trimmed, and one pair of matching quotes taken off.
+wifi_txt_get() {
+	[ -r "$WIFITXT" ] || return 0
+	K="$1" awk '
+		{ sub(/\r$/, ""); if (NR == 1) sub(/^\xef\xbb\xbf/, "") }
+		index($0, "=") {
+			k = substr($0, 1, index($0, "=") - 1); gsub(/[[:space:]]/, "", k)
+			if (tolower(k) != ENVIRON["K"]) next
+			v = substr($0, index($0, "=") + 1)
+			sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$/, "", v)
+			q = substr(v, 1, 1)
+			if (length(v) >= 2 && (q == "\"" || q == "\047") && substr(v, length(v)) == q)
+				v = substr(v, 2, length(v) - 2)
+			last = v
+		}
+		END { printf "%s", last }' "$WIFITXT"
+}
+
+# Write name= and password= into settings/wifi.txt (from the template if there isn't one),
+# keeping every other line, and have of-netplan apply it. The values go in double quotes,
+# which of-netplan takes off, so spaces and quotes at either end are kept as they are.
+wifi_write() {
+	local NEW
+	NEW=$(mktemp) || answer "error: no temporary file"
+	trap 'rm -f "$NEW"' EXIT
+	if [ -f "$WIFITXT" ]; then
+		cp "$WIFITXT" "$NEW"
+	elif [ -f "$WIFITEMPLATE" ]; then
+		cp "$WIFITEMPLATE" "$NEW"
+	fi
+	# The values reach awk through the environment: awk -v would turn backslashes into escapes.
+	N="$1" P="$2" awk '
+		function line(k, v) { return v == "" ? k "=" : k "=\"" v "\"" }
+		index($0, "=") {
+			k = substr($0, 1, index($0, "=") - 1); gsub(/[[:space:]]/, "", k); k = tolower(k)
+			if (k == "name") { if (!dn) print line("name", ENVIRON["N"]); dn = 1; next }
+			if (k == "password") { if (!dp) print line("password", ENVIRON["P"]); dp = 1; next }
+		}
+		{ print }
+		END {
+			if (!dn) print line("name", ENVIRON["N"])
+			if (!dp) print line("password", ENVIRON["P"])
+		}' "$NEW" > "$NEW.2" && mv "$NEW.2" "$NEW" || answer "error: preparing wifi.txt failed"
+	chmod 600 "$NEW"
+	boot_write "$NEW" "$WIFITXT"
+	systemctl --no-block start of-netplan.service || answer "error: of-netplan didn't start"
+}
 
 read -r -t 5 CMD ARG || [ -n "$CMD" ] || answer "error: no request"
 
@@ -46,17 +136,71 @@ case "$CMD" in
 		else
 			echo "$KEY=$VAL" >> "$NEW"
 		fi
-		# /boot is read-only (FAT, no journal): open it with bootrw, and replace the file
-		# with a synced copy so a power cut leaves the old file or the new one.
-		/usr/lib/openframe/bootrw open || answer "error: /boot can't be made writable"
-		mkdir -p "${SETTINGS%/*}" && sync && cp "$NEW" "$SETTINGS.new" && sync && mv -f "$SETTINGS.new" "$SETTINGS" && sync
-		OK=$?
-		/usr/lib/openframe/bootrw close
-		[ $OK -eq 0 ] || answer "error: writing $SETTINGS failed"
+		boot_write "$NEW" "$SETTINGS"
 		answer ok
 		;;
 	reboot|poweroff)
 		systemctl --no-block "$CMD" || answer "error: systemctl $CMD failed"
+		answer ok
+		;;
+	wifi-scan)
+		IF=$(wifi_if) || answer "error: no Wi-Fi"
+		CTRL="$WPACTRL"
+		if [ ! -S "$CTRL/$IF" ]; then
+			# No wpa_supplicant running for it (no network set up): start one of our own
+			# just for the scan. It puts the interface back down when it stops.
+			CTRL="$SCANCTRL"
+			CONF=$(mktemp) || answer "error: no temporary file"
+			printf 'ctrl_interface=%s\n' "$CTRL" > "$CONF"
+			PIDF="/run/sprite-helper-wpa.pid"
+			trap 'kill "$(cat "$PIDF" 2>/dev/null)" 2>/dev/null; rm -f "$CONF" "$PIDF"' EXIT
+			wpa_supplicant -B -q -i "$IF" -c "$CONF" -P "$PIDF" >/dev/null 2>&1 ||
+				answer "error: wpa_supplicant didn't start"
+			for _ in 1 2 3 4 5 6 7 8 9 10; do [ -S "$CTRL/$IF" ] && break; sleep 0.2; done
+		fi
+		wpa_cli -p "$CTRL" -i "$IF" scan >/dev/null 2>&1
+		# Results come in over a few seconds: wait until they've stopped changing (at most 8 s).
+		PREV=""
+		for _ in $(seq 16); do
+			sleep 0.5
+			NOW=$(wpa_cli -p "$CTRL" -i "$IF" scan_results 2>/dev/null | tail -n +2)
+			[ -n "$NOW" ] && [ "$NOW" = "$PREV" ] && break
+			PREV="$NOW"
+		done
+		[ -n "$NOW" ] && printf '%s\n' "$NOW"
+		answer ok
+		;;
+	wifi-status)
+		IF=$(wifi_if) || answer "error: no Wi-Fi"
+		echo "interface=$IF"
+		SAVED=$(wifi_txt_get name)
+		echo "saved=${SAVED//$'\n'/}"
+		if [ -S "$WPACTRL/$IF" ]; then
+			wpa_cli -p "$WPACTRL" -i "$IF" status 2>/dev/null | grep -E '^(wpa_state|ssid)='
+			wpa_cli -p "$WPACTRL" -i "$IF" list_networks 2>/dev/null |
+				awk -F '\t' 'NR > 1 && $4 ~ /TEMP-DISABLED/ { print "trouble=yes"; exit }'
+		fi
+		ADDR=$(ip -4 -o addr show dev "$IF" 2>/dev/null | awk '{ print $4; exit }')
+		echo "address=${ADDR%/*}"
+		answer ok
+		;;
+	wifi-join)
+		wifi_if >/dev/null || answer "error: no Wi-Fi"
+		IFS= read -r -t 5 NAME || answer "error: no network name"
+		IFS= read -r -t 5 PASS || [ -n "$PASS" ] || PASS=""
+		# A name of 1-32 bytes and a password that of-netplan will take (8-63 characters,
+		# or 64 hex digits, or none for an open network), neither with control characters,
+		# which would break the file's lines.
+		export LC_ALL=C
+		(( ${#NAME} >= 1 && ${#NAME} <= 32 )) || answer "error: the network name must be 1 to 32 characters"
+		[[ "$NAME$PASS" =~ [[:cntrl:]] ]] && answer "error: control characters aren't allowed"
+		[ -z "$PASS" ] || (( ${#PASS} >= 8 && ${#PASS} <= 63 )) || [[ "$PASS" =~ ^[0-9a-fA-F]{64}$ ]] ||
+			answer "error: the password must be 8 to 63 characters"
+		wifi_write "$NAME" "$PASS"
+		answer ok
+		;;
+	wifi-forget)
+		wifi_write "" ""
 		answer ok
 		;;
 	*)

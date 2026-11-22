@@ -5,6 +5,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <time.h>
 
@@ -59,7 +60,7 @@ static lv_indev_t *indev;
 static int ptr_x, ptr_y;
 static bool ptr_pressed;
 static lv_obj_t *bar_clock, *bar_date, *bar_title, *net_eth, *net_wifi;
-static lv_obj_t *page_home, *pager, *strip, *page_settings, *toast;
+static lv_obj_t *page_home, *pager, *strip, *page_settings, *page_wifi, *page_entry, *toast;
 static lv_obj_t *dots, *gear;         // page dots and the Settings gear, in the status bar
 static int cur_page, n_pages;
 
@@ -145,9 +146,26 @@ static double now_ms(void) {
 	return t.tv_sec * 1e3 + t.tv_nsec / 1e6;
 }
 
+// SPRITE_TRACE_PERF=3 also logs the areas each frame redraws, to find what's redrawn needlessly
+static int trace_areas = -1;
+
 static void refr_event(lv_event_t *e) {
-	if (lv_event_get_code(e) == LV_EVENT_RENDER_START) render_start = now_ms();
-	else perf_render(now_ms() - render_start);
+	if (lv_event_get_code(e) == LV_EVENT_RENDER_START) {
+		render_start = now_ms();
+		if (trace_areas < 0) trace_areas = getenv("SPRITE_TRACE_PERF") && atoi(getenv("SPRITE_TRACE_PERF")) >= 3;
+		if (trace_areas) {
+			lv_display_t *d = lv_event_get_target(e);
+			char t[512];
+			int n = 0;
+			for (uint32_t i = 0; i < d->inv_p && n < (int)sizeof t - 40; i++)
+				if (!d->inv_area_joined[i])
+					n += snprintf(t + n, sizeof t - n, " %dx%d@%d,%d", (int)lv_area_get_width(&d->inv_areas[i]),
+						      (int)lv_area_get_height(&d->inv_areas[i]), (int)d->inv_areas[i].x1, (int)d->inv_areas[i].y1);
+			fprintf(stderr, "sprite: redraw%s\n", t);
+		}
+	} else {
+		perf_render(now_ms() - render_start);
+	}
 }
 
 static void flush_cb(lv_display_t *d, const lv_area_t *a, uint8_t *px) {
@@ -315,8 +333,8 @@ static void clock_settings_changed(void) {
 
 /* ---- network icons: drawn once, anti-aliased, as alpha masks the text colour fills ---- */
 
-static uint8_t eth_px[NET_ICON * NET_ICON], wifi_px[5][NET_ICON * NET_ICON];
-static lv_image_dsc_t eth_img, wifi_img[5];
+static uint8_t eth_px[NET_ICON * NET_ICON], wifi_px[5][NET_ICON * NET_ICON], lock_px[NET_ICON * NET_ICON];
+static lv_image_dsc_t eth_img, wifi_img[5], lock_img;
 
 static bool in_rect(double x, double y, double x0, double y0, double x1, double y1) {
 	return x >= x0 && x < x1 && y >= y0 && y < y1;
@@ -340,6 +358,13 @@ static int wifi_part(double x, double y) {
 	return 0;
 }
 
+// A padlock (a network that needs a password): a body, and a shackle over it
+static bool lock_shape(double x, double y) {
+	if (in_rect(x, y, 4, 9.5, 16, 18)) return true;
+	double dx = x - 10, dy = y - 9.5, r = sqrt(dx * dx + dy * dy);
+	return (dy <= 0 && r >= 3.4 && r <= 5.2) || (dy > 0 && dy < 1 && fabs(dx) >= 3.4 && fabs(dx) <= 5.2);
+}
+
 // lit: how many parts are bright (the rest are faint); 0 = all faint (not connected)
 static void draw_icon(uint8_t *px, int lit, bool wifi) {
 	for (int y = 0; y < NET_ICON; y++)
@@ -348,7 +373,9 @@ static void draw_icon(uint8_t *px, int lit, bool wifi) {
 			for (int sy = 0; sy < 4; sy++) // 4x4 samples a pixel
 				for (int sx = 0; sx < 4; sx++) {
 					double fx = x + (sx + 0.5) / 4, fy = y + (sy + 0.5) / 4;
-					if (wifi) {
+					if (lit < 0) {
+						if (lock_shape(fx, fy)) a += 1.0;
+					} else if (wifi) {
 						int part = wifi_part(fx, fy);
 						if (part) a += part <= lit ? 1.0 : 0.3;
 					} else if (eth_shape(fx, fy, 0)) {
@@ -377,10 +404,15 @@ static void make_net_icons(void) {
 		draw_icon(wifi_px[i], i, true);
 		make_img(&wifi_img[i], wifi_px[i]);
 	}
+	draw_icon(lock_px, -1, false);
+	make_img(&lock_img, lock_px);
 }
 
 // Ethernet shows while a cable is connected, faint until it has an address. Wi-Fi shows unless
 // it's switched off or missing: bars by signal, all faint while not connected.
+static bool wifi_scanning;
+static struct wifi_status wifi_now;                       // what the helper last said
+
 static void update_net(lv_timer_t *t) {
 	struct sprite_net n;
 	sysinfo_net(&n);
@@ -390,7 +422,8 @@ static void update_net(lv_timer_t *t) {
 	} else {
 		lv_obj_add_flag(net_eth, LV_OBJ_FLAG_HIDDEN);
 	}
-	if (n.wifi_present && n.wifi_enabled) {
+	// (a scan brings the card up for a few seconds: that isn't Wi-Fi being on)
+	if (n.wifi_present && n.wifi_enabled && !(wifi_scanning && !wifi_now.saved[0])) {
 		int level = 0;
 		if (n.wifi_ip[0]) {
 			int q = n.wifi_quality < 0 ? 0 : n.wifi_quality;
@@ -482,7 +515,9 @@ static void build_bar(lv_obj_t *scr) {
 	make_net_icons();
 	lv_obj_t *net = lv_obj_create(bar);
 	lv_obj_remove_style_all(net);
-	lv_obj_set_size(net, LV_SIZE_CONTENT, BAR_H);
+	// A fixed width for both icons, packed to the right: sized to its content, it didn't grow
+	// when Wi-Fi appeared beside Ethernet, which was pushed out of it and lost.
+	lv_obj_set_size(net, 2 * NET_ICON + 12, BAR_H);
 	lv_obj_set_flex_flow(net, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(net, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_style_pad_column(net, 12, 0);
@@ -507,12 +542,17 @@ static void build_bar(lv_obj_t *scr) {
 /* ---- pages ---- */
 
 static void update_dots(void);
+static void entry_clear(void);
+
+static bool showing(lv_obj_t *page) { return page && !lv_obj_has_flag(page, LV_OBJ_FLAG_HIDDEN); }
 
 static void show_page(lv_obj_t *page) {
-	lv_obj_add_flag(page_home, LV_OBJ_FLAG_HIDDEN);
-	lv_obj_add_flag(page_settings, LV_OBJ_FLAG_HIDDEN);
+	if (page != page_entry && showing(page_entry)) entry_clear(); // never leave a password lying about
+	lv_obj_t *pages[] = { page_home, page_settings, page_wifi, page_entry };
+	for (size_t i = 0; i < sizeof pages / sizeof pages[0]; i++)
+		if (pages[i]) lv_obj_add_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
 	lv_obj_remove_flag(page, LV_OBJ_FLAG_HIDDEN);
-	lv_label_set_text(bar_title, page == page_settings ? "Settings" : "");
+	lv_label_set_text(bar_title, page == page_settings ? "Settings" : page == page_wifi || page == page_entry ? "Wi-Fi" : "");
 	update_dots();
 }
 
@@ -536,8 +576,14 @@ void shell_notice(const char *text) {
 	sprite_lvgl_kick();
 }
 
+static void wifi_refresh(void);
+static lv_obj_t *wifi_status_label;
+
 static void refresh_settings(lv_timer_t *t) {
-	if (lv_obj_has_flag(page_settings, LV_OBJ_FLAG_HIDDEN) || !visible) return;
+	if (!visible) return;
+	if (showing(page_wifi)) { wifi_refresh(); return; }
+	if (!showing(page_settings)) return;
+	if (wifi_status_label) wifi_refresh();
 	static char text[768];
 	sysinfo_summary(text, sizeof text);
 	lv_label_set_text(about_label, text);
@@ -567,9 +613,9 @@ static void open_app(struct sprite_app *a) {
 
 static void tile_clicked(lv_event_t *e) { open_app(lv_event_get_user_data(e)); }
 
-// The gear opens Settings, and closes it again.
+// The gear opens Settings, and from any of its screens goes home again.
 static void gear_clicked(lv_event_t *e) {
-	if (!lv_obj_has_flag(page_settings, LV_OBJ_FLAG_HIDDEN)) {
+	if (!showing(page_home)) {
 		show_page(page_home);
 		return;
 	}
@@ -596,7 +642,12 @@ static lv_obj_t *button(lv_obj_t *parent, const char *text, enum button_role rol
 	int w = text_w(text, &lv_font_montserrat_20) + 2 * BUTTON_PAD;
 	lv_obj_t *b = lv_button_create(parent);
 	lv_obj_set_size(b, w > BUTTON_MIN_W ? w : BUTTON_MIN_W, BUTTON_H);
-	lv_obj_set_style_bg_color(b, lv_color_hex(role == BUTTON_MAIN ? C_ACCENT : role == BUTTON_DANGER ? C_BUTTON_DANGER : C_BUTTON_OTHER), 0);
+	lv_color_t c = lv_color_hex(role == BUTTON_MAIN ? C_ACCENT : role == BUTTON_DANGER ? C_BUTTON_DANGER : C_BUTTON_OTHER);
+	lv_obj_set_style_bg_color(b, c, 0);
+	lv_obj_set_style_bg_color(b, c, LV_STATE_DISABLED);
+	lv_obj_set_style_bg_opa(b, LV_OPA_40, LV_STATE_DISABLED);
+	lv_obj_set_style_text_color(b, lv_color_hex(C_TEXT), LV_STATE_DISABLED);
+	lv_obj_set_style_text_opa(b, LV_OPA_50, LV_STATE_DISABLED);
 	lv_obj_t *l = lv_label_create(b);
 	lv_label_set_text(l, text);
 	lv_obj_set_style_text_font(l, &lv_font_montserrat_20, 0);
@@ -879,7 +930,8 @@ static void scroll_glide(lv_obj_t *obj, int from, int to, uint32_t ms) {
 
 // The scrolling screen showing, if any: sprite does its scrolling itself (see drag_input).
 static lv_obj_t *scrolling_screen(void) {
-	if (page_settings && !lv_obj_has_flag(page_settings, LV_OBJ_FLAG_HIDDEN)) return page_settings;
+	if (showing(page_settings)) return page_settings;
+	if (showing(page_wifi)) return page_wifi;
 	return NULL;
 }
 
@@ -1086,6 +1138,8 @@ static void power_clicked(lv_event_t *e) {
 #define ROW_GAP 12
 #define ROW_H 48
 #define HEADING_SPACE 16
+#define LIST_ROW_GAP 4      // a list of choices (networks): rows closer together, each pressable
+#define LIST_ROW_PAD 12     // ... with their content inset, inside the press highlight
 
 static lv_obj_t *section(lv_obj_t *parent, const char *title) {
 	lv_obj_t *l = lv_label_create(parent);
@@ -1272,19 +1326,617 @@ static void switch_row(lv_obj_t *parent, const char *text, bool on, lv_event_cb_
 	lv_obj_add_event_cb(sw, cb, LV_EVENT_VALUE_CHANGED, NULL);
 }
 
-static void build_settings(lv_obj_t *scr) {
-	page_settings = lv_obj_create(scr);
-	lv_obj_remove_style_all(page_settings);
-	lv_obj_set_size(page_settings, SPRITE_W, SPRITE_H - BAR_H);
-	lv_obj_set_pos(page_settings, 0, BAR_H);
-	lv_obj_set_flex_flow(page_settings, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_style_pad_hor(page_settings, CONTENT_X, 0);
-	lv_obj_set_style_pad_ver(page_settings, CONTENT_TOP, 0);
-	lv_obj_set_style_pad_row(page_settings, ROW_GAP, 0);
-	lv_obj_set_scroll_dir(page_settings, LV_DIR_VER);
-	lv_obj_set_scrollbar_mode(page_settings, LV_SCROLLBAR_MODE_OFF);
+// A list screen (Settings, Wi-Fi): below the bar, the content inset like every screen, a
+// column of headings and rows that sprite scrolls (see drag_input).
+static lv_obj_t *list_page(lv_obj_t *scr) {
+	lv_obj_t *p = lv_obj_create(scr);
+	lv_obj_remove_style_all(p);
+	lv_obj_set_size(p, SPRITE_W, SPRITE_H - BAR_H);
+	lv_obj_set_pos(p, 0, BAR_H);
+	lv_obj_set_flex_flow(p, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_style_pad_hor(p, CONTENT_X, 0);
+	lv_obj_set_style_pad_ver(p, CONTENT_TOP, 0);
+	lv_obj_set_style_pad_row(p, ROW_GAP, 0);
+	lv_obj_set_scroll_dir(p, LV_DIR_VER);
+	lv_obj_set_scrollbar_mode(p, LV_SCROLLBAR_MODE_OFF);
+	lv_obj_add_flag(p, LV_OBJ_FLAG_HIDDEN);
+	return p;
+}
 
+/* ---- Wi-Fi: its section in Settings, the networks in reach, joining and forgetting. The
+   helper does the work (wifi.c); the network to join is kept in settings/wifi.txt. ---- */
+
+#define WIFI_JOIN_WAIT_MS 45000    // how long joining may take before we say it hasn't worked
+#define WIFI_TROUBLE_AFTER_MS 6000 // ignore "trouble" this soon: it may be the old network's
+#define WIFI_RESCAN_MS 30000       // a list older than this is looked for again on opening
+
+enum entry_mode { ENTRY_PASSWORD, ENTRY_OPEN_PASSWORD, ENTRY_NAME };
+static void open_entry(enum entry_mode mode, const char *ssid);
+
+static lv_obj_t *wifi_detail_label, *wifi_forget_btn;     // in Settings (and wifi_status_label)
+static lv_obj_t *wifi_list, *wifi_note, *wifi_rescan;     // the Wi-Fi screen
+static struct wifi_net wifi_nets[WIFI_NETS_MAX];          // what the last scan found
+static int wifi_n;
+static uint32_t wifi_scanned_at;
+static bool wifi_asking, wifi_ever_scanned;
+static char wifi_listed[3][WIFI_SSID_MAX * 4 + 2];        // the state the list was drawn for
+static char wifi_target[WIFI_SSID_MAX + 1];               // the network being joined, or asked about
+static lv_timer_t *wifi_watch;                            // while joining: the status, every 1.5 s
+static uint32_t wifi_watch_start;
+
+static void wifi_build_list(void);
+
+static void set_text(lv_obj_t *l, const char *t) {
+	if (strcmp(lv_label_get_text(l), t)) lv_label_set_text(l, t);
+}
+
+static void wifi_show_status(void) {
+	if (!wifi_status_label) return;
+	const struct wifi_status *s = &wifi_now;
+	char t[200];
+	const char *st = s->state;
+	bool trying = st[0] && strcmp(st, "INACTIVE") && strcmp(st, "DISCONNECTED") && strcmp(st, "INTERFACE_DISABLED");
+	if (s->connected) snprintf(t, sizeof t, "Connected to %s", s->ssid);
+	else if (s->saved[0] && s->trouble) snprintf(t, sizeof t, "Can't connect to %s", s->saved);
+	else if (s->saved[0] && (trying || wifi_watch)) snprintf(t, sizeof t, "Connecting to %s...", s->saved);
+	else if (s->saved[0]) snprintf(t, sizeof t, "Not connected to %s", s->saved);
+	else snprintf(t, sizeof t, "Not connected");
+	set_text(wifi_status_label, t);
+	set_text(wifi_detail_label, s->connected ? s->address : "");
+	if (s->saved[0]) lv_obj_remove_flag(wifi_forget_btn, LV_OBJ_FLAG_HIDDEN);
+	else lv_obj_add_flag(wifi_forget_btn, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void wifi_try_again(lv_event_t *e) {
+	dialog_close();
+	open_entry(ENTRY_PASSWORD, wifi_target);
+}
+
+static void wifi_forget_now(lv_event_t *e);
+
+static void wifi_watch_stop(void) {
+	if (wifi_watch) lv_timer_delete(wifi_watch);
+	wifi_watch = NULL;
+}
+
+// While joining: done when we're connected to it, or wpa_supplicant gives up, or it's too long.
+static void wifi_watch_check(void) {
+	if (!wifi_watch) return;
+	uint32_t ms = lv_tick_elaps(wifi_watch_start);
+	if (wifi_now.connected && !strcmp(wifi_now.ssid, wifi_target)) {
+		wifi_watch_stop();
+		char t[80];
+		snprintf(t, sizeof t, "Connected to %s", wifi_target);
+		show_toast(t, 3000);
+	} else if ((wifi_now.trouble && ms > WIFI_TROUBLE_AFTER_MS) || ms > WIFI_JOIN_WAIT_MS) {
+		wifi_watch_stop();
+		char t[80];
+		snprintf(t, sizeof t, "Couldn't connect to %s", wifi_target);
+		lv_obj_t *card = dialog_open(NULL, t, "The password may be wrong, or the network out of reach. "
+					    "The OpenFrame keeps trying while it's saved.", false);
+		dialog_button(card, "Try again", BUTTON_MAIN, wifi_try_again, NULL);
+		dialog_button(card, "Forget", BUTTON_DANGER, wifi_forget_now, NULL);
+		dialog_button(card, "Close", BUTTON_OTHER, dialog_cancel, NULL);
+	}
+	wifi_show_status();
+}
+
+static void wifi_status_got(const struct wifi_status *s, const char *error, void *data) {
+	wifi_asking = false;
+	if (error) return; // no card, or no helper: leave what's shown
+	wifi_now = *s;
+	wifi_show_status();
+	if (showing(page_wifi)) wifi_build_list();
+	wifi_watch_check();
+}
+
+static void wifi_refresh(void) {
+	if (wifi_asking) return; // one question at a time
+	wifi_asking = true;
+	wifi_status(wifi_status_got, NULL);
+}
+
+static void wifi_watch_tick(lv_timer_t *t) { wifi_refresh(); }
+
+static void wifi_joined(const char *error, void *data) {
+	if (!error) return; // written: the watch follows it
+	wifi_watch_stop();
+	char t[80];
+	snprintf(t, sizeof t, "Couldn't join %s", wifi_target);
+	lv_obj_t *card = dialog_open(NULL, t, !strncmp(error, "error: ", 7) ? error + 7 : error, true);
+	dialog_button(card, "Close", BUTTON_OTHER, dialog_cancel, NULL);
+	wifi_refresh();
+}
+
+// Join a network: save it (the helper writes wifi.txt and has it applied), then back to
+// Settings, whose Wi-Fi section follows it, and say how it went.
+static void wifi_join_now(const char *ssid, const char *password) {
+	snprintf(wifi_target, sizeof wifi_target, "%s", ssid);
+	wifi_join(ssid, password, wifi_joined, NULL);
+	snprintf(wifi_now.saved, sizeof wifi_now.saved, "%s", ssid); // until the helper says
+	wifi_now.connected = wifi_now.trouble = false;
+	wifi_watch_stop();
+	wifi_watch = lv_timer_create(wifi_watch_tick, 1500, NULL);
+	wifi_watch_start = lv_tick_get();
+	show_page(page_settings);
+	lv_obj_scroll_to_y(page_settings, 0, LV_ANIM_OFF); // the Wi-Fi section is at the top
+	refresh_settings(NULL);
+	wifi_show_status();
+}
+
+static void wifi_forgot(const char *error, void *data) {
+	if (error) {
+		lv_obj_t *card = dialog_open(NULL, "Couldn't forget the network", !strncmp(error, "error: ", 7) ? error + 7 : error, true);
+		dialog_button(card, "Close", BUTTON_OTHER, dialog_cancel, NULL);
+	}
+	wifi_refresh();
+}
+
+static void wifi_forget_now(lv_event_t *e) {
+	dialog_close();
+	wifi_watch_stop();
+	wifi_forget(wifi_forgot, NULL);
+	char t[sizeof wifi_now.saved + 16];
+	snprintf(t, sizeof t, "Forgot %s", wifi_now.saved[0] ? wifi_now.saved : wifi_target);
+	show_toast(t, 3000);
+	wifi_now.saved[0] = 0;
+	wifi_now.connected = wifi_now.trouble = false;
+	wifi_show_status();
+	if (showing(page_wifi)) wifi_build_list();
+}
+
+static void wifi_forget_ask(lv_event_t *e) {
+	char t[sizeof wifi_now.saved + 16];
+	snprintf(t, sizeof t, "Forget %s?", wifi_now.saved);
+	lv_obj_t *card = dialog_open(NULL, t, "The OpenFrame won't join it again until it's chosen again.", true);
+	dialog_button(card, "Forget", BUTTON_DANGER, wifi_forget_now, NULL);
+	dialog_button(card, "Cancel", BUTTON_OTHER, dialog_cancel, NULL);
+}
+
+static void wifi_scan_got(const struct wifi_net *nets, int n, const char *error, void *data) {
+	wifi_scanning = false;
+	wifi_ever_scanned = true;
+	wifi_scanned_at = lv_tick_get();
+	lv_obj_remove_state(wifi_rescan, LV_STATE_DISABLED);
+	wifi_n = error ? 0 : n;
+	memcpy(wifi_nets, nets, wifi_n * sizeof nets[0]);
+	if (error) {
+		char t[160];
+		snprintf(t, sizeof t, "Couldn't look for networks: %s", !strncmp(error, "error: ", 7) ? error + 7 : error);
+		lv_label_set_text(wifi_note, t);
+	}
+	wifi_listed[0][0] = 1; // whatever was drawn, draw it again
+	wifi_build_list();
+}
+
+static void wifi_start_scan(void) {
+	if (wifi_scanning) return;
+	wifi_scanning = true;
+	lv_obj_add_state(wifi_rescan, LV_STATE_DISABLED);
+	lv_label_set_text(wifi_note, "Looking for networks...");
+	lv_obj_remove_flag(wifi_note, LV_OBJ_FLAG_HIDDEN);
+	wifi_scan(wifi_scan_got, NULL);
+}
+
+static void wifi_rescan_clicked(lv_event_t *e) { wifi_start_scan(); }
+
+static void wifi_open_join(lv_event_t *e) {
+	dialog_close();
+	wifi_join_now(wifi_target, "");
+}
+
+static void wifi_change_password(lv_event_t *e) {
+	dialog_close();
+	open_entry(ENTRY_PASSWORD, wifi_target);
+}
+
+static void wifi_row_clicked(lv_event_t *e) {
+	int i = (int)(intptr_t)lv_event_get_user_data(e);
+	if (i < 0) { open_entry(ENTRY_NAME, ""); return; } // a network that doesn't say its name
+	const struct wifi_net *w = &wifi_nets[i];
+	snprintf(wifi_target, sizeof wifi_target, "%s", w->ssid);
+	bool joined = wifi_now.connected && !strcmp(w->ssid, wifi_now.ssid);
+	if (joined || !strcmp(w->ssid, wifi_now.saved)) { // the one we have: change or forget it
+		char body[120];
+		if (joined) snprintf(body, sizeof body, "Connected, with the address %s.", wifi_now.address);
+		else snprintf(body, sizeof body, "Saved: the OpenFrame joins it whenever it's in reach.");
+		lv_obj_t *card = dialog_open(NULL, w->ssid, body, true);
+		if (w->secured) dialog_button(card, "Change password", BUTTON_MAIN, wifi_change_password, NULL);
+		dialog_button(card, "Forget", BUTTON_DANGER, wifi_forget_now, NULL);
+		dialog_button(card, "Cancel", BUTTON_OTHER, dialog_cancel, NULL);
+	} else if (!w->supported) {
+		char t[80];
+		snprintf(t, sizeof t, "Can't join %s", w->ssid);
+		lv_obj_t *card = dialog_open(NULL, t, "It needs WEP or an enterprise login, which Settings can't set up. "
+					    "A network.yaml in the settings folder on OF-BOOT can.", true);
+		dialog_button(card, "Close", BUTTON_OTHER, dialog_cancel, NULL);
+	} else if (w->secured) {
+		open_entry(ENTRY_PASSWORD, w->ssid);
+	} else {
+		char t[80];
+		snprintf(t, sizeof t, "Join %s?", w->ssid);
+		lv_obj_t *card = dialog_open(NULL, t, "It's an open network: what's sent over it isn't encrypted.", true);
+		dialog_button(card, "Join", BUTTON_MAIN, wifi_open_join, NULL);
+		dialog_button(card, "Cancel", BUTTON_OTHER, dialog_cancel, NULL);
+	}
+}
+
+// One row of the list: the whole row takes the touch, and lightens while pressed.
+static void wifi_row(int index, const lv_image_dsc_t *icon, const char *symbol, const char *name,
+		     bool lock, const char *note, uint32_t note_color, bool dim) {
+	lv_obj_t *r = lv_obj_create(wifi_list);
+	lv_obj_remove_style_all(r);
+	lv_obj_set_size(r, LV_PCT(100), ROW_H);
+	lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(r, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_hor(r, LIST_ROW_PAD, 0);
+	lv_obj_set_style_pad_column(r, 14, 0);
+	lv_obj_set_style_bg_color(r, lv_color_white(), LV_STATE_PRESSED);
+	lv_obj_set_style_bg_opa(r, LV_OPA_10, LV_STATE_PRESSED);
+	lv_obj_add_flag(r, LV_OBJ_FLAG_CLICKABLE);
+	lv_obj_remove_flag(r, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_add_event_cb(r, wifi_row_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)index);
+	rounded(r);
+	lv_color_t text = lv_color_hex(dim ? C_DIM : C_TEXT);
+	if (icon) {
+		lv_obj_t *im = lv_image_create(r);
+		lv_image_set_src(im, icon);
+		lv_obj_set_style_image_recolor(im, text, 0);
+		lv_obj_set_style_image_recolor_opa(im, LV_OPA_COVER, 0);
+	} else {
+		lv_obj_t *l = lv_label_create(r);
+		lv_label_set_text(l, symbol);
+		lv_obj_set_width(l, NET_ICON);
+		lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+		lv_obj_set_style_text_color(l, text, 0);
+	}
+	lv_obj_t *l = lv_label_create(r);
+	lv_label_set_text(l, name);
+	lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
+	lv_obj_set_flex_grow(l, 1);
+	lv_obj_set_style_text_color(l, text, 0);
+	if (note) {
+		lv_obj_t *nl = lv_label_create(r);
+		lv_label_set_text(nl, note);
+		lv_obj_set_style_text_font(nl, &lv_font_montserrat_16, 0);
+		lv_obj_set_style_text_color(nl, lv_color_hex(note_color), 0);
+	}
+	if (lock) {
+		lv_obj_t *im = lv_image_create(r);
+		lv_image_set_src(im, &lock_img);
+		lv_obj_set_style_image_recolor(im, lv_color_hex(C_DIM), 0);
+		lv_obj_set_style_image_recolor_opa(im, LV_OPA_COVER, 0);
+	} else {
+		lv_obj_t *sp = lv_obj_create(r); // keeps the notes in line with or without a lock
+		lv_obj_remove_style_all(sp);
+		lv_obj_set_size(sp, NET_ICON, 1);
+	}
+}
+
+// The list again, if what it shows has changed: the networks, and which is joined or saved.
+static void wifi_build_list(void) {
+	char now[3][WIFI_SSID_MAX * 4 + 2];
+	snprintf(now[0], sizeof now[0], "%u", (unsigned)wifi_scanned_at);
+	snprintf(now[1], sizeof now[1], "%d%s", wifi_now.connected, wifi_now.ssid);
+	snprintf(now[2], sizeof now[2], "%s", wifi_now.saved);
+	if (!memcmp(now, wifi_listed, sizeof now)) return;
+	memcpy(wifi_listed, now, sizeof now);
+	lv_obj_clean(wifi_list);
+	if (!wifi_ever_scanned) return;
+	if (!wifi_scanning) {
+		if (wifi_n) lv_obj_add_flag(wifi_note, LV_OBJ_FLAG_HIDDEN);
+		else if (!strncmp(lv_label_get_text(wifi_note), "Looking", 7)) lv_label_set_text(wifi_note, "No networks found.");
+	}
+	for (int i = 0; i < wifi_n; i++) {
+		const struct wifi_net *w = &wifi_nets[i];
+		bool joined = wifi_now.connected && !strcmp(w->ssid, wifi_now.ssid);
+		bool saved = !joined && !strcmp(w->ssid, wifi_now.saved);
+		const char *note = joined ? "Connected" : saved ? "Saved" : !w->supported ? "Not supported" : NULL;
+		wifi_row(i, &wifi_img[wifi_level(w->dbm)], NULL, w->ssid, w->secured, note,
+			 joined ? C_ACCENT : C_DIM, !w->supported);
+	}
+	wifi_row(-1, NULL, LV_SYMBOL_PLUS, "Other network...", false, NULL, 0, false);
+}
+
+static void wifi_choose_clicked(lv_event_t *e) {
+	show_page(page_wifi);
+	lv_obj_scroll_to_y(page_wifi, 0, LV_ANIM_OFF);
+	wifi_refresh();
+	if (!wifi_ever_scanned || lv_tick_elaps(wifi_scanned_at) > WIFI_RESCAN_MS) wifi_start_scan();
+}
+
+static void wifi_back_clicked(lv_event_t *e) {
+	show_page(page_settings);
+	refresh_settings(NULL);
+}
+
+static void build_wifi(lv_obj_t *scr) {
+	page_wifi = list_page(scr);
+	lv_obj_t *br = button_row(page_wifi);
+	button(br, LV_SYMBOL_LEFT "  Settings", BUTTON_MAIN, wifi_back_clicked, NULL);
+	wifi_rescan = button(br, LV_SYMBOL_REFRESH "  Look again", BUTTON_OTHER, wifi_rescan_clicked, NULL);
+	section(page_wifi, "NETWORKS");
+	wifi_note = lv_label_create(page_wifi);
+	lv_obj_set_style_text_color(wifi_note, lv_color_hex(C_DIM), 0);
+	lv_label_set_text(wifi_note, "");
+	wifi_list = lv_obj_create(page_wifi);
+	lv_obj_remove_style_all(wifi_list);
+	lv_obj_set_size(wifi_list, LV_PCT(100), LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(wifi_list, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_style_pad_row(wifi_list, LIST_ROW_GAP, 0);
+	lv_obj_remove_flag(wifi_list, LV_OBJ_FLAG_SCROLLABLE);
+}
+
+/* ---- typing: a screen with one field and sprite's own keyboard under it ----
+
+   The keyboard fills the bottom of the screen: five rows of 48 px keys (the smallest touch
+   target), 6 px apart. Digits are always on the top row; one layer has the letters, one
+   every other printable ASCII character. Shift is for one letter, or tapped again, for all
+   of them until it's tapped once more. A key acts as it's pressed, and only backspace
+   repeats when held. */
+
+#define KB_KEY_H 48
+#define KB_GAP 6
+#define KB_ROWS 5
+#define KB_H (KB_ROWS * KB_KEY_H + (KB_ROWS + 1) * KB_GAP)
+#define KB_SHIFT_KEY 31            // the index of shift in the letter layers (see kb_lower)
+
+static const char *kb_lower[] = {
+	"1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "\n",
+	"q", "w", "e", "r", "t", "y", "u", "i", "o", "p", "\n",
+	" ", "a", "s", "d", "f", "g", "h", "j", "k", "l", " ", "\n",
+	LV_SYMBOL_UP, "z", "x", "c", "v", "b", "n", "m", LV_SYMBOL_BACKSPACE, "\n",
+	"#+=", ",", " ", ".", "-", "" };
+static const char *kb_upper[] = {
+	"1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "\n",
+	"Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "\n",
+	" ", "A", "S", "D", "F", "G", "H", "J", "K", "L", " ", "\n",
+	LV_SYMBOL_UP, "Z", "X", "C", "V", "B", "N", "M", LV_SYMBOL_BACKSPACE, "\n",
+	"#+=", ",", " ", ".", "-", "" };
+static const char *kb_symbols[] = {
+	"1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "\n",
+	"!", "@", "#", "$", "%", "^", "&", "*", "(", ")", "\n",
+	"-", "_", "=", "+", "[", "]", "{", "}", "\\", "|", "\n",
+	"`", "~", ";", ":", "'", "\"", "<", ">", LV_SYMBOL_BACKSPACE, "\n",
+	"abc", "?", " ", "/", ".", ",", "" };
+
+// Widths in half keys. NR: no repeat (everything but backspace); HID: a half-key indent.
+#define NR LV_BUTTONMATRIX_CTRL_NO_REPEAT
+#define HID (LV_BUTTONMATRIX_CTRL_HIDDEN | NR | 1)
+static const lv_buttonmatrix_ctrl_t kb_letters_ctrl[] = {
+	NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2,
+	NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2,
+	HID, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, HID,
+	NR | 3, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, 3,
+	NR | 4, NR | 2, NR | 10, NR | 2, NR | 2 };
+static const lv_buttonmatrix_ctrl_t kb_symbols_ctrl[] = {
+	NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2,
+	NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2,
+	NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2,
+	NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, NR | 2, 4,
+	NR | 4, NR | 2, NR | 8, NR | 2, NR | 2, NR | 2 };
+#undef NR
+#undef HID
+
+static lv_obj_t *kb, *entry_ta, *entry_title, *entry_hint, *entry_go, *entry_eye;
+static enum entry_mode entry_mode;
+static char entry_ssid[WIFI_SSID_MAX + 1];
+static enum { SHIFT_OFF, SHIFT_ONCE, SHIFT_LOCK } kb_shift;
+static bool kb_syms;
+
+static void kb_layout(void) {
+	if (kb_syms) {
+		lv_buttonmatrix_set_map(kb, kb_symbols);
+		lv_buttonmatrix_set_ctrl_map(kb, kb_symbols_ctrl);
+	} else {
+		lv_buttonmatrix_set_map(kb, kb_shift ? kb_upper : kb_lower);
+		lv_buttonmatrix_set_ctrl_map(kb, kb_letters_ctrl);
+		if (kb_shift) lv_buttonmatrix_set_button_ctrl(kb, KB_SHIFT_KEY, LV_BUTTONMATRIX_CTRL_CHECKED);
+	}
+}
+
+static void entry_validate(void) {
+	size_t n = strlen(lv_textarea_get_text(entry_ta));
+	bool ok = entry_mode == ENTRY_NAME ? n >= 1 && n <= WIFI_SSID_MAX
+					  : (n >= 8 && n <= 64) || (entry_mode == ENTRY_OPEN_PASSWORD && n == 0);
+	if (ok) lv_obj_remove_state(entry_go, LV_STATE_DISABLED);
+	else lv_obj_add_state(entry_go, LV_STATE_DISABLED);
+}
+
+static void entry_changed(lv_event_t *e) { entry_validate(); }
+
+static void kb_draw_task(lv_event_t *e) {
+	lv_draw_task_t *t = lv_event_get_draw_task(e);
+	lv_draw_dsc_base_t *base = lv_draw_task_get_draw_dsc(t);
+	if (base->part != LV_PART_ITEMS || lv_draw_task_get_type(t) != LV_DRAW_TASK_TYPE_FILL) return;
+	if (!lv_obj_has_state(kb, LV_STATE_PRESSED) || base->id1 != lv_buttonmatrix_get_selected_button(kb)) return;
+	lv_draw_fill_dsc_t *f = lv_draw_task_get_fill_dsc(t);
+	f->color = lv_color_darken(f->color, LV_OPA_30);
+}
+
+static void kb_pressed(lv_event_t *e) {
+	uint32_t id = lv_buttonmatrix_get_selected_button(kb);
+	if (id == LV_BUTTONMATRIX_BUTTON_NONE) return;
+	const char *t = lv_buttonmatrix_get_button_text(kb, id);
+	if (!strcmp(t, LV_SYMBOL_BACKSPACE)) {
+		lv_textarea_delete_char(entry_ta);
+	} else if (!strcmp(t, LV_SYMBOL_UP)) {
+		kb_shift = kb_shift == SHIFT_OFF ? SHIFT_ONCE : kb_shift == SHIFT_ONCE ? SHIFT_LOCK : SHIFT_OFF;
+		kb_layout();
+	} else if (!strcmp(t, "#+=") || !strcmp(t, "abc")) {
+		kb_syms = !kb_syms;
+		kb_shift = SHIFT_OFF;
+		kb_layout();
+	} else {
+		lv_textarea_add_text(entry_ta, t);
+		if (kb_shift == SHIFT_ONCE) {
+			kb_shift = SHIFT_OFF;
+			kb_layout();
+		}
+	}
+	entry_validate();
+}
+
+static void entry_clear(void) {
+	if (entry_ta) lv_textarea_set_text(entry_ta, "");
+}
+
+static void entry_back(lv_event_t *e) { show_page(page_wifi); }
+
+static void entry_go_clicked(lv_event_t *e) {
+	if (lv_obj_has_state(entry_go, LV_STATE_DISABLED)) return;
+	if (entry_mode == ENTRY_NAME) {
+		char name[WIFI_SSID_MAX + 1];
+		snprintf(name, sizeof name, "%s", lv_textarea_get_text(entry_ta));
+		open_entry(ENTRY_OPEN_PASSWORD, name);
+		return;
+	}
+	wifi_join_now(entry_ssid, lv_textarea_get_text(entry_ta)); // leaving the screen clears it
+}
+
+static void entry_eye_clicked(lv_event_t *e) {
+	bool hidden = lv_textarea_get_password_mode(entry_ta);
+	lv_textarea_set_password_mode(entry_ta, !hidden);
+	lv_label_set_text(lv_obj_get_child(entry_eye, 0), hidden ? LV_SYMBOL_EYE_CLOSE : LV_SYMBOL_EYE_OPEN);
+}
+
+static void open_entry(enum entry_mode mode, const char *ssid) {
+	entry_mode = mode;
+	snprintf(entry_ssid, sizeof entry_ssid, "%s", ssid);
+	char t[80];
+	if (mode == ENTRY_NAME) snprintf(t, sizeof t, "The network's name");
+	else snprintf(t, sizeof t, "Password for %s", ssid);
+	lv_label_set_text(entry_title, t);
+	lv_label_set_text(entry_hint, mode == ENTRY_NAME ? "Exactly as it's written, capitals and all"
+				      : mode == ENTRY_OPEN_PASSWORD ? "8 to 63 characters, or none for an open network"
+								    : "8 to 63 characters");
+	lv_label_set_text(lv_obj_get_child(entry_go, 0), mode == ENTRY_NAME ? "Next" : "Connect");
+	lv_textarea_set_max_length(entry_ta, mode == ENTRY_NAME ? WIFI_SSID_MAX : 64);
+	lv_textarea_set_password_mode(entry_ta, mode != ENTRY_NAME);
+	if (mode == ENTRY_NAME) lv_obj_add_flag(entry_eye, LV_OBJ_FLAG_HIDDEN);
+	else lv_obj_remove_flag(entry_eye, LV_OBJ_FLAG_HIDDEN);
+	lv_label_set_text(lv_obj_get_child(entry_eye, 0), LV_SYMBOL_EYE_OPEN);
+	kb_shift = SHIFT_OFF;
+	kb_syms = false;
+	kb_layout();
+	show_page(page_entry);
+	entry_clear();
+	entry_validate();
+}
+
+static void build_entry(lv_obj_t *scr) {
+	page_entry = lv_obj_create(scr);
+	lv_obj_remove_style_all(page_entry);
+	lv_obj_set_size(page_entry, SPRITE_W, SPRITE_H - BAR_H);
+	lv_obj_set_pos(page_entry, 0, BAR_H);
+	lv_obj_remove_flag(page_entry, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_add_flag(page_entry, LV_OBJ_FLAG_HIDDEN);
+
+	// the top row: back, and what's wanted
+	lv_obj_t *back = button(page_entry, LV_SYMBOL_LEFT "  Wi-Fi", BUTTON_MAIN, entry_back, NULL);
+	lv_obj_set_pos(back, CONTENT_X, CONTENT_TOP);
+	lv_obj_update_layout(back);
+	int tx = CONTENT_X + lv_obj_get_width(back) + BUTTON_GAP;
+	entry_title = lv_label_create(page_entry);
+	lv_label_set_long_mode(entry_title, LV_LABEL_LONG_DOT);
+	lv_obj_set_width(entry_title, SPRITE_W - CONTENT_X - tx);
+	lv_obj_set_style_text_color(entry_title, lv_color_hex(C_TEXT), 0);
+	lv_obj_align_to(entry_title, back, LV_ALIGN_OUT_RIGHT_MID, BUTTON_GAP, 0);
+
+	// the field, the eye that shows what's typed, and the button that goes on
+	int fy = CONTENT_TOP + BUTTON_H + ROW_GAP + 4;
+	entry_go = button(page_entry, "Connect", BUTTON_MAIN, entry_go_clicked, NULL);
+	lv_obj_update_layout(entry_go);
+	int gw = lv_obj_get_width(entry_go);
+	lv_obj_set_pos(entry_go, SPRITE_W - CONTENT_X - gw, fy);
+	entry_eye = lv_button_create(page_entry);
+	lv_obj_set_size(entry_eye, BUTTON_H, BUTTON_H);
+	lv_obj_set_pos(entry_eye, SPRITE_W - CONTENT_X - gw - BUTTON_GAP / 2 - BUTTON_H, fy);
+	lv_obj_set_style_bg_color(entry_eye, lv_color_hex(C_BUTTON_OTHER), 0);
+	lv_obj_t *el = lv_label_create(entry_eye);
+	lv_label_set_text(el, LV_SYMBOL_EYE_OPEN);
+	lv_obj_center(el);
+	lv_obj_add_event_cb(entry_eye, entry_eye_clicked, LV_EVENT_CLICKED, NULL);
+	entry_ta = lv_textarea_create(page_entry);
+	lv_textarea_set_one_line(entry_ta, true);
+	lv_textarea_set_password_show_time(entry_ta, 1200); // each character shows briefly as it's typed
+	lv_obj_set_size(entry_ta, SPRITE_W - 2 * CONTENT_X - gw - BUTTON_GAP - BUTTON_H - BUTTON_GAP / 2, BUTTON_H);
+	lv_obj_set_pos(entry_ta, CONTENT_X, fy);
+	lv_obj_set_style_bg_color(entry_ta, lv_color_hex(C_CARD), 0);
+	lv_obj_set_style_bg_opa(entry_ta, LV_OPA_COVER, 0);
+	lv_obj_set_style_border_width(entry_ta, 2, 0);
+	lv_obj_set_style_border_color(entry_ta, lv_color_hex(C_ACCENT), 0);
+	lv_obj_set_style_text_color(entry_ta, lv_color_hex(C_TEXT), 0);
+	lv_obj_set_style_text_font(entry_ta, &lv_font_montserrat_20, 0);
+	lv_obj_set_style_pad_hor(entry_ta, 14, 0);
+	lv_obj_set_style_pad_ver(entry_ta, (BUTTON_H - 4 - lv_font_get_line_height(&lv_font_montserrat_20)) / 2, 0);
+	lv_obj_set_style_border_color(entry_ta, lv_color_hex(C_ACCENT), LV_PART_CURSOR);
+	lv_obj_set_style_border_width(entry_ta, 2, LV_PART_CURSOR);
+	lv_obj_add_state(entry_ta, LV_STATE_FOCUSED); // shows the cursor
+	lv_obj_add_event_cb(entry_ta, entry_changed, LV_EVENT_VALUE_CHANGED, NULL);
+	rounded(entry_ta);
+	entry_hint = lv_label_create(page_entry);
+	lv_obj_set_style_text_font(entry_hint, &lv_font_montserrat_14, 0);
+	lv_obj_set_style_text_color(entry_hint, lv_color_hex(C_DIM), 0);
+	lv_obj_set_pos(entry_hint, CONTENT_X + 2, fy + BUTTON_H + HINT_GAP);
+
+	// the keyboard. None of LVGL's theme: its pressed style for the keys makes LVGL redraw the
+	// whole keyboard (19 ms) each time it's pressed and released, as the widget's own state
+	// changes. The pressed key is darkened as it's drawn instead, so only that key redraws.
+	kb = lv_buttonmatrix_create(page_entry);
+	lv_obj_remove_style_all(kb);
+	lv_obj_add_flag(kb, LV_OBJ_FLAG_SEND_DRAW_TASK_EVENTS);
+	lv_obj_add_event_cb(kb, kb_draw_task, LV_EVENT_DRAW_TASK_ADDED, NULL);
+	lv_obj_set_size(kb, SPRITE_W, KB_H);
+	lv_obj_align(kb, LV_ALIGN_BOTTOM_MID, 0, 0);
+	lv_obj_set_style_bg_color(kb, lv_color_hex(C_BAR), 0);
+	lv_obj_set_style_bg_opa(kb, LV_OPA_COVER, 0);
+	lv_obj_set_style_border_width(kb, 0, 0);
+	lv_obj_set_style_radius(kb, 0, 0);
+	lv_obj_set_style_pad_all(kb, KB_GAP, 0);
+	lv_obj_set_style_pad_row(kb, KB_GAP, 0);
+	lv_obj_set_style_pad_column(kb, KB_GAP, 0);
+	lv_obj_set_style_bg_color(kb, lv_color_hex(C_BUTTON_OTHER), LV_PART_ITEMS);
+	lv_obj_set_style_bg_opa(kb, LV_OPA_COVER, LV_PART_ITEMS);
+	lv_obj_set_style_bg_color(kb, lv_color_hex(C_ACCENT), LV_PART_ITEMS | LV_STATE_CHECKED);
+	lv_obj_set_style_text_color(kb, lv_color_hex(C_TEXT), LV_PART_ITEMS);
+	lv_obj_set_style_text_font(kb, &lv_font_montserrat_20, LV_PART_ITEMS);
+	lv_obj_set_style_border_width(kb, 0, LV_PART_ITEMS);
+	lv_obj_set_style_shadow_width(kb, 0, LV_PART_ITEMS);
+	int key_w = (SPRITE_W - 2 * KB_GAP - 9 * KB_GAP) / 10;
+	lv_obj_set_style_radius(kb, radius_for(key_w, KB_KEY_H), LV_PART_ITEMS);
+	lv_obj_add_event_cb(kb, kb_pressed, LV_EVENT_VALUE_CHANGED, NULL);
+	kb_layout();
+}
+
+static void build_settings(lv_obj_t *scr) {
+	page_settings = list_page(scr);
 	button(page_settings, LV_SYMBOL_LEFT "  Home", BUTTON_MAIN, back_clicked, NULL);
+
+	struct sprite_net net;
+	sysinfo_net(&net);
+	if (net.wifi_present) { // the unit has a Wi-Fi card
+		section(page_settings, "WI-FI");
+		lv_obj_t *r = lv_obj_create(page_settings);
+		lv_obj_remove_style_all(r);
+		lv_obj_set_size(r, LV_PCT(100), ROW_H);
+		lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
+		lv_obj_set_flex_align(r, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+		lv_obj_set_style_pad_column(r, 20, 0);
+		lv_obj_remove_flag(r, LV_OBJ_FLAG_SCROLLABLE);
+		wifi_status_label = lv_label_create(r);
+		lv_label_set_text(wifi_status_label, "Not connected");
+		lv_label_set_long_mode(wifi_status_label, LV_LABEL_LONG_DOT);
+		lv_obj_set_flex_grow(wifi_status_label, 1);
+		lv_obj_set_style_text_color(wifi_status_label, lv_color_hex(C_TEXT), 0);
+		wifi_detail_label = lv_label_create(r);
+		lv_label_set_text(wifi_detail_label, "");
+		lv_obj_set_style_text_color(wifi_detail_label, lv_color_hex(C_DIM), 0);
+		lv_obj_t *br = button_row(page_settings);
+		button(br, LV_SYMBOL_WIFI "  Choose network", BUTTON_MAIN, wifi_choose_clicked, NULL);
+		wifi_forget_btn = button(br, "Forget", BUTTON_OTHER, wifi_forget_ask, NULL);
+		lv_obj_add_flag(wifi_forget_btn, LV_OBJ_FLAG_HIDDEN);
+	}
 
 	section(page_settings, "BRIGHTNESS");
 	lv_obj_t *row = lv_obj_create(page_settings);
@@ -1372,4 +2024,6 @@ void shell_init(void *pixels) {
 	build_bar(scr);
 	build_home(scr);
 	build_settings(scr);
+	build_wifi(scr);
+	build_entry(scr);
 }

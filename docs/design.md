@@ -150,6 +150,7 @@ Buttons in a row are 20 px apart.
 - **Pressed, a button darkens.** It doesn't grow (LVGL's `LV_THEME_DEFAULT_GROW` is off): a
   grown button's corners poke out of its row and get cut off square.
 - **Labels say what happens** in words anyone knows: "Reset", not "Standard".
+- **An icon-only button** (showing a password) is a 48×48 square, grey.
 
 **List screens** (Settings, and any like it) are a column of headings and rows, 12 px apart:
 - **Every row of controls is 48 px tall.** A button fills it; a switch or slider sits in its
@@ -158,8 +159,34 @@ Buttons in a row are 20 px apart.
   starts 28 px below whatever came before it, whatever that was.
 - **A hint under a setting's name** (14 px, dimmed) sits 6 px below it, and says what the
   setting does in plain words.
+- **A list of choices** (the Wi-Fi networks) has rows 48 px tall but only 4 px apart, each
+  pressable as a whole (white at 10% while pressed, with the radius rule), its content inset
+  12 px: a 20 px icon, the name (20 px, ending in "..." if it's too long), then a note (16 px:
+  "Connected" in the accent colour, others dimmed) and a lock for one that needs a password.
+  Ones that can't be chosen are dimmed, but still say why when tapped.
+- **Something that takes a moment** (looking for networks) says so in a dimmed line where
+  its results will go, and the button that would start it again is disabled meanwhile.
 
-## 8. Dialogs
+## 8. Typing
+
+**A screen for typing** has one field, and sprite's own keyboard filling the bottom 276 px:
+
+- **The top row:** a back button, and what's wanted beside it ("Password for ...").
+- **The field** below it, 48 px tall, with a 2 px accent border and the cursor showing; then
+  the eye button (passwords only) and the button that goes on ("Connect", "Next"), disabled
+  until what's typed will do. A dimmed hint under the field says what will ("8 to 63
+  characters").
+- **Passwords are hidden** as they're typed, each character showing for a moment; the eye
+  shows them all. Leaving the screen empties the field.
+- **The keyboard:** five rows of keys 48 px tall and about 73 px wide, 6 px apart, on the
+  status bar's colour. The top row is always the digits. One layer has the letters (with
+  `, . -` and a space bar), the other every other printable ASCII character. Shift is for
+  one letter; tapped twice, for all until it's tapped again; it's accent-coloured while on.
+- **Keys act as they're pressed,** and only backspace repeats when held. A pressed key
+  darkens, drawn as it's drawn rather than through LVGL's pressed style, which would redraw
+  the whole keyboard (19 ms) on every press: only the key itself redraws (about 8 ms).
+
+## 9. Dialogs
 
 **Anything that asks something uses the one dialog** (`dialog_open()` and `dialog_button()`):
 the long-press sheet, the Restart and Switch off questions, and the calibration result.
@@ -175,7 +202,7 @@ the long-press sheet, the Restart and Switch off questions, and the calibration 
 - Text says what happened or will happen in a sentence or two. Titles are short: the app's
   name, or the question.
 
-## 9. Touch
+## 10. Touch
 
 - **Targets are at least 48 px in their smaller dimension.** Calibrated taps land within
   about 10 px of where you aim, and on the bare factory calibration up to 16 px out. Never
@@ -187,7 +214,7 @@ the long-press sheet, the Restart and Switch off questions, and the calibration 
   strokes. Motion carries on through that wait, so nothing visibly stops.
 - **No hover:** the touchscreen only reports while it's touched.
 
-## 10. Apps
+## 11. Apps
 
 - **Full screen at 800×480,** drawn in software (no GL). Wayland apps connect directly; X11
   and SDL apps go through Xwayland.
@@ -201,4 +228,6 @@ the long-press sheet, the Restart and Switch off questions, and the calibration 
 - **Icon artwork** for apps that bring their own (an 88×88 image in the manifest?), alongside
   the glyph tiles.
 - **Light or dark,** and whether the look follows the time of day or the light sensor.
-- **Settings' layout** as it grows: Wi-Fi, sound, time zone.
+- **Settings' layout** as it grows: sound, time zone.
+- **Fonts beyond ASCII,** for network and app names with accents or emoji: each size built
+  in with more characters costs memory, so measure first.

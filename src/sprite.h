@@ -133,5 +133,34 @@ bool sysinfo_backlight_auto(void);
 void sysinfo_set_backlight(const char *arg);  // "0".."100" or "auto", runs of-backlight
 void sysinfo_summary(char *buf, size_t len);  // multi-line system text
 void sysinfo_run(const char *cmd);            // fire and forget
+#define HELPER_SOCKET "/run/sprite-helper.sock"
 // Ask sprite's root helper to do something (one line, e.g. "reboot"), without waiting.
 void sysinfo_helper(const char *line);
+
+/* wifi.c: Wi-Fi through the helper, which owns settings/wifi.txt. Each call answers later,
+   from the event loop; error is NULL on success, or the reason. */
+#define WIFI_SSID_MAX 32
+#define WIFI_NETS_MAX 40
+struct wifi_net {
+	char ssid[WIFI_SSID_MAX + 1];   // UTF-8, as it should be shown
+	int dbm;                        // signal
+	bool secured;                   // needs a password
+	bool supported;                 // joinable from wifi.txt: not WEP or enterprise-only
+};
+struct wifi_status {
+	bool present;                   // there's a Wi-Fi interface (and the helper answered)
+	bool connected;                 // joined, with an address
+	bool trouble;                   // wpa_supplicant has given up on the network for now
+	char state[24];                 // wpa_supplicant's: COMPLETED, SCANNING, ... or empty
+	char ssid[WIFI_SSID_MAX + 1];   // the network joined
+	char saved[WIFI_SSID_MAX * 4 + 1]; // the network in settings/wifi.txt, if any
+	char address[16];
+};
+typedef void (*wifi_scan_cb)(const struct wifi_net *nets, int n, const char *error, void *data);
+typedef void (*wifi_status_cb)(const struct wifi_status *s, const char *error, void *data);
+typedef void (*wifi_done_cb)(const char *error, void *data);
+void wifi_scan(wifi_scan_cb cb, void *data);       // strongest first, one per name
+void wifi_status(wifi_status_cb cb, void *data);
+void wifi_join(const char *ssid, const char *password, wifi_done_cb cb, void *data);
+void wifi_forget(wifi_done_cb cb, void *data);
+int wifi_level(int dbm);                          // 1-4 bars
