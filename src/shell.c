@@ -2,12 +2,16 @@
 // The shell: status bar, home screen of app tiles, settings. LVGL, rendered in software
 // into the buffer the compositor shows whenever no app is on screen.
 #define _GNU_SOURCE
+#include <errno.h>
+#include <fcntl.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "lvgl/lvgl.h"
 #include "lvgl/lvgl_private.h" // lv_theme_t, to layer sprite's rules over LVGL's default theme
@@ -79,12 +83,14 @@ static int cur_page, n_pages;
 // springs back from past an end in PAGE_SLIDE_MS.
 #define SCROLL_GLIDE_MS 300
 #define SCROLL_GLIDE_MIN_SPEED 0.15  // px/ms
-static enum { DRAG_NONE, DRAG_MAYBE, DRAG_PAGING, DRAG_SCROLL } drag;
+static enum { DRAG_NONE, DRAG_MAYBE, DRAG_PAGING, DRAG_SCROLL, DRAG_TILE } drag;
 static int drag_x0, drag_y0;
 static bool drag_can_page;           // the touch began where a sideways drag turns pages
 static lv_obj_t *drag_scroll;        // ... or where an up/down drag scrolls this
 static int scroll_y0, scroll_max;
 static void drag_input(int x, int y, bool pressed, bool was_pressed);
+static void tile_drop(bool place);
+static void tile_follow(int x, int y);
 static lv_obj_t *bl_slider, *bl_auto, *about_label;
 static bool visible = true, rebuild_pending;
 static struct sprite_app *opening;
@@ -201,7 +207,7 @@ void shell_pointer(int x, int y, bool pressed) {
 	y = y < 0 ? 0 : y >= SPRITE_H ? SPRITE_H - 1 : y;
 	double now = now_ms();
 	// While dragging, the frames move things, from interpolated positions (shell_frame)
-	bool dragging = (drag == DRAG_PAGING || drag == DRAG_SCROLL) && pressed && ptr_pressed;
+	bool dragging = (drag == DRAG_PAGING || drag == DRAG_SCROLL || drag == DRAG_TILE) && pressed && ptr_pressed;
 	if (!dragging) drag_input(x, y, pressed, ptr_pressed);
 	if (pressed && ptr_pressed) { // the finger moving: used by the next frames (shell_frame)
 		smp[0] = smp[1];
@@ -232,12 +238,12 @@ void shell_frame(void) {
 		// Our drags carry on at the finger's last speed past its last report, for at most
 		// SPRITE_DEBOUNCE_MS: a lifting finger's release is held that long (it may be a
 		// contact bounce), and the strip shouldn't stop dead while it waits.
-		bool ours = drag == DRAG_PAGING || drag == DRAG_SCROLL;
+		bool ours = drag == DRAG_PAGING || drag == DRAG_SCROLL || drag == DRAG_TILE;
 		double kmax = ours ? 1 + SPRITE_DEBOUNCE_MS / (smp[1].t - smp[0].t) : 1;
 		if (k > kmax) k = kmax;
 		ptr_x = (int)(smp[0].x + (smp[1].x - smp[0].x) * k + 0.5);
 		ptr_y = (int)(smp[0].y + (smp[1].y - smp[0].y) * k + 0.5);
-		if (ours) drag_input(ptr_x, ptr_y, true, true); // the strip or the screen, smoothly
+		if (ours) drag_input(ptr_x, ptr_y, true, true); // the strip, the screen or a tile, smoothly
 		else lv_indev_read(indev);
 		if (k < kmax) sprite_request_frame(); // still catching up, or carrying on
 	}
@@ -258,6 +264,7 @@ void shell_set_visible(bool v) {
 		if (toast_timer) { lv_timer_delete(toast_timer); toast_timer = NULL; }
 		if (hold_timer) { lv_timer_delete(hold_timer); hold_timer = NULL; }
 		opening = NULL;
+		tile_drop(false);
 		sheet_dismiss();
 		dialog_close();
 	}
@@ -810,7 +817,10 @@ static void open_sheet(struct sprite_app *a) {
 	sprite_lvgl_kick();
 }
 
-static void tile_long_pressed(lv_event_t *e) { open_sheet(lv_event_get_user_data(e)); }
+static void tile_lift(lv_obj_t *tile, struct sprite_app *a);
+static void tile_long_pressed(lv_event_t *e) {
+	tile_lift(lv_event_get_current_target(e), lv_event_get_user_data(e));
+}
 
 /* ---- the home grid, in pages ---- */
 
@@ -834,7 +844,7 @@ static lv_obj_t *make_badge(lv_obj_t *cell, const struct sprite_app *a) {
 	return badge;
 }
 
-static void make_cell(lv_obj_t *page, struct sprite_app *a) {
+static lv_obj_t *make_cell(lv_obj_t *page, struct sprite_app *a) {
 	lv_obj_t *tile = lv_obj_create(page);
 	lv_obj_remove_style_all(tile);
 	lv_obj_set_size(tile, TILE_W, TILE_H);
@@ -880,6 +890,7 @@ static void make_cell(lv_obj_t *page, struct sprite_app *a) {
 	lv_obj_set_style_bg_color(tile, lv_color_white(), LV_STATE_PRESSED);
 	lv_obj_set_style_bg_opa(tile, LV_OPA_20, LV_STATE_PRESSED);
 	lv_obj_set_style_radius(tile, radius_for(TILE_W, TILE_H), 0);
+	return tile;
 }
 
 static void slide_exec(void *obj, int32_t x) { lv_obj_set_x(obj, x); }
@@ -937,6 +948,11 @@ static lv_obj_t *scrolling_screen(void) {
 // Called with each position the shell is given, before LVGL sees it: page turning and
 // scrolling, the same way everywhere.
 static void drag_input(int x, int y, bool pressed, bool was_pressed) {
+	if (drag == DRAG_TILE) { // a lifted tile (see tile_lift) follows, then drops
+		if (pressed) tile_follow(x, y);
+		else tile_drop(true);
+		return;
+	}
 	bool free = !sheet && !cal && !lv_obj_get_child_count(lv_layer_top());
 	if (pressed && !was_pressed) { // a touch begins
 		// one page can be flicked too, against the ends: it shows there's paging to be had
@@ -1021,35 +1037,247 @@ static void update_dots(void) {
 	}
 }
 
+/* ---- arranging the home screen ---- */
+
+// Each app has a place: a slot on one of up to MAX_PAGES pages, kept in the of user's
+// ~/.local/state/sprite/layout as "<slot> <app id>" lines (slot = page * PER_PAGE + cell).
+// Apps the file doesn't place (new ones) take the first free slots. A long press lifts a
+// tile: let go where it is and the sheet opens; drag it and it follows the finger, the slot
+// under it lit, and dropping it there swaps it with whatever was there. Held at a side
+// edge, the pages turn; while a tile is up there's an empty page after the last (up to
+// MAX_PAGES), to start a new one.
+#define MAX_PAGES 3
+#define MAX_SLOTS (MAX_PAGES * PER_PAGE)
+#define EDGE_W 40                  // px at either side where a held tile turns the page
+#define EDGE_HOLD_MS 600
+static struct sprite_app *slots[MAX_SLOTS];
+static struct { char id[64]; int slot; } placed[MAX_SLOTS];
+static int n_placed = -1;          // -1: the file hasn't been read yet
+
+static lv_obj_t *lift_tile, *floater, *marker;
+static struct sprite_app *lift_app;
+static int lift_from, lift_to, lift_dx, lift_dy, edge_dir;
+static bool lift_moved;
+static lv_timer_t *edge_timer;
+
+static const char *layout_path(void) {
+	static char path[256];
+	const char *home = getenv("HOME");
+	snprintf(path, sizeof path, "%s/.local/state/sprite/layout", home && home[0] ? home : "/tmp");
+	return path;
+}
+
+static void layout_read(void) {
+	n_placed = 0;
+	FILE *f = fopen(layout_path(), "r");
+	if (!f) return;
+	char line[128];
+	int slot;
+	char id[64];
+	while (n_placed < MAX_SLOTS && fgets(line, sizeof line, f))
+		if (sscanf(line, "%d %63s", &slot, id) == 2 && slot >= 0 && slot < MAX_SLOTS) {
+			placed[n_placed].slot = slot;
+			snprintf(placed[n_placed].id, sizeof placed[0].id, "%s", id);
+			n_placed++;
+		}
+	fclose(f);
+}
+
+// Written to a new file, synced, and renamed over the old, so a power cut leaves one or the other.
+static void layout_write(void) {
+	char dir[256], tmp[300];
+	const char *path = layout_path();
+	snprintf(dir, sizeof dir, "%s", path);
+	for (char *p = dir + 1; (p = strchr(p, '/')); *p++ = '/') { *p = 0; mkdir(dir, 0755); }
+	snprintf(tmp, sizeof tmp, "%s.new", path);
+	n_placed = 0;
+	FILE *f = fopen(tmp, "w");
+	if (!f) { fprintf(stderr, "sprite: can't write %s: %s\n", tmp, strerror(errno)); return; }
+	for (int s = 0; s < MAX_SLOTS; s++)
+		if (slots[s]) {
+			fprintf(f, "%d %s\n", s, slots[s]->id);
+			placed[n_placed].slot = s;
+			snprintf(placed[n_placed].id, sizeof placed[0].id, "%s", slots[s]->id);
+			n_placed++;
+		}
+	fflush(f);
+	fsync(fileno(f));
+	fclose(f);
+	if (rename(tmp, path) != 0) fprintf(stderr, "sprite: can't replace %s: %s\n", path, strerror(errno));
+}
+
+static bool on_grid(const struct sprite_app *a) { return !a->hidden && !a->builtin; } // Settings is the gear
+
+// Fills slots[] from the layout, then the rest in name order; returns the number of pages used.
+static int layout_assign(void) {
+	if (n_placed < 0) layout_read();
+	memset(slots, 0, sizeof slots);
+	for (int i = 0; i < n_placed; i++) {
+		if (slots[placed[i].slot]) continue;
+		for (int k = 0; k < apps_count(); k++) {
+			struct sprite_app *a = apps_get(k);
+			if (!on_grid(a) || strcmp(a->id, placed[i].id)) continue;
+			bool already = false;
+			for (int s = 0; s < MAX_SLOTS; s++) already |= slots[s] == a;
+			if (!already) slots[placed[i].slot] = a;
+			break;
+		}
+	}
+	for (int k = 0; k < apps_count(); k++) {
+		struct sprite_app *a = apps_get(k);
+		bool already = false;
+		for (int s = 0; s < MAX_SLOTS; s++) already |= slots[s] == a;
+		if (!on_grid(a) || already) continue;
+		int s = 0;
+		while (s < MAX_SLOTS && slots[s]) s++;
+		if (s == MAX_SLOTS) { fprintf(stderr, "sprite: no room on the home screen for %s\n", a->name); continue; }
+		slots[s] = a;
+	}
+	int last = 0;
+	for (int s = 0; s < MAX_SLOTS; s++)
+		if (slots[s]) last = s / PER_PAGE;
+	return last + 1;
+}
+
+static void cell_pos(int slot, int *x, int *y) {
+	int c = slot % PER_PAGE;
+	*x = GRID_PAD_X + (c % GRID_COLS) * TILE_W;
+	*y = GRID_PAD_TOP + (c / GRID_COLS) * TILE_H;
+}
+
+static lv_obj_t *new_page(int p) {
+	lv_obj_t *page = lv_obj_create(strip);
+	lv_obj_remove_style_all(page);
+	lv_obj_set_size(page, SPRITE_W, SPRITE_H - BAR_H);
+	lv_obj_set_pos(page, p * SPRITE_W, 0);
+	lv_obj_remove_flag(page, LV_OBJ_FLAG_SCROLLABLE);
+	return page;
+}
+
+// The slot under a point on the screen, on the page showing.
+static int slot_at(int x, int y) {
+	int col = (x - GRID_PAD_X) / TILE_W, row = (y - BAR_H - GRID_PAD_TOP) / TILE_H;
+	col = col < 0 ? 0 : col >= GRID_COLS ? GRID_COLS - 1 : col;
+	row = row < 0 ? 0 : row >= GRID_ROWS ? GRID_ROWS - 1 : row;
+	return cur_page * PER_PAGE + row * GRID_COLS + col;
+}
+
+static void mark_slot(int slot) {
+	lift_to = slot;
+	lv_obj_t *page = lv_obj_get_child(strip, slot / PER_PAGE);
+	if (!page) return;
+	if (lv_obj_get_parent(marker) != page) lv_obj_set_parent(marker, page);
+	int x, y;
+	cell_pos(slot, &x, &y);
+	lv_obj_set_pos(marker, x, y);
+}
+
+static void edge_turn(lv_timer_t *t) {
+	int p = cur_page + edge_dir;
+	if (drag != DRAG_TILE || !edge_dir || p < 0 || p >= n_pages) return;
+	go_to_page(p, true);
+	mark_slot(slot_at(ptr_x, ptr_y)); // the cell at the edge the finger's on, on the new page
+}
+
+static void tile_lift(lv_obj_t *tile, struct sprite_app *a) {
+	if (drag == DRAG_TILE || sheet) return;
+	lift_from = -1;
+	for (int s = 0; s < MAX_SLOTS; s++)
+		if (slots[s] == a) lift_from = s;
+	if (lift_from < 0) { open_sheet(a); return; }
+	lift_app = a;
+	lift_tile = tile;
+	lift_moved = false;
+	drag = DRAG_TILE;
+	drag_x0 = ptr_x;
+	drag_y0 = ptr_y;
+	// a copy of the icon, over everything, to carry about; the tile itself fades
+	lv_area_t c;
+	lv_obj_get_coords(tile, &c);
+	floater = lv_obj_create(lv_layer_top());
+	lv_obj_remove_style_all(floater);
+	lv_obj_set_size(floater, TILE_W, TILE_H);
+	lv_obj_set_pos(floater, c.x1, c.y1);
+	lv_obj_remove_flag(floater, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+	make_badge(floater, a);
+	lift_dx = ptr_x - c.x1;
+	lift_dy = ptr_y - c.y1;
+	lv_obj_set_style_opa(tile, LV_OPA_30, 0);
+	// where it would land: lit like a pressed cell
+	marker = lv_obj_create(lv_obj_get_parent(tile));
+	lv_obj_remove_style_all(marker);
+	lv_obj_set_size(marker, TILE_W, TILE_H);
+	lv_obj_set_style_bg_color(marker, lv_color_white(), 0);
+	lv_obj_set_style_bg_opa(marker, LV_OPA_20, 0);
+	lv_obj_set_style_radius(marker, radius_for(TILE_W, TILE_H), 0);
+	lv_obj_remove_flag(marker, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+	mark_slot(lift_from);
+	// one empty page after the last, to start a new one
+	if (n_pages < MAX_PAGES) {
+		new_page(n_pages++);
+		lv_obj_set_width(strip, n_pages * SPRITE_W);
+	}
+	lv_obj_remove_state(tile, LV_STATE_PRESSED);
+	lv_indev_reset(indev, NULL); // the drag is ours now: nothing more for LVGL from this touch
+	lv_indev_wait_release(indev);
+	sprite_lvgl_kick();
+}
+
+// Ends a lift: with place, the tile goes where it's marked (or, if it never moved, the sheet
+// opens); without, it goes back.
+static void tile_drop(bool place) {
+	if (drag != DRAG_TILE) return;
+	drag = DRAG_NONE;
+	if (edge_timer) { lv_timer_delete(edge_timer); edge_timer = NULL; }
+	lv_obj_delete(floater);
+	floater = marker = NULL; // the marker goes with the grid, rebuilt below
+	struct sprite_app *a = lift_app;
+	if (place && !lift_moved) {
+		lv_obj_set_style_opa(lift_tile, LV_OPA_COVER, 0);
+		shell_apps_changed(); // takes the empty page away again
+		open_sheet(a);
+		return;
+	}
+	if (place && lift_to != lift_from) {
+		slots[lift_from] = slots[lift_to];
+		slots[lift_to] = a;
+		layout_write();
+	}
+	shell_apps_changed();
+}
+
+static void tile_follow(int x, int y) {
+	if (!lift_moved && abs(x - drag_x0) < PAGE_DRAG_START && abs(y - drag_y0) < PAGE_DRAG_START) return;
+	lift_moved = true;
+	lv_obj_set_pos(floater, x - lift_dx, y - lift_dy);
+	int dir = x < EDGE_W ? -1 : x >= SPRITE_W - EDGE_W ? 1 : 0;
+	if (dir != edge_dir || !dir) {
+		edge_dir = dir;
+		if (edge_timer) { lv_timer_delete(edge_timer); edge_timer = NULL; }
+		if (dir) edge_timer = lv_timer_create(edge_turn, EDGE_HOLD_MS, NULL);
+	}
+	if (!dir) {
+		int s = slot_at(x, y);
+		if (s != lift_to) mark_slot(s);
+	}
+}
+
 static void rebuild_grid(void *unused) {
 	rebuild_pending = false;
+	if (drag == DRAG_TILE) return; // the lifted tile is still in it: the drop rebuilds
 	lv_obj_clean(strip);
-	int n = 0;
-	for (int i = 0; i < apps_count(); i++) { // Settings is the gear in the bar, not a tile
-		struct sprite_app *a = apps_get(i);
-		if (!a->hidden && !a->builtin) n++;
-	}
-	n_pages = n ? (n + PER_PAGE - 1) / PER_PAGE : 1;
+	n_pages = layout_assign();
 	lv_obj_set_width(strip, n_pages * SPRITE_W);
-	lv_obj_t *page = NULL;
-	int k = 0, p = 0;
-	for (int i = 0; i < apps_count() || !page; i++) {
-		struct sprite_app *a = i < apps_count() ? apps_get(i) : NULL;
-		if (a && (a->hidden || a->builtin)) continue;
-		if (!page || k == PER_PAGE) {
-			page = lv_obj_create(strip);
-			lv_obj_remove_style_all(page);
-			lv_obj_set_size(page, SPRITE_W, SPRITE_H - BAR_H);
-			lv_obj_set_pos(page, p++ * SPRITE_W, 0);
-			lv_obj_set_flex_flow(page, LV_FLEX_FLOW_ROW_WRAP);
-			lv_obj_set_style_pad_hor(page, GRID_PAD_X, 0);
-			lv_obj_set_style_pad_top(page, GRID_PAD_TOP, 0);
-			lv_obj_remove_flag(page, LV_OBJ_FLAG_SCROLLABLE);
-			k = 0;
+	for (int p = 0; p < n_pages; p++) {
+		lv_obj_t *page = new_page(p);
+		for (int c = 0; c < PER_PAGE; c++) {
+			struct sprite_app *a = slots[p * PER_PAGE + c];
+			if (!a) continue;
+			lv_obj_t *tile = make_cell(page, a);
+			int x, y;
+			cell_pos(p * PER_PAGE + c, &x, &y);
+			lv_obj_set_pos(tile, x, y);
 		}
-		if (!a) break;
-		make_cell(page, a);
-		k++;
 	}
 	go_to_page(cur_page, false);
 	if (opening && opening->pid == 0 && !opening->pending) { // it exited before showing a window

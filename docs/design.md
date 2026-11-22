@@ -64,7 +64,13 @@ later page.
 
 ## 4. Home grid
 
-- **6 columns by 3 rows,** 18 apps a page, as OpenPeak's own home screen had (O2's had 5×3).
+- **6 columns by 3 rows,** 18 apps a page, as OpenPeak's own home screen had (O2's had 5×3),
+  on up to three pages. No folders: three pages are room enough, and pages make the groups.
+- **Apps stay where they're put.** A long press lifts a tile (it fades, and a copy follows
+  the finger, the cell it would land in lit like a pressed one); dropping it swaps it with
+  what's there, so nothing else moves, and gaps stay gaps. Held 0.6 s within 40 px of either
+  side, it turns the page, again every 0.6 s. While it's up, an empty page waits after the
+  last (up to three). Let go without moving and the long-press sheet opens instead.
 - **Cells are 128×140,** with 16 px side margins and 10 px above the first row. The whole
   cell takes the touch.
 - **Icons are 88×88** with 18 px corners, 10 px from the top of the cell: a white glyph, 40 px,

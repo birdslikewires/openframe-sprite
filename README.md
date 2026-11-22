@@ -24,9 +24,14 @@ The ground rules for how it looks, feels and performs are in [docs/design.md](do
 - **Going home:** while an app shows, a small pill sits at the bottom centre of the screen.
   Touch it, or swipe up from it, to go home. With a USB keyboard, Alt+Esc also goes home, and
   Ctrl+Alt+Backspace quits sprite.
-- **Long press on a tile** opens a sheet with Open, Close (when the app is running) and
-  **Open at startup**. Close asks the app's window to close, then sends SIGTERM after 2 s and
-  SIGKILL after 4 s if it's still running.
+- **Long press on a tile** lifts it. Let go without moving and a sheet opens with Open, Close
+  (when the app is running) and **Open at startup**. Close asks the app's window to close,
+  then stops its sandbox 2 s later if it's still running.
+- **Arranging:** a lifted tile follows the finger, and dropping it on a cell puts it there,
+  swapping it with any app already in it. Held at either side, it turns the page; while a
+  tile is up there's an empty page after the last, so apps can go on up to three pages,
+  with gaps where you leave them. The layout is kept in `~/.local/state/sprite/layout`;
+  new apps take the first free cells.
 - **The startup app** (one at most, with a blue ring round its icon) opens when sprite starts,
   and reopens 2 s after it closes or crashes, unless it was closed from the sheet. After three
   exits within a minute it stops reopening and says so. It's `startup=` in the settings
@@ -196,8 +201,6 @@ can still be joined.
   as i386 `.deb` packages
 - `of` losing `NOPASSWD` and the shared password, now that apps don't run as `of`
 - A CPU cap on apps in the background (`CPUQuota=`, which the kernel can do now)
-- Arranging the home screen: dragging tiles to place them, across up to three pages (common
-  apps first, games on the next, and so on), with the layout kept. No folders.
 
 ## Licence
 

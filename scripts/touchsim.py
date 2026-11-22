@@ -7,6 +7,7 @@
 #   touchsim.py swipe X1 Y1 X2 Y2 MS          one way only
 #   touchsim.py tap X Y
 #   touchsim.py hold X Y MS                   press and hold (for screenshots of pressed states)
+#   touchsim.py lift X1 Y1 X2 Y2 MS [END_MS]   long press, drag to X2 Y2 in MS, hold END_MS, let go
 import fcntl, os, struct, sys, time
 
 UI_SET_EVBIT, UI_SET_KEYBIT, UI_SET_ABSBIT = 0x40045564, 0x40045565, 0x40045567
@@ -69,6 +70,24 @@ try:
         emit(EV_KEY, BTN_LEFT, 0)
         emit(EV_SYN, 0, 0)
         time.sleep(0.3)
+    elif sys.argv[1] == 'lift':
+        x1, y1, x2, y2, ms = map(float, sys.argv[2:7])
+        end = float(sys.argv[7]) if len(sys.argv) > 7 else 0
+        report(x1, y1, 1)
+        for _ in range(int(0.8 / PERIOD)):  # still, reporting as the real one does, past a long press
+            time.sleep(PERIOD)
+            report(x1, y1)
+        steps = max(1, int(ms / 1000 / PERIOD))
+        for i in range(1, steps + 1):
+            time.sleep(PERIOD)
+            report(x1 + (x2 - x1) * i / steps, y1 + (y2 - y1) * i / steps)
+        for _ in range(int(end / 1000 / PERIOD)):
+            time.sleep(PERIOD)
+            report(x2, y2)
+        time.sleep(PERIOD)
+        emit(EV_KEY, BTN_LEFT, 0)
+        emit(EV_SYN, 0, 0)
+        time.sleep(0.5)
     elif sys.argv[1] == 'tap':
         x, y = map(float, sys.argv[2:4])
         report(x, y, 1)
