@@ -91,6 +91,7 @@ void sprite_close_app(struct sprite_app *app); // ask its windows to close, then
 // (the startup app, at startup and when it's reopened). NULL shows the home screen again.
 void sprite_hold_for(struct sprite_app *app);
 void sprite_lvgl_kick(void);                  // run the LVGL timer handler soon
+void sprite_request_frame(void);              // the shell has something to draw at the next refresh
 struct wl_event_loop *sprite_event_loop(void);
 
 // shell.c
@@ -98,7 +99,11 @@ void shell_init(void *pixels);                // pixels: SPRITE_W x SPRITE_H XRG
 void shell_pointer(int x, int y, bool pressed);
 void shell_apps_changed(void);                // running state or list changed
 void shell_set_visible(bool visible);
+void shell_frame(void);                       // the display wants a frame: draw what has changed
 void shell_notice(const char *text);          // a banner on the home screen
+
+// main.c: performance trace (SPRITE_TRACE_PERF=1), one line a second while anything moves
+void perf_render(double ms);                  // the shell drew a frame, taking ms
 
 // main.c provides this for shell.c's flush callback
 void sprite_shell_damage(int x, int y, int w, int h, bool commit);

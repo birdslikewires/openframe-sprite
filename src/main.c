@@ -75,6 +75,7 @@ static struct {
 	struct wlr_scene_output_layout *scene_layout;
 	struct wlr_output_layout *layout;
 	struct wlr_scene_tree *apps_tree;
+	struct wlr_output *output;      // the panel
 	struct wlr_scene_buffer *shell_node;
 	struct wlr_scene_buffer *handle; // where to touch to go home, over apps
 	struct shell_buffer handlebuf;
@@ -100,6 +101,9 @@ static struct {
 	bool app_press_home_x;  // ... and whether that was in the middle, under the handle
 	bool button_down;
 	bool trace_input;       // SPRITE_TRACE_INPUT=1: log presses given to apps
+	int trace_perf;         // SPRITE_TRACE_PERF=1: frame timings, 2: and each late frame
+	// one burst of motion: frames shown with under 200 ms between them
+	struct { int renders, frames, missed; double render_sum, render_max, gap_max, first, last; } perf;
 	double calib[6];        // touch correction (see sprite.h)
 	bool calibrating;
 	struct wl_event_source *release_timer; // see SPRITE_DEBOUNCE_MS
@@ -781,16 +785,61 @@ static void new_input(struct wl_listener *l, void *data) {
 
 /* ---- output ---- */
 
-struct output { struct wlr_output *wlr; struct wl_listener frame, request_state, destroy; };
+struct output { struct wlr_output *wlr; struct wl_listener frame, request_state, destroy, present; };
 
+static void perf_flush(double now);
+
+// Each frame that reached the screen, timed by the display (for the performance trace).
+static void output_present(struct wl_listener *l, void *data) {
+	struct wlr_output_event_present *e = data;
+	if (!S.trace_perf || !e->presented) return;
+	double now = e->when->tv_sec * 1e3 + e->when->tv_nsec / 1e6;
+	double gap = now - S.perf.last;
+	if (S.perf.frames && gap > 200) perf_flush(now); // the end of a burst
+	if (!S.perf.frames) S.perf.first = now;
+	else {
+		if (gap > 20) S.perf.missed += (int)(gap / 16.7 + 0.5) - 1; // refreshes with no new frame
+		if (gap > 20 && S.trace_perf > 1)
+			wlr_log(WLR_INFO, "perf: late frame %.0f ms into the burst, after a %.1f ms gap", now - S.perf.first, gap);
+		if (gap > S.perf.gap_max) S.perf.gap_max = gap;
+	}
+	S.perf.last = now;
+	S.perf.frames++;
+}
+
+static void perf_flush(double now) {
+	if (S.perf.frames > 2) {
+		double dur = S.perf.last - S.perf.first;
+		wlr_log(WLR_INFO, "perf: %d frames in %.0f ms (%.1f/s), %d late (max gap %.1f ms); drawn %d, avg %.1f ms, max %.1f",
+			S.perf.frames, dur, dur > 0 ? (S.perf.frames - 1) * 1000.0 / dur : 0, S.perf.missed, S.perf.gap_max,
+			S.perf.renders, S.perf.renders ? S.perf.render_sum / S.perf.renders : 0, S.perf.render_max);
+	}
+	memset(&S.perf, 0, sizeof S.perf);
+}
+
+void perf_render(double ms) {
+	if (!S.trace_perf) return;
+	S.perf.renders++;
+	S.perf.render_sum += ms;
+	if (ms > S.perf.render_max) S.perf.render_max = ms;
+}
+
+void sprite_request_frame(void) {
+	if (S.output) wlr_output_schedule_frame(S.output);
+}
+
+// The panel is ready for a frame: the shell draws what has changed (in step with the display,
+// one frame per refresh), then the scene, with that, goes to the screen.
 static void output_frame(struct wl_listener *l, void *data) {
 	struct output *o = wl_container_of(l, o, frame);
 	struct wlr_scene_output *so = wlr_scene_get_scene_output(S.scene, o->wlr);
+	shell_frame();
 	wlr_scene_output_commit(so, NULL);
 	struct timespec now;
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	wlr_scene_output_send_frame_done(so, &now);
 }
+
 static void output_request_state(struct wl_listener *l, void *data) {
 	struct output *o = wl_container_of(l, o, request_state);
 	const struct wlr_output_event_request_state *e = data;
@@ -801,6 +850,8 @@ static void output_destroy(struct wl_listener *l, void *data) {
 	wl_list_remove(&o->frame.link);
 	wl_list_remove(&o->request_state.link);
 	wl_list_remove(&o->destroy.link);
+	wl_list_remove(&o->present.link);
+	if (S.output == o->wlr) S.output = NULL;
 	free(o);
 }
 
@@ -822,9 +873,12 @@ static void new_output(struct wl_listener *l, void *data) {
 	wl_signal_add(&wo->events.request_state, &o->request_state);
 	o->destroy.notify = output_destroy;
 	wl_signal_add(&wo->events.destroy, &o->destroy);
+	o->present.notify = output_present;
+	wl_signal_add(&wo->events.present, &o->present);
 	struct wlr_output_layout_output *lo = wlr_output_layout_add_auto(S.layout, wo);
 	struct wlr_scene_output *so = wlr_scene_output_create(S.scene, wo);
 	wlr_scene_output_layout_add_output(S.scene_layout, lo, so);
+	S.output = wo;
 	wlr_log(WLR_INFO, "output %s %dx%d@%.1f", wo->name, wo->width, wo->height, wo->refresh / 1000.0);
 }
 
@@ -925,6 +979,7 @@ int main(int argc, char **argv) {
 	wlr_buffer_init(&S.handlebuf.base, &shellbuf_impl, SPRITE_HANDLE_W, SPRITE_HANDLE_H);
 	S.handle = wlr_scene_buffer_create(&S.scene->tree, &S.handlebuf.base);
 	S.trace_input = getenv("SPRITE_TRACE_INPUT") && atoi(getenv("SPRITE_TRACE_INPUT"));
+	S.trace_perf = getenv("SPRITE_TRACE_PERF") ? atoi(getenv("SPRITE_TRACE_PERF")) : 0;
 	S.home_bottom = !getenv("SPRITE_HOME_EDGE") || strcmp(getenv("SPRITE_HOME_EDGE"), "top");
 	wlr_scene_node_set_position(&S.handle->node, (SPRITE_W - SPRITE_HANDLE_W) / 2,
 		S.home_bottom ? SPRITE_H - SPRITE_HANDLE_Y - SPRITE_HANDLE_H : SPRITE_HANDLE_Y);
