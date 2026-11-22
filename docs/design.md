@@ -31,18 +31,29 @@ couldn't redraw a page at 60 fps.
 | Content | 800×440 below it |
 | Apps | the whole 800×480, full screen, one at a time |
 
+**Every screen starts its content at the same point:** 36 px from the left, 20 px below the
+bar, at (36, 60). The home grid's first icon and Settings' first control both start there, and
+the clock in the bar lines up with that left edge. The right margin matches: 36 px. Screens
+that scroll keep a 20 px margin at the bottom of the content too.
+
 ## 3. Status bar
 
-From left to right:
-- **the time** (20 px), then **the date** (14 px, dimmed);
-- **the page dots** in the centre, only when there's more than one page; in Settings, the
-  title instead;
-- **network status** (14 px);
-- **the Settings gear**, at the right-hand end: a 48 px-wide touch area, the bar's full
-  height.
+Everything in the bar is centred on its midline. From left to right:
+- **the time** (20 px), then **the date** (14 px, dimmed), 10 px apart, from x = 36;
+- **the page dots** in the centre, only when there's more than one page. In Settings, the
+  title goes there instead;
+- **network icons** (20 px), ending 8 px before the gear:
+  - **ethernet** while a cable is connected, faint until it has an address;
+  - **Wi-Fi**, unless it's switched off (interface down, or radio blocked) or missing. It shows
+    the signal as a dot and up to three arcs, all faint while it isn't connected;
+- **the Settings gear**, 48 px wide, hard against the top and right edges. Its pressed
+  highlight is a tab flush with both edges, rounded only on the inside corner.
 
-The bar is the same on every sprite screen. Settings is reached only from the gear, never
-from a tile, so it can't be pushed onto a later page.
+The bar is the same on every sprite screen. The **page dots are one touch target**, as tall as
+the bar: each tap turns to the next page, wrapping round from the last to the first. They're
+too small to tap one by one, and dragging is the main way of turning pages anyway.
+**Settings is reached only from the gear**, never from a tile, so it can't be pushed onto a
+later page.
 
 ## 4. Home grid
 
@@ -54,7 +65,7 @@ from a tile, so it can't be pushed onto a later page.
   beyond that.
 - **A running app** has a 12 px dot on its icon's top-right corner: green with a window,
   amber while starting. **The startup app** has a small power mark at the bottom-left.
-- **A press** lightens the whole cell (white at 20%).
+- **A press** lightens the whole cell (white at 20%, with the 18 px radius).
 
 ## 5. Pages and motion
 
@@ -71,6 +82,13 @@ from a tile, so it can't be pushed onto a later page.
   position interpolated between the last two reports, one report (28 ms) behind.
 
 ## 6. The look: flat
+
+**One corner radius, 18 px, for every box:** icons, buttons, cards, banners, the message box and
+pressed highlights. Only circles and pills are rounder: dots, the home pill, switches and slider
+ends. A box flush with the screen's edges hangs its outer corners off-screen, so only its
+inside corners show rounded (see the gear). LVGL's buttons and message boxes get the radius
+from sprite's theme layer, so new ones can't drift from it.
+
 
 | Role | Colour |
 |---|---|

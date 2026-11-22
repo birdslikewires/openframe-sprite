@@ -9,9 +9,19 @@
 #include <time.h>
 
 #include "lvgl/lvgl.h"
+#include "lvgl/lvgl_private.h" // lv_theme_t, to layer sprite's rules over LVGL's default theme
 #include "sprite.h"
 
 #define BAR_H 40
+// One corner radius for every box: icons, buttons, cards, banners, pressed highlights. Only
+// circles and pills (dots, the home pill, switches, slider ends) are rounder.
+#define UI_RADIUS 18
+// Where content starts on every screen, below the status bar: the home grid's first icon and
+// Settings' first control sit at the same point, (CONTENT_X, BAR_H + CONTENT_TOP), and the
+// clock in the bar lines up with them.
+#define CONTENT_X 36
+#define CONTENT_TOP 20
+#define NET_ICON 20                                         // the network icons in the bar
 // The home grid: 6 columns by 3 rows of apps, as OpenPeak's own home screen had. Each app has a
 // cell (the whole cell takes the touch) with an icon and a label of up to two lines below it.
 #define GRID_COLS 6
@@ -21,11 +31,13 @@
 #define TILE_W ((SPRITE_W - 2 * GRID_PAD_X) / GRID_COLS)  // 128
 #define TILE_H 140
 #define ICON_SIZE 88
-#define ICON_RADIUS 18
+#define ICON_RADIUS UI_RADIUS
 #define ICON_TOP 6
 #define LABEL_GAP 6
 #define LABEL_H 38                                          // two lines of 16 px Montserrat
 #define PER_PAGE (GRID_COLS * GRID_ROWS)                    // further apps go on further pages
+_Static_assert(GRID_PAD_X + (TILE_W - ICON_SIZE) / 2 == CONTENT_X, "the grid's first icon is at CONTENT_X");
+_Static_assert(GRID_PAD_TOP + ICON_TOP == CONTENT_TOP, "the grid's first icon is at CONTENT_TOP");
 
 #define C_BG 0x0e1217
 #define C_BAR 0x070a0d
@@ -37,7 +49,7 @@ static lv_display_t *disp;
 static lv_indev_t *indev;
 static int ptr_x, ptr_y;
 static bool ptr_pressed;
-static lv_obj_t *bar_clock, *bar_date, *bar_net, *bar_title;
+static lv_obj_t *bar_clock, *bar_date, *bar_title, *net_eth, *net_wifi;
 static lv_obj_t *page_home, *pager, *strip, *page_settings, *toast;
 static lv_obj_t *dots, *gear;         // page dots and the Settings gear, in the status bar
 static int cur_page, n_pages;
@@ -225,22 +237,98 @@ static void update_clock(lv_timer_t *t) {
 	lv_label_set_text(bar_date, s);
 }
 
+/* ---- network icons: drawn once, anti-aliased, as alpha masks the text colour fills ---- */
+
+static uint8_t eth_px[NET_ICON * NET_ICON], wifi_px[5][NET_ICON * NET_ICON];
+static lv_image_dsc_t eth_img, wifi_img[5];
+
+static bool in_rect(double x, double y, double x0, double y0, double x1, double y1) {
+	return x >= x0 && x < x1 && y >= y0 && y < y1;
+}
+
+// Ethernet: a box above two, wired together ("network-wired")
+static bool eth_shape(double x, double y, int unused) {
+	return in_rect(x, y, 6.5, 2, 13.5, 7.5) || in_rect(x, y, 9.2, 7.5, 10.8, 10) ||
+	       in_rect(x, y, 3.5, 9.5, 16.5, 11) || in_rect(x, y, 3.5, 11, 5, 13.5) ||
+	       in_rect(x, y, 15, 11, 16.5, 13.5) || in_rect(x, y, 1, 13.5, 8, 18.5) || in_rect(x, y, 12, 13.5, 19, 18.5);
+}
+
+// Wi-Fi: a dot and three arcs; returns which part a point is in (1 dot, 2-4 arcs), 0 if none
+static int wifi_part(double x, double y) {
+	double dx = x - 10, dy = 16.5 - y, r = sqrt(dx * dx + dy * dy);
+	if (r <= 2.1) return 1;
+	if (dy <= 0 || fabs(dx) > dy) return 0; // within 45 degrees of straight up
+	if (r >= 5.2 && r <= 7.3) return 2;
+	if (r >= 9.0 && r <= 11.1) return 3;
+	if (r >= 12.8 && r <= 14.9) return 4;
+	return 0;
+}
+
+// lit: how many parts are bright (the rest are faint); 0 = all faint (not connected)
+static void draw_icon(uint8_t *px, int lit, bool wifi) {
+	for (int y = 0; y < NET_ICON; y++)
+		for (int x = 0; x < NET_ICON; x++) {
+			double a = 0;
+			for (int sy = 0; sy < 4; sy++) // 4x4 samples a pixel
+				for (int sx = 0; sx < 4; sx++) {
+					double fx = x + (sx + 0.5) / 4, fy = y + (sy + 0.5) / 4;
+					if (wifi) {
+						int part = wifi_part(fx, fy);
+						if (part) a += part <= lit ? 1.0 : 0.3;
+					} else if (eth_shape(fx, fy, 0)) {
+						a += 1.0;
+					}
+				}
+			px[y * NET_ICON + x] = (uint8_t)(a / 16 * 255 + 0.5);
+		}
+}
+
+static void make_img(lv_image_dsc_t *d, uint8_t *px) {
+	memset(d, 0, sizeof *d);
+	d->header.magic = LV_IMAGE_HEADER_MAGIC;
+	d->header.cf = LV_COLOR_FORMAT_A8;
+	d->header.w = NET_ICON;
+	d->header.h = NET_ICON;
+	d->header.stride = NET_ICON;
+	d->data_size = NET_ICON * NET_ICON;
+	d->data = px;
+}
+
+static void make_net_icons(void) {
+	draw_icon(eth_px, 0, false);
+	make_img(&eth_img, eth_px);
+	for (int i = 0; i < 5; i++) { // 0: not connected; 1-4: the dot and up to three arcs lit
+		draw_icon(wifi_px[i], i, true);
+		make_img(&wifi_img[i], wifi_px[i]);
+	}
+}
+
+// Ethernet shows while a cable is connected, faint until it has an address. Wi-Fi shows unless
+// it's switched off or missing: bars by signal, all faint while not connected.
 static void update_net(lv_timer_t *t) {
 	struct sprite_net n;
 	sysinfo_net(&n);
-	char s[96];
-	if (n.wifi_ip[0] && n.wifi_quality >= 0)
-		snprintf(s, sizeof s, "%s  " LV_SYMBOL_WIFI " %d%%", n.eth_ip[0] ? "LAN" : "", n.wifi_quality);
-	else if (n.eth_ip[0])
-		snprintf(s, sizeof s, "LAN %s", n.eth_ip);
-	else if (n.wifi_up || n.eth_up)
-		snprintf(s, sizeof s, LV_SYMBOL_WARNING " No address");
-	else
-		snprintf(s, sizeof s, LV_SYMBOL_CLOSE " Offline");
-	lv_label_set_text(bar_net, s);
+	if (n.eth_up) {
+		lv_obj_remove_flag(net_eth, LV_OBJ_FLAG_HIDDEN);
+		lv_obj_set_style_image_opa(net_eth, n.eth_ip[0] ? LV_OPA_COVER : LV_OPA_40, 0);
+	} else {
+		lv_obj_add_flag(net_eth, LV_OBJ_FLAG_HIDDEN);
+	}
+	if (n.wifi_present && n.wifi_enabled) {
+		int level = 0;
+		if (n.wifi_ip[0]) {
+			int q = n.wifi_quality < 0 ? 0 : n.wifi_quality;
+			level = q >= 75 ? 4 : q >= 50 ? 3 : q >= 25 ? 2 : 1;
+		}
+		lv_image_set_src(net_wifi, &wifi_img[level]);
+		lv_obj_remove_flag(net_wifi, LV_OBJ_FLAG_HIDDEN);
+	} else {
+		lv_obj_add_flag(net_wifi, LV_OBJ_FLAG_HIDDEN);
+	}
 }
 
 static void gear_clicked(lv_event_t *e);
+static void dots_clicked(lv_event_t *e);
 
 static void build_bar(lv_obj_t *scr) {
 	lv_obj_t *bar = lv_obj_create(scr);
@@ -250,15 +338,22 @@ static void build_bar(lv_obj_t *scr) {
 	lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
 	lv_obj_remove_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
 
-	bar_clock = lv_label_create(bar);
+	// Everything in the bar is centred on its midline. Left: the time and date, starting at
+	// CONTENT_X like the content below.
+	lv_obj_t *left = lv_obj_create(bar);
+	lv_obj_remove_style_all(left);
+	lv_obj_set_size(left, LV_SIZE_CONTENT, BAR_H);
+	lv_obj_set_flex_flow(left, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(left, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_column(left, 10, 0);
+	lv_obj_align(left, LV_ALIGN_LEFT_MID, CONTENT_X, 0);
+	lv_obj_remove_flag(left, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+	bar_clock = lv_label_create(left);
 	lv_obj_set_style_text_font(bar_clock, &lv_font_montserrat_20, 0);
 	lv_obj_set_style_text_color(bar_clock, lv_color_hex(C_TEXT), 0);
-	lv_obj_align(bar_clock, LV_ALIGN_LEFT_MID, 16, 0);
-
-	bar_date = lv_label_create(bar);
+	bar_date = lv_label_create(left);
 	lv_obj_set_style_text_font(bar_date, &lv_font_montserrat_14, 0);
 	lv_obj_set_style_text_color(bar_date, lv_color_hex(C_DIM), 0);
-	lv_obj_align(bar_date, LV_ALIGN_LEFT_MID, 84, 1);
 
 	bar_title = lv_label_create(bar);
 	lv_obj_set_style_text_font(bar_title, &lv_font_montserrat_14, 0);
@@ -266,35 +361,59 @@ static void build_bar(lv_obj_t *scr) {
 	lv_label_set_text(bar_title, "");
 	lv_obj_align(bar_title, LV_ALIGN_CENTER, 0, 0);
 
+	// Centre: the page dots, as one touch target (the bar's height) that turns to the next page
 	dots = lv_obj_create(bar);
 	lv_obj_remove_style_all(dots);
 	lv_obj_set_size(dots, LV_SIZE_CONTENT, BAR_H);
 	lv_obj_set_flex_flow(dots, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(dots, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_style_pad_column(dots, 14, 0);
+	lv_obj_set_style_pad_hor(dots, 20, 0);
+	lv_obj_set_style_radius(dots, UI_RADIUS, 0);
+	lv_obj_set_style_bg_color(dots, lv_color_white(), LV_STATE_PRESSED);
+	lv_obj_set_style_bg_opa(dots, LV_OPA_10, LV_STATE_PRESSED);
 	lv_obj_align(dots, LV_ALIGN_CENTER, 0, 0);
 	lv_obj_remove_flag(dots, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_add_flag(dots, LV_OBJ_FLAG_CLICKABLE);
+	lv_obj_add_event_cb(dots, dots_clicked, LV_EVENT_CLICKED, NULL);
 
-	// Settings: a gear at the end of the bar, the whole bar's height to touch
+	// Right: Settings, a gear hard against the top and right edges, the bar's height to touch.
+	// The box runs UI_RADIUS past the top and right of the screen, so those rounded corners are
+	// cut off: its pressed highlight is a tab flush with both edges, rounded only inside.
 	gear = lv_obj_create(bar);
 	lv_obj_remove_style_all(gear);
-	lv_obj_set_size(gear, 48, BAR_H);
-	lv_obj_align(gear, LV_ALIGN_RIGHT_MID, -4, 0);
+	lv_obj_set_size(gear, 48 + UI_RADIUS, BAR_H + UI_RADIUS);
+	lv_obj_align(gear, LV_ALIGN_TOP_RIGHT, UI_RADIUS, -UI_RADIUS);
 	lv_obj_add_flag(gear, LV_OBJ_FLAG_CLICKABLE);
 	lv_obj_set_style_bg_color(gear, lv_color_white(), LV_STATE_PRESSED);
 	lv_obj_set_style_bg_opa(gear, LV_OPA_20, LV_STATE_PRESSED);
-	lv_obj_set_style_radius(gear, 8, 0);
+	lv_obj_set_style_radius(gear, UI_RADIUS, 0);
 	lv_obj_t *gl = lv_label_create(gear);
 	lv_label_set_text(gl, LV_SYMBOL_SETTINGS);
 	lv_obj_set_style_text_font(gl, &lv_font_montserrat_20, 0);
 	lv_obj_set_style_text_color(gl, lv_color_hex(C_TEXT), 0);
-	lv_obj_center(gl);
+	lv_obj_align(gl, LV_ALIGN_CENTER, -UI_RADIUS / 2, UI_RADIUS / 2); // the centre of the part on screen
 	lv_obj_add_event_cb(gear, gear_clicked, LV_EVENT_CLICKED, NULL);
 
-	bar_net = lv_label_create(bar);
-	lv_obj_set_style_text_font(bar_net, &lv_font_montserrat_14, 0);
-	lv_obj_set_style_text_color(bar_net, lv_color_hex(C_TEXT), 0);
-	lv_obj_align(bar_net, LV_ALIGN_RIGHT_MID, -60, 0);
+	// ... and to its left, the network icons
+	make_net_icons();
+	lv_obj_t *net = lv_obj_create(bar);
+	lv_obj_remove_style_all(net);
+	lv_obj_set_size(net, LV_SIZE_CONTENT, BAR_H);
+	lv_obj_set_flex_flow(net, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(net, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_column(net, 12, 0);
+	lv_obj_align(net, LV_ALIGN_RIGHT_MID, -56, 0);
+	lv_obj_remove_flag(net, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+	net_eth = lv_image_create(net);
+	lv_image_set_src(net_eth, &eth_img);
+	net_wifi = lv_image_create(net);
+	lv_image_set_src(net_wifi, &wifi_img[0]);
+	for (lv_obj_t *o = net_eth; o; o = o == net_eth ? net_wifi : NULL) {
+		lv_obj_set_style_image_recolor(o, lv_color_hex(C_TEXT), 0);
+		lv_obj_set_style_image_recolor_opa(o, LV_OPA_COVER, 0);
+		lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+	}
 
 	update_clock(NULL);
 	update_net(NULL);
@@ -435,7 +554,7 @@ static void open_sheet(struct sprite_app *a) {
 	lv_obj_center(card);
 	lv_obj_set_style_bg_color(card, lv_color_hex(0x1c242c), 0);
 	lv_obj_set_style_border_width(card, 0, 0);
-	lv_obj_set_style_radius(card, 22, 0);
+	lv_obj_set_style_radius(card, UI_RADIUS, 0);
 	lv_obj_set_style_pad_all(card, 24, 0);
 	lv_obj_set_style_pad_row(card, 18, 0);
 	lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
@@ -578,8 +697,9 @@ static void go_to_page(int p, bool animate) {
 	update_dots();
 }
 
-static void dot_clicked(lv_event_t *e) {
-	go_to_page((int)(intptr_t)lv_event_get_user_data(e), true);
+// The dots are one touch target: each tap turns to the next page, round to the first again.
+static void dots_clicked(lv_event_t *e) {
+	if (n_pages > 1) go_to_page((cur_page + 1) % n_pages, true);
 }
 
 // Called with each position the shell is given, before LVGL sees it.
@@ -622,7 +742,8 @@ static void update_dots(void) {
 	if (!dots) return;
 	lv_obj_clean(dots);
 	bool show = n_pages > 1 && !lv_obj_has_flag(page_home, LV_OBJ_FLAG_HIDDEN);
-	if (!show) return;
+	if (!show) { lv_obj_add_flag(dots, LV_OBJ_FLAG_HIDDEN); return; }
+	lv_obj_remove_flag(dots, LV_OBJ_FLAG_HIDDEN);
 	for (int i = 0; i < n_pages; i++) {
 		lv_obj_t *d = lv_obj_create(dots);
 		lv_obj_remove_style_all(d);
@@ -630,9 +751,7 @@ static void update_dots(void) {
 		lv_obj_set_style_radius(d, LV_RADIUS_CIRCLE, 0);
 		lv_obj_set_style_bg_color(d, lv_color_hex(i == cur_page ? C_TEXT : 0x4a5560), 0);
 		lv_obj_set_style_bg_opa(d, LV_OPA_COVER, 0);
-		lv_obj_add_flag(d, LV_OBJ_FLAG_CLICKABLE);
-		lv_obj_set_ext_click_area(d, 12);
-		lv_obj_add_event_cb(d, dot_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+		lv_obj_remove_flag(d, LV_OBJ_FLAG_CLICKABLE);
 	}
 }
 
@@ -704,7 +823,7 @@ static void build_home(lv_obj_t *scr) {
 	lv_obj_set_size(toast, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
 	lv_obj_set_style_bg_color(toast, lv_color_hex(0x26313c), 0);
 	lv_obj_set_style_bg_opa(toast, LV_OPA_COVER, 0);
-	lv_obj_set_style_radius(toast, 20, 0);
+	lv_obj_set_style_radius(toast, UI_RADIUS, 0);
 	lv_obj_set_style_pad_hor(toast, 22, 0);
 	lv_obj_set_style_pad_ver(toast, 10, 0);
 	lv_obj_align(toast, LV_ALIGN_BOTTOM_MID, 0, -16);
@@ -935,8 +1054,8 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_size(page_settings, SPRITE_W, SPRITE_H - BAR_H);
 	lv_obj_set_pos(page_settings, 0, BAR_H);
 	lv_obj_set_flex_flow(page_settings, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_style_pad_hor(page_settings, 30, 0);
-	lv_obj_set_style_pad_ver(page_settings, 14, 0);
+	lv_obj_set_style_pad_hor(page_settings, CONTENT_X, 0);
+	lv_obj_set_style_pad_ver(page_settings, CONTENT_TOP, 0);
 	lv_obj_set_style_pad_row(page_settings, 12, 0);
 	lv_obj_set_scroll_dir(page_settings, LV_DIR_VER);
 
@@ -1016,6 +1135,16 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_add_flag(page_settings, LV_OBJ_FLAG_HIDDEN);
 }
 
+// sprite's rules over LVGL's default theme: its buttons and message boxes take UI_RADIUS, so
+// nothing made later can drift from it.
+static lv_theme_t theme;
+static lv_style_t st_radius;
+
+static void theme_apply(lv_theme_t *th, lv_obj_t *obj) {
+	if (lv_obj_check_type(obj, &lv_button_class) || lv_obj_check_type(obj, &lv_msgbox_class))
+		lv_obj_add_style(obj, &st_radius, 0);
+}
+
 void shell_init(void *pixels) {
 	lv_init();
 	lv_tick_set_cb(tick_ms);
@@ -1032,7 +1161,12 @@ void shell_init(void *pixels) {
 	lv_display_add_event_cb(disp, refr_event, LV_EVENT_RENDER_READY, NULL);
 	lv_theme_t *th = lv_theme_default_init(disp, lv_color_hex(C_ACCENT), lv_color_hex(0x45d483), true,
 					       &lv_font_montserrat_20);
-	lv_display_set_theme(disp, th);
+	lv_style_init(&st_radius);
+	lv_style_set_radius(&st_radius, UI_RADIUS);
+	theme = *th;
+	lv_theme_set_parent(&theme, th);
+	lv_theme_set_apply_cb(&theme, theme_apply);
+	lv_display_set_theme(disp, &theme);
 
 	indev = lv_indev_create();
 	lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);

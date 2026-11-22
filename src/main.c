@@ -909,8 +909,8 @@ static int on_terminate(int sig, void *data) {
 }
 
 static int on_sigchld(int sig, void *data) {
-	apps_reap();
-	shell_apps_changed();
+	// Helpers and settings calls end in SIGCHLD too: only an app's change of state redraws
+	if (apps_reap()) shell_apps_changed();
 	return 0;
 }
 

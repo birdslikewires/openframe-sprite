@@ -75,7 +75,7 @@ int apps_count(void);
 struct sprite_app *apps_get(int i);
 struct sprite_app *apps_for_pid(pid_t pid);  // follows parent pids up to a launched app
 void apps_launch(struct sprite_app *app);
-void apps_reap(void);                         // collect exited apps, update state
+bool apps_reap(void);                         // collect exited apps; true if any app changed
 void apps_set_env(const char *wayland_display, const char *x_display);
 void apps_x11_ready(bool ready);              // the X keeper has (or no longer has) opened X to apps
 void apps_close(struct sprite_app *app);      // SIGTERM, then SIGKILL, unless it goes by itself
@@ -122,6 +122,8 @@ void sprite_calibrating(bool on);                 // pass input uncorrected, for
 // sysinfo.c
 struct sprite_net {
 	bool eth_up, wifi_up;
+	bool wifi_present;    // there's a Wi-Fi interface
+	bool wifi_enabled;    // ... and it's switched on (interface up, radio not blocked)
 	char eth_ip[48], wifi_ip[48];
 	int wifi_quality;     // 0-100, -1 when unknown
 };

@@ -358,7 +358,8 @@ void apps_end_all(void) {
 		}
 }
 
-void apps_reap(void) {
+bool apps_reap(void) {
+	bool changed = false;
 	int st;
 	if (keeper_pid && waitpid(keeper_pid, &st, WNOHANG) == keeper_pid) {
 		wlr_log(WLR_INFO, "X keeper exited");
@@ -368,6 +369,7 @@ void apps_reap(void) {
 			keeper_src = NULL;
 		}
 		apps_x11_ready(false);
+		changed = true;
 	}
 	for (int i = 0; i < n_apps; i++) {
 		struct sprite_app *a = &apps[i];
@@ -378,10 +380,12 @@ void apps_reap(void) {
 				WIFEXITED(status) ? WEXITSTATUS(status) : WTERMSIG(status));
 			a->pid = 0;
 			exited(a);
+			changed = true;
 		}
 	}
 	// hidden entries: drop the pid once the process has gone
 	for (int i = 0; i < n_apps; i++)
 		if (apps[i].hidden && apps[i].pid > 0 && kill(apps[i].pid, 0) != 0 && errno == ESRCH && !apps[i].view)
 			apps[i].pid = 0;
+	return changed;
 }

@@ -6,6 +6,7 @@
 #   touchsim.py drag X1 Y1 X2 Y2 MS [REPEAT]   drag between two screen points, there and back
 #   touchsim.py swipe X1 Y1 X2 Y2 MS          one way only
 #   touchsim.py tap X Y
+#   touchsim.py hold X Y MS                   press and hold (for screenshots of pressed states)
 import fcntl, os, struct, sys, time
 
 UI_SET_EVBIT, UI_SET_KEYBIT, UI_SET_ABSBIT = 0x40045564, 0x40045565, 0x40045567
@@ -61,6 +62,13 @@ try:
         x1, y1, x2, y2, ms = map(float, sys.argv[2:7])
         drag(x1, y1, x2, y2, ms)
         time.sleep(0.6)
+    elif sys.argv[1] == 'hold':
+        x, y, ms = map(float, sys.argv[2:5])
+        report(x, y, 1)
+        time.sleep(ms / 1000)
+        emit(EV_KEY, BTN_LEFT, 0)
+        emit(EV_SYN, 0, 0)
+        time.sleep(0.3)
     elif sys.argv[1] == 'tap':
         x, y = map(float, sys.argv[2:4])
         report(x, y, 1)

@@ -3,6 +3,7 @@
 // Reads /proc and /sys only; changes go through the existing openframe tools (of-backlight).
 #define _GNU_SOURCE
 #include <arpa/inet.h>
+#include <dirent.h>
 #include <ifaddrs.h>
 #include <net/if.h>
 #include <signal.h>
@@ -42,6 +43,26 @@ void sysinfo_net(struct sprite_net *n) {
 	n->wifi_quality = -1;
 	n->eth_up = if_up("eth0");
 	n->wifi_up = if_up("wlan0");
+	n->wifi_present = access("/sys/class/net/wlan0", F_OK) == 0;
+	if (n->wifi_present) {
+		int flags = 0; // IFF_UP is 0x1: off when it's down administratively (not configured)
+		FILE *f = fopen("/sys/class/net/wlan0/flags", "r");
+		if (f) { if (fscanf(f, "%x", &flags) != 1) flags = 0; fclose(f); }
+		n->wifi_enabled = flags & 1;
+		for (int i = 0; i < 8; i++) { // a blocked Wi-Fi radio counts as off
+			char path[64], type[16] = "";
+			snprintf(path, sizeof path, "/sys/class/rfkill/rfkill%d/type", i);
+			FILE *t = fopen(path, "r");
+			if (!t) continue;
+			if (!fgets(type, sizeof type, t)) type[0] = 0;
+			fclose(t);
+			if (strncmp(type, "wlan", 4)) continue;
+			snprintf(path, sizeof path, "/sys/class/rfkill/rfkill%d/soft", i);
+			if (read_int(path, 0)) n->wifi_enabled = false;
+			snprintf(path, sizeof path, "/sys/class/rfkill/rfkill%d/hard", i);
+			if (read_int(path, 0)) n->wifi_enabled = false;
+		}
+	}
 	struct ifaddrs *ifa, *i;
 	if (getifaddrs(&ifa) == 0) {
 		for (i = ifa; i; i = i->ifa_next) {
@@ -69,14 +90,21 @@ void sysinfo_net(struct sprite_net *n) {
 	}
 }
 
+// The first backlight's sysfs directory. (Read directly: a child process here would end in a
+// SIGCHLD, and each one makes the shell rebuild its home grid.)
 static int backlight_dir(char *out, size_t len) {
-	FILE *p = popen("ls -1d /sys/class/backlight/* 2>/dev/null | head -1", "r");
-	if (!p) return -1;
-	int ok = fgets(out, len, p) != NULL;
-	pclose(p);
-	if (!ok) return -1;
-	out[strcspn(out, "\n")] = 0;
-	return 0;
+	DIR *d = opendir("/sys/class/backlight");
+	if (!d) return -1;
+	struct dirent *e;
+	int r = -1;
+	while ((e = readdir(d))) {
+		if (e->d_name[0] == '.') continue;
+		snprintf(out, len, "/sys/class/backlight/%.64s", e->d_name);
+		r = 0;
+		break;
+	}
+	closedir(d);
+	return r;
 }
 
 int sysinfo_backlight(void) {
