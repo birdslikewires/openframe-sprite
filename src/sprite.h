@@ -128,6 +128,7 @@ struct sprite_net {
 	int wifi_dbm;         // the signal of the network joined, in dBm; 0 when unknown
 };
 void sysinfo_net(struct sprite_net *out);
+int wifi_signal(const char *ifname);          // dBm of the network joined (nl80211), 0 if unknown
 int sysinfo_backlight(void);                  // 0-100, -1 if unknown
 bool sysinfo_backlight_auto(void);
 void sysinfo_set_backlight(const char *arg);  // "0".."100" or "auto", runs of-backlight

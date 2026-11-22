@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // System state for the status bar and settings: network, backlight, a summary.
-// Reads /proc and /sys only; changes go through the existing openframe tools (of-backlight).
+// Reads /proc, /sys and nl80211 only; changes go through the existing openframe tools
+// (of-backlight).
 #define _GNU_SOURCE
 #include <arpa/inet.h>
 #include <dirent.h>
 #include <ifaddrs.h>
+#include <linux/genetlink.h>
+#include <linux/netlink.h>
+#include <linux/nl80211.h>
 #include <net/if.h>
 #include <signal.h>
 #include <stdio.h>
@@ -12,6 +16,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/statvfs.h>
+#include <sys/time.h>
 #include <sys/un.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
@@ -36,6 +41,114 @@ static bool if_up(const char *ifname) {
 	if (!fgets(state, sizeof state, f)) state[0] = 0;
 	fclose(f);
 	return !strncmp(state, "up", 2);
+}
+
+/* ---- the Wi-Fi signal, from nl80211 ---- */
+
+// Asked over generic netlink, as `iw dev wlan0 link` does: no root needed, and no child
+// process. /proc/net/wireless can't be used, as it lists cfg80211 drivers (every OpenFrame
+// Wi-Fi card's) only with CFG80211_WEXT, which the kernel doesn't have.
+
+struct nl_req {
+	struct nlmsghdr n;
+	struct genlmsghdr g;
+	char attrs[32];
+};
+
+static void nl_req_init(struct nl_req *r, int type, int flags, int cmd) {
+	memset(r, 0, sizeof *r);
+	r->n.nlmsg_len = NLMSG_LENGTH(GENL_HDRLEN);
+	r->n.nlmsg_type = type;
+	r->n.nlmsg_flags = NLM_F_REQUEST | flags;
+	r->g.cmd = cmd;
+	r->g.version = 1;
+}
+
+static void nl_put(struct nl_req *r, int type, const void *data, int len) {
+	struct nlattr *a = (struct nlattr *)((char *)r + NLMSG_ALIGN(r->n.nlmsg_len));
+	a->nla_type = type;
+	a->nla_len = NLA_HDRLEN + len;
+	memcpy((char *)a + NLA_HDRLEN, data, len);
+	r->n.nlmsg_len = NLMSG_ALIGN(r->n.nlmsg_len) + NLA_ALIGN(a->nla_len);
+}
+
+// The attribute `type` among those in [p, p + len), or NULL.
+static struct nlattr *nl_find(void *p, int len, int type) {
+	struct nlattr *a = p;
+	while (len >= NLA_HDRLEN && a->nla_len >= NLA_HDRLEN && a->nla_len <= len) {
+		if ((a->nla_type & NLA_TYPE_MASK) == type) return a;
+		len -= NLA_ALIGN(a->nla_len);
+		a = (struct nlattr *)((char *)a + NLA_ALIGN(a->nla_len));
+	}
+	return NULL;
+}
+
+#define NLA_DATA(a) ((void *)((char *)(a) + NLA_HDRLEN))
+
+// A generic netlink message's attributes, and their length.
+static void *genl_attrs(struct nlmsghdr *h, int *len) {
+	*len = (int)h->nlmsg_len - NLMSG_LENGTH(GENL_HDRLEN);
+	return (char *)NLMSG_DATA(h) + GENL_HDRLEN;
+}
+
+static char nl_buf[32768] __attribute__((aligned(4))); // the family reply lists every command
+
+// nl80211's generic netlink family, or -1 if cfg80211 isn't loaded (yet).
+static int nl80211_family(int fd) {
+	struct nl_req r;
+	nl_req_init(&r, GENL_ID_CTRL, 0, CTRL_CMD_GETFAMILY);
+	nl_put(&r, CTRL_ATTR_FAMILY_NAME, "nl80211", sizeof "nl80211");
+	if (send(fd, &r, r.n.nlmsg_len, 0) != (ssize_t)r.n.nlmsg_len) return -1;
+	ssize_t got = recv(fd, nl_buf, sizeof nl_buf, 0);
+	struct nlmsghdr *h = (struct nlmsghdr *)nl_buf;
+	if (got < (ssize_t)NLMSG_HDRLEN || !NLMSG_OK(h, (size_t)got) || h->nlmsg_type != GENL_ID_CTRL) return -1;
+	int len;
+	void *attrs = genl_attrs(h, &len);
+	struct nlattr *a = nl_find(attrs, len, CTRL_ATTR_FAMILY_ID);
+	return a ? *(uint16_t *)NLA_DATA(a) : -1;
+}
+
+int wifi_signal(const char *ifname) {
+	static int family = -1; // found once cfg80211 is there, and kept
+	unsigned ifindex = if_nametoindex(ifname);
+	if (!ifindex) return 0;
+	int fd = socket(AF_NETLINK, SOCK_RAW | SOCK_CLOEXEC, NETLINK_GENERIC);
+	if (fd < 0) return 0;
+	struct timeval tv = { 0, 200000 }; // the kernel answers at once; never hold up a frame long
+	setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+	struct sockaddr_nl kernel = { .nl_family = AF_NETLINK };
+	int dbm = 0;
+	if (connect(fd, (struct sockaddr *)&kernel, sizeof kernel) < 0) goto out;
+	if (family < 0) family = nl80211_family(fd);
+	if (family < 0) goto out;
+
+	// Joined to a network, the one station is its access point.
+	struct nl_req r;
+	nl_req_init(&r, family, NLM_F_DUMP, NL80211_CMD_GET_STATION);
+	uint32_t idx = ifindex;
+	nl_put(&r, NL80211_ATTR_IFINDEX, &idx, sizeof idx);
+	if (send(fd, &r, r.n.nlmsg_len, 0) != (ssize_t)r.n.nlmsg_len) goto out;
+	for (int reads = 0; reads < 8; reads++) {
+		ssize_t got = recv(fd, nl_buf, sizeof nl_buf, 0);
+		if (got <= 0) break;
+		size_t left = got;
+		for (struct nlmsghdr *h = (struct nlmsghdr *)nl_buf; NLMSG_OK(h, left); h = NLMSG_NEXT(h, left)) {
+			if (h->nlmsg_type == NLMSG_DONE || h->nlmsg_type == NLMSG_ERROR) goto out;
+			if (h->nlmsg_type != family || dbm) continue;
+			int len;
+			void *attrs = genl_attrs(h, &len);
+			struct nlattr *sta = nl_find(attrs, len, NL80211_ATTR_STA_INFO);
+			if (!sta) continue;
+			// The average if the driver keeps one, so the bars don't flicker with each frame.
+			int slen = sta->nla_len - NLA_HDRLEN;
+			struct nlattr *s = nl_find(NLA_DATA(sta), slen, NL80211_STA_INFO_SIGNAL_AVG);
+			if (!s) s = nl_find(NLA_DATA(sta), slen, NL80211_STA_INFO_SIGNAL);
+			if (s) dbm = *(int8_t *)NLA_DATA(s);
+		}
+	}
+out:
+	close(fd);
+	return dbm < 0 ? dbm : 0;
 }
 
 void sysinfo_net(struct sprite_net *n) {
@@ -71,24 +184,7 @@ void sysinfo_net(struct sprite_net *n) {
 		}
 		freeifaddrs(ifa);
 	}
-	// /proc/net/wireless: "wlan0: 0000   54.  -56.  -256 ..." status, link quality (out of
-	// 70), signal level in dBm, noise. The signal is what the scan's list goes by too, so one
-	// rule (wifi_level) gives the bars everywhere. Should a driver give no dBm level, the
-	// quality is the signal + 110, as cfg80211 makes it.
-	FILE *f = fopen("/proc/net/wireless", "r");
-	if (f) {
-		char line[256];
-		while (fgets(line, sizeof line, f)) {
-			char *p = strstr(line, "wlan0:");
-			if (!p) continue;
-			unsigned status;
-			float q, level;
-			int got = sscanf(p + 6, "%x %f %f", &status, &q, &level);
-			if (got == 3 && level < 0) n->wifi_dbm = (int)level;
-			else if (got >= 2 && q > 0) n->wifi_dbm = (int)q - 110;
-		}
-		fclose(f);
-	}
+	if (n->wifi_up) n->wifi_dbm = wifi_signal("wlan0");
 }
 
 // The first backlight's sysfs directory. (Read directly: a child process here would end in a
