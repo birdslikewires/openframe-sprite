@@ -970,7 +970,7 @@ int main(int argc, char **argv) {
 	const char *apps_dir = getenv("SPRITE_APPS");
 	// sprite's own, then those packages install, then local ones (demo apps, apps added by hand)
 	if (!apps_dir) apps_dir = "/opt/sprite/share/sprite/apps:/usr/share/sprite/apps:/usr/local/share/sprite/apps";
-	struct passwd *pw = getpwnam(getenv("SPRITE_USER") ? getenv("SPRITE_USER") : "of");
+	struct passwd *pw = getpwnam(getenv("SPRITE_USER") ? getenv("SPRITE_USER") : "sprite");
 	if (pw) prepare_runtime_dir(pw->pw_uid, pw->pw_gid);
 
 	wl_list_init(&S.views);

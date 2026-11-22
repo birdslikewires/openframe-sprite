@@ -1,2 +1,2 @@
 # sprite's Wayland socket for sandboxed apps goes in here: setgid, so it takes the group.
-d /run/sprite-apps 2750 of sprite-apps -
+d /run/sprite-apps 2750 sprite sprite-apps -

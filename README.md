@@ -30,14 +30,15 @@ The ground rules for how it looks, feels and performs are in [docs/design.md](do
 - **Arranging:** a lifted tile follows the finger, and dropping it on a cell puts it there,
   swapping it with any app already in it. Held at either side, it turns the page; while a
   tile is up there's an empty page after the last, so apps can go on up to three pages,
-  with gaps where you leave them. The layout is kept in `~/.local/state/sprite/layout`;
-  new apps take the first free cells.
+  with gaps where you leave them. The layout is kept in `/var/lib/sprite/layout`; new apps
+  take the first free cells.
 - **The startup app** (one at most, with a blue ring round its icon) opens when sprite starts,
   and reopens 2 s after it closes or crashes, unless it was closed from the sheet. After three
   exits within a minute it stops reopening and says so. It's `startup=` in the settings
   file (see Settings below).
 - **Settings:** Wi-Fi (choosing a network, typing its password on sprite's own keyboard,
-  and forgetting it), brightness (through `of-backlight`, including automatic brightness),
+  and forgetting it), remote access (the password for logging in as `of` over SSH, which
+  images leave unset; it warns while a unit still has the old shared one), brightness (through `of-backlight`, including automatic brightness),
   the clock's format, touch calibration, information about the system, and Restart and
   Switch off.
 
@@ -135,7 +136,12 @@ sprite reads manifests from `/opt/sprite/share/sprite/apps`, then `/usr/share/sp
 (packages), then `/usr/local/share/sprite/apps`, which is the place to try out an app by hand.
 
 sprite runs as `sprite.service` (in `system/`), on tty1 in place of the login prompt, as
-the `of` user in a logind session, so libseat gets the display and input through logind.
+its own user, `sprite`, in a logind session, so libseat gets the display and input through
+logind. `sprite` has no password, login or sudo, and keeps its state in `/var/lib/sprite`.
+`of` is the person's account (with sudo), and nothing runs as it unless someone's logged
+in: so an app that got the better of sprite or Xwayland, which take everything apps send
+to the display, would have `sprite`, not root. `of` is in the `sprite-apps` group, so a
+Wayland client started by hand can use `WAYLAND_DISPLAY=/run/sprite-apps/wayland-0`.
 It starts after `of-flash`, `of-mac-gate`, `of-provision` and Plymouth, which all use tty1
 first. If it keeps failing, the login prompt comes back (`OnFailure=getty@tty1.service`).
 The log is in the journal: `sudo journalctl _COMM=sprite` (under the PAM session, sprite's
@@ -143,11 +149,12 @@ own lines aren't filed under the unit). `SPRITE_TRACE_INPUT=1` logs every press 
 app.
 
 A few things need root, and go through `sprite-helper` (`system/`), which systemd starts
-for each connection to `/run/sprite-helper.sock` (group `of`). It takes one request and
+for each connection to `/run/sprite-helper.sock` (group `sprite`). It takes one request and
 validates it: `set <key> <value>` for `startup`, `calibration`, `clock` and `seconds` in the
 settings file, `reboot` and `poweroff`, for Wi-Fi `wifi-scan`, `wifi-status`, `wifi-join`
-and `wifi-forget` (see Wi-Fi below), and `app-start` and `app-stop` for apps (see Sandboxes
-above). The header of `system/sprite-helper` describes each.
+and `wifi-forget` (see Wi-Fi below), `app-start` and `app-stop` for apps (see Sandboxes
+above), and `ssh-status` and `ssh-password` for the login password (never giving out the
+password or its hash). The header of `system/sprite-helper` describes each.
 
 It also expects the touchscreen calibration in `spike/touch/` to be installed.
 
@@ -199,7 +206,6 @@ can still be joined.
 - Sound and time zone in Settings
 - The app store: an index repository of app manifests, added to by pull request, with apps
   as i386 `.deb` packages
-- `of` losing `NOPASSWD` and the shared password, now that apps don't run as `of`
 - A CPU cap on apps in the background (`CPUQuota=`, which the kernel can do now)
 
 ## Licence

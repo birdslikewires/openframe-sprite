@@ -1,4 +1,6 @@
-# sprite on the panel, in place of the tty1 login, as the 'of' user in a logind session.
+# sprite on the panel, in place of the tty1 login, as its own user in a logind session (so
+# libseat gets the display and input through logind). It has no password or sudo: "of" is
+# the person's account, and nothing runs as it unless someone's logged in.
 [Unit]
 Description=sprite, the OpenFrame touch shell
 # tty1 is shared: the installer (of-flash), the MAC store reboot (of-mac-gate), first-boot
@@ -13,9 +15,11 @@ StartLimitIntervalSec=60
 StartLimitBurst=3
 
 [Service]
-User=of
+User=sprite
 # to give sandboxed apps' display sockets their group (see sprite-helper)
 SupplementaryGroups=sprite-apps
+StateDirectory=sprite
+StateDirectoryMode=0700
 PAMName=login
 TTYPath=/dev/tty1
 TTYReset=yes

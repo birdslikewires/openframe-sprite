@@ -582,6 +582,7 @@ void shell_notice(const char *text) {
 }
 
 static void wifi_refresh(void);
+static void ssh_refresh(void);
 static lv_obj_t *wifi_status_label;
 
 static void refresh_settings(lv_timer_t *t) {
@@ -589,6 +590,7 @@ static void refresh_settings(lv_timer_t *t) {
 	if (showing(page_wifi)) { wifi_refresh(); return; }
 	if (!showing(page_settings)) return;
 	if (wifi_status_label) wifi_refresh();
+	if (!t) ssh_refresh(); // as Settings opens: it changes only when it's set
 	static char text[768];
 	sysinfo_summary(text, sizeof text);
 	lv_label_set_text(about_label, text);
@@ -1039,8 +1041,8 @@ static void update_dots(void) {
 
 /* ---- arranging the home screen ---- */
 
-// Each app has a place: a slot on one of up to MAX_PAGES pages, kept in the of user's
-// ~/.local/state/sprite/layout as "<slot> <app id>" lines (slot = page * PER_PAGE + cell).
+// Each app has a place: a slot on one of up to MAX_PAGES pages, kept in
+// /var/lib/sprite/layout (layout_path) as "<slot> <app id>" lines (slot = page * PER_PAGE + cell).
 // Apps the file doesn't place (new ones) take the first free slots. A long press lifts a
 // tile: let go where it is and the sheet opens; drag it and it follows the finger, the slot
 // under it lit, and dropping it there swaps it with whatever was there. Held at a side
@@ -1060,10 +1062,13 @@ static int lift_from, lift_to, lift_dx, lift_dy, edge_dir;
 static bool lift_moved;
 static lv_timer_t *edge_timer;
 
+// In sprite's state directory (/var/lib/sprite, StateDirectory= in sprite.service), or, run
+// by hand, ~/.local/state/sprite.
 static const char *layout_path(void) {
 	static char path[256];
-	const char *home = getenv("HOME");
-	snprintf(path, sizeof path, "%s/.local/state/sprite/layout", home && home[0] ? home : "/tmp");
+	const char *state = getenv("STATE_DIRECTORY"), *home = getenv("HOME");
+	if (state && state[0]) snprintf(path, sizeof path, "%s/layout", state);
+	else snprintf(path, sizeof path, "%s/.local/state/sprite/layout", home && home[0] ? home : "/tmp");
 	return path;
 }
 
@@ -1578,7 +1583,7 @@ static lv_obj_t *list_page(lv_obj_t *scr) {
 #define WIFI_TROUBLE_AFTER_MS 6000 // ignore "trouble" this soon: it may be the old network's
 #define WIFI_RESCAN_MS 30000       // a list older than this is looked for again on opening
 
-enum entry_mode { ENTRY_PASSWORD, ENTRY_OPEN_PASSWORD, ENTRY_NAME };
+enum entry_mode { ENTRY_PASSWORD, ENTRY_OPEN_PASSWORD, ENTRY_NAME, ENTRY_SSH };
 static void open_entry(enum entry_mode mode, const char *ssid);
 
 static lv_obj_t *wifi_detail_label, *wifi_forget_btn;     // in Settings (and wifi_status_label)
@@ -1946,7 +1951,7 @@ static const lv_buttonmatrix_ctrl_t kb_symbols_ctrl[] = {
 #undef NR
 #undef HID
 
-static lv_obj_t *kb, *entry_ta, *entry_title, *entry_hint, *entry_go, *entry_eye;
+static lv_obj_t *kb, *entry_ta, *entry_title, *entry_hint, *entry_go, *entry_eye, *entry_back_btn;
 static enum entry_mode entry_mode;
 static char entry_ssid[WIFI_SSID_MAX + 1];
 static enum { SHIFT_OFF, SHIFT_ONCE, SHIFT_LOCK } kb_shift;
@@ -1967,6 +1972,7 @@ static void entry_validate(void) {
 	size_t n = strlen(lv_textarea_get_text(entry_ta));
 	bool ok = entry_mode == ENTRY_NAME ? n >= 1 && n <= WIFI_SSID_MAX
 					  : (n >= 8 && n <= 64) || (entry_mode == ENTRY_OPEN_PASSWORD && n == 0);
+	if (entry_mode == ENTRY_SSH) ok = n >= 8 && n <= 64;
 	if (ok) lv_obj_remove_state(entry_go, LV_STATE_DISABLED);
 	else lv_obj_add_state(entry_go, LV_STATE_DISABLED);
 }
@@ -2009,7 +2015,8 @@ static void entry_clear(void) {
 	if (entry_ta) lv_textarea_set_text(entry_ta, "");
 }
 
-static void entry_back(lv_event_t *e) { show_page(page_wifi); }
+static void entry_back(lv_event_t *e) { show_page(entry_mode == ENTRY_SSH ? page_settings : page_wifi); }
+static void ssh_set_now(const char *password);
 
 static void entry_go_clicked(lv_event_t *e) {
 	if (lv_obj_has_state(entry_go, LV_STATE_DISABLED)) return;
@@ -2019,7 +2026,8 @@ static void entry_go_clicked(lv_event_t *e) {
 		open_entry(ENTRY_OPEN_PASSWORD, name);
 		return;
 	}
-	wifi_join_now(entry_ssid, lv_textarea_get_text(entry_ta)); // leaving the screen clears it
+	if (entry_mode == ENTRY_SSH) ssh_set_now(lv_textarea_get_text(entry_ta));
+	else wifi_join_now(entry_ssid, lv_textarea_get_text(entry_ta)); // leaving the screen clears it
 }
 
 static void entry_eye_clicked(lv_event_t *e) {
@@ -2033,12 +2041,14 @@ static void open_entry(enum entry_mode mode, const char *ssid) {
 	snprintf(entry_ssid, sizeof entry_ssid, "%s", ssid);
 	char t[80];
 	if (mode == ENTRY_NAME) snprintf(t, sizeof t, "The network's name");
+	else if (mode == ENTRY_SSH) snprintf(t, sizeof t, "A password for logging in");
 	else snprintf(t, sizeof t, "Password for %s", ssid);
 	lv_label_set_text(entry_title, t);
 	lv_label_set_text(entry_hint, mode == ENTRY_NAME ? "Exactly as it's written, capitals and all"
 				      : mode == ENTRY_OPEN_PASSWORD ? "8 to 63 characters, or none for an open network"
+				      : mode == ENTRY_SSH ? "For logging in as \"of\" over SSH: 8 to 64 characters"
 								    : "8 to 63 characters");
-	lv_label_set_text(lv_obj_get_child(entry_go, 0), mode == ENTRY_NAME ? "Next" : "Connect");
+	lv_label_set_text(lv_obj_get_child(entry_go, 0), mode == ENTRY_NAME ? "Next" : mode == ENTRY_SSH ? "Set" : "Connect");
 	lv_textarea_set_max_length(entry_ta, mode == ENTRY_NAME ? WIFI_SSID_MAX : 64);
 	lv_textarea_set_password_mode(entry_ta, mode != ENTRY_NAME);
 	if (mode == ENTRY_NAME) lv_obj_add_flag(entry_eye, LV_OBJ_FLAG_HIDDEN);
@@ -2047,7 +2057,16 @@ static void open_entry(enum entry_mode mode, const char *ssid) {
 	kb_shift = SHIFT_OFF;
 	kb_syms = false;
 	kb_layout();
+	// back to where it came from: Wi-Fi, or Settings for the login password
+	const char *from = mode == ENTRY_SSH ? LV_SYMBOL_LEFT "  Settings" : LV_SYMBOL_LEFT "  Wi-Fi";
+	lv_label_set_text(lv_obj_get_child(entry_back_btn, 0), from);
+	int bw = text_w(from, &lv_font_montserrat_20) + 2 * BUTTON_PAD;
+	lv_obj_set_width(entry_back_btn, bw > BUTTON_MIN_W ? bw : BUTTON_MIN_W);
+	lv_obj_update_layout(entry_back_btn);
+	lv_obj_set_width(entry_title, SPRITE_W - 2 * CONTENT_X - lv_obj_get_width(entry_back_btn) - BUTTON_GAP);
+	lv_obj_align_to(entry_title, entry_back_btn, LV_ALIGN_OUT_RIGHT_MID, BUTTON_GAP, 0);
 	show_page(page_entry);
+	if (mode == ENTRY_SSH) lv_label_set_text(bar_title, "Settings");
 	entry_clear();
 	entry_validate();
 }
@@ -2061,7 +2080,7 @@ static void build_entry(lv_obj_t *scr) {
 	lv_obj_add_flag(page_entry, LV_OBJ_FLAG_HIDDEN);
 
 	// the top row: back, and what's wanted
-	lv_obj_t *back = button(page_entry, LV_SYMBOL_LEFT "  Wi-Fi", BUTTON_MAIN, entry_back, NULL);
+	lv_obj_t *back = entry_back_btn = button(page_entry, LV_SYMBOL_LEFT "  Wi-Fi", BUTTON_MAIN, entry_back, NULL);
 	lv_obj_set_pos(back, CONTENT_X, CONTENT_TOP);
 	lv_obj_update_layout(back);
 	int tx = CONTENT_X + lv_obj_get_width(back) + BUTTON_GAP;
@@ -2137,6 +2156,59 @@ static void build_entry(lv_obj_t *scr) {
 	kb_layout();
 }
 
+/* ---- remote access: the password for logging in as "of" (sprite-helper ssh-status/-password) ---- */
+
+static lv_obj_t *ssh_status_label, *ssh_detail_label;
+
+static void ssh_status_done(char *reply, void *data) {
+	const char *st = helper_reply_status(reply);
+	if (!ssh_status_label) return;
+	if (strcmp(st, "ok")) { set_text(ssh_status_label, "Can't tell"); return; }
+	char pw[16] = "", *save = NULL;
+	int keys = 0;
+	for (char *l = strtok_r(reply, "\n", &save); l; l = strtok_r(NULL, "\n", &save)) {
+		if (!strncmp(l, "password=", 9)) snprintf(pw, sizeof pw, "%s", l + 9);
+		else if (!strncmp(l, "keys=", 5)) keys = atoi(l + 5);
+	}
+	char t[96];
+	if (!strcmp(pw, "shared")) snprintf(t, sizeof t, "Still the old shared password: set one");
+	else if (!strcmp(pw, "set")) snprintf(t, sizeof t, "Password set%s", keys ? ", and keys" : "");
+	else if (keys) snprintf(t, sizeof t, "By key only (no password)");
+	else snprintf(t, sizeof t, "Off: set a password to log in");
+	set_text(ssh_status_label, t);
+	lv_obj_set_style_text_color(ssh_status_label, lv_color_hex(!strcmp(pw, "shared") ? 0xf2b33d : C_TEXT), 0);
+	struct sprite_net n;
+	sysinfo_net(&n);
+	const char *ip = n.eth_ip[0] ? n.eth_ip : n.wifi_ip;
+	snprintf(t, sizeof t, "%s%s", ip[0] ? "ssh of@" : "", ip);
+	set_text(ssh_detail_label, strcmp(pw, "none") || keys ? t : "");
+}
+
+static void ssh_refresh(void) {
+	if (ssh_status_label) helper_request("ssh-status\n", ssh_status_done, NULL);
+}
+
+static void ssh_set_done(char *reply, void *data) {
+	const char *st = helper_reply_status(reply);
+	if (strcmp(st, "ok")) {
+		lv_obj_t *card = dialog_open(NULL, "The password wasn't set", strncmp(st, "error: ", 7) ? st : st + 7, true);
+		dialog_button(card, "OK", BUTTON_MAIN, dialog_cancel, NULL);
+		return;
+	}
+	show_toast("Password set", 2500);
+	ssh_refresh();
+}
+
+static void ssh_set_now(const char *password) {
+	char req[96];
+	snprintf(req, sizeof req, "ssh-password\n%s\n", password);
+	helper_request(req, ssh_set_done, NULL);
+	explicit_bzero(req, sizeof req);
+	show_page(page_settings); // leaving the screen clears the password
+}
+
+static void ssh_set_clicked(lv_event_t *e) { open_entry(ENTRY_SSH, ""); }
+
 static void build_settings(lv_obj_t *scr) {
 	page_settings = list_page(scr);
 	button(page_settings, LV_SYMBOL_LEFT "  Home", BUTTON_MAIN, back_clicked, NULL);
@@ -2165,6 +2237,27 @@ static void build_settings(lv_obj_t *scr) {
 		wifi_forget_btn = button(br, "Forget", BUTTON_OTHER, wifi_forget_ask, NULL);
 		lv_obj_add_flag(wifi_forget_btn, LV_OBJ_FLAG_HIDDEN);
 	}
+
+	// Logging in over SSH as "of": images give it no password (every unit used to have the
+	// same one), so this is where an owner sets one, through the helper.
+	section(page_settings, "REMOTE ACCESS");
+	lv_obj_t *sr = lv_obj_create(page_settings);
+	lv_obj_remove_style_all(sr);
+	lv_obj_set_size(sr, LV_PCT(100), ROW_H);
+	lv_obj_set_flex_flow(sr, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(sr, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_column(sr, 20, 0);
+	lv_obj_remove_flag(sr, LV_OBJ_FLAG_SCROLLABLE);
+	ssh_status_label = lv_label_create(sr);
+	lv_label_set_text(ssh_status_label, "");
+	lv_label_set_long_mode(ssh_status_label, LV_LABEL_LONG_DOT);
+	lv_obj_set_flex_grow(ssh_status_label, 1);
+	lv_obj_set_style_text_color(ssh_status_label, lv_color_hex(C_TEXT), 0);
+	ssh_detail_label = lv_label_create(sr);
+	lv_label_set_text(ssh_detail_label, "");
+	lv_obj_set_style_text_color(ssh_detail_label, lv_color_hex(C_DIM), 0);
+	lv_obj_t *srow = button_row(page_settings);
+	button(srow, LV_SYMBOL_KEYBOARD "  Set password", BUTTON_MAIN, ssh_set_clicked, NULL);
 
 	section(page_settings, "BRIGHTNESS");
 	lv_obj_t *row = lv_obj_create(page_settings);

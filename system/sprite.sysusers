@@ -1,0 +1,8 @@
+# sprite runs as a user of its own: no password, no login, no sudo, its state in
+# /var/lib/sprite. "of" is the person's account, and nothing runs as it unless someone's
+# logged in.
+u sprite - "sprite, the OpenFrame touch shell" /var/lib/sprite
+# sprite's sandboxed apps each run as a user of their own (see sprite-helper), all in this
+# group, which can reach sprite's display sockets. sprite has it too.
+g sprite-apps -
+m sprite sprite-apps

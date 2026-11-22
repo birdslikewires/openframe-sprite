@@ -5,7 +5,8 @@ set -e
 cd "$(dirname "$0")/.."
 : "${OFH:?set OFH to user@address of the OpenFrame}"
 name=${1:-shot}
-ssh $SSH_OPTS "$OFH" 'pkill -USR1 -x sprite; sleep 0.5; cat "$XDG_RUNTIME_DIR/sprite-shot.ppm" 2>/dev/null || cat /run/user/$(id -u)/sprite-shot.ppm' </dev/null > "out/$name.ppm"
+# sprite runs as its own user, so it takes sudo to signal it and read what it saves.
+ssh $SSH_OPTS "$OFH" 'sudo pkill -USR1 -x sprite; sleep 0.5; sudo cat /run/user/$(id -u sprite)/sprite-shot.ppm' </dev/null > "out/$name.ppm"
 python3 - "out/$name.ppm" "out/$name.png" <<'PY'
 import sys, zlib, struct
 data = open(sys.argv[1], 'rb').read()

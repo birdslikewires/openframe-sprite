@@ -30,8 +30,8 @@ install -m 644 settings/sprite.txt "$pkg$P/share/sprite/sprite.txt"
 install -m 644 apps/settings.app "$pkg$P/share/sprite/apps/"
 install -m 644 system/sprite.service system/sprite-helper.socket system/sprite-helper@.service \
   "$pkg/usr/lib/systemd/system/"
-install -D -m 644 system/sprite-apps.sysusers "$pkg/usr/lib/sysusers.d/openframe-sprite.conf"
-install -D -m 644 system/sprite-apps.tmpfiles "$pkg/usr/lib/tmpfiles.d/openframe-sprite.conf"
+install -D -m 644 system/sprite.sysusers "$pkg/usr/lib/sysusers.d/openframe-sprite.conf"
+install -D -m 644 system/sprite.tmpfiles "$pkg/usr/lib/tmpfiles.d/openframe-sprite.conf"
 for f in postinst prerm postrm; do install -m 755 "package/$f" "$pkg/DEBIAN/$f"; done
 find "$pkg$P" -type f \( -name '*.so*' -o -perm -u+x \) ! -name sprite-helper -exec strip --strip-unneeded {} +
 

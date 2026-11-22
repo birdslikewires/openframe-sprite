@@ -295,7 +295,7 @@ void apps_launch(struct sprite_app *app) {
 	if (app->x11 && !x_open && (apps_sandboxed() || getuid() == 0)) {
 		app->pending = true;
 		if (apps_sandboxed()) start_keeper("localgroup", "sprite-apps");
-		else start_keeper("localuser", getenv("SPRITE_USER") ? getenv("SPRITE_USER") : "of");
+		else start_keeper("localuser", getenv("SPRITE_USER") ? getenv("SPRITE_USER") : "sprite");
 		return;
 	}
 	if (apps_sandboxed()) {
@@ -306,7 +306,7 @@ void apps_launch(struct sprite_app *app) {
 		helper_request(req, launched, app);
 		return;
 	}
-	const char *user = getenv("SPRITE_USER") ? getenv("SPRITE_USER") : "of";
+	const char *user = getenv("SPRITE_USER") ? getenv("SPRITE_USER") : "sprite";
 	struct passwd *pw = getpwnam(user);
 	pid_t pid = fork();
 	if (pid < 0) { wlr_log(WLR_ERROR, "fork: %s", strerror(errno)); return; }

@@ -4,7 +4,8 @@
 #  Once per system, sprite takes tty1 from the login prompt (getty@tty1), so it starts at
 #  boot; disabling it afterwards sticks. The settings file goes onto OF-BOOT if there isn't
 #  one, for editing from a PC. On an upgrade, a running sprite restarts on the new version.
-#  Sandboxed apps get their group (sysusers.d) and socket directory (tmpfiles.d).
+#  sprite gets its user, and sandboxed apps their group (sysusers.d) and socket directory
+#  (tmpfiles.d). "of", the person's account, joins the group, to try apps by hand.
 
 set -e
 
@@ -19,12 +20,17 @@ in_chroot() {
 case "$1" in
 	configure)
 		# the group sandboxed apps share, and (outside a chroot) their socket directory
-		systemd-sysusers openframe-sprite.conf 2>/dev/null || getent group sprite-apps >/dev/null ||
-			groupadd --system sprite-apps
+		if ! systemd-sysusers openframe-sprite.conf 2>/dev/null; then # no systemd (a container)
+			getent group sprite-apps >/dev/null || groupadd --system sprite-apps
+			getent passwd sprite >/dev/null || useradd --system --home-dir /var/lib/sprite \
+				--shell /usr/sbin/nologin --comment "sprite, the OpenFrame touch shell" sprite
+			usermod -a -G sprite-apps sprite
+		fi
+		getent passwd of >/dev/null && usermod -a -G sprite-apps of || true
 		in_chroot || systemd-tmpfiles --create openframe-sprite.conf || true
 		in_chroot || systemctl daemon-reload 2>/dev/null || true
 		systemctl enable --quiet sprite-helper.socket 2>/dev/null || true
-		in_chroot || systemctl start sprite-helper.socket 2>/dev/null || true
+		in_chroot || systemctl restart sprite-helper.socket 2>/dev/null || true # its group may be new
 
 		if [ ! -e "$ENABLEMARKER" ]; then
 			systemctl disable --quiet getty@tty1.service 2>/dev/null || true
