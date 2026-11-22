@@ -14,6 +14,8 @@ StartLimitBurst=3
 
 [Service]
 User=of
+# to give sandboxed apps' display sockets their group (see sprite-helper)
+SupplementaryGroups=sprite-apps
 PAMName=login
 TTYPath=/dev/tty1
 TTYReset=yes

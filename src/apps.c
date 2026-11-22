@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Apps: manifests on disk, launching as the unprivileged user, and tracking their processes.
+// Apps: manifests on disk, launching them, and tracking their processes.
+//
+// Apps run in sandboxes: sprite-helper starts each as a systemd unit, sprite-app-<id>, under
+// a user of its own (see the helper for what each may do). sprite knows an app's processes
+// by that unit, and its exit by a pidfd on its main process. With SPRITE_SANDBOX=0 (for
+// trying things out) sprite starts apps itself instead, as its own user, as it used to.
 //
 // A manifest is a small key=value file, one per app, in the apps directory:
 //   name=Clock
@@ -9,6 +14,8 @@
 //   builtin=settings     (handled by sprite itself, no exec)
 //   display=x11          (an X11 or SDL app, run through Xwayland; default wayland)
 //   handle=faint         (home handle: normal, faint or hidden while the app shows)
+//   allow=network sound  (what a sandboxed app may have beyond the display; read by the helper)
+// Comments go on lines of their own.
 #define _GNU_SOURCE
 #include <dirent.h>
 #include <time.h>
@@ -20,6 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/pidfd.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <wlr/util/log.h>
@@ -48,6 +56,11 @@ static struct wl_event_source *keeper_src;
 void apps_set_env(const char *wayland_display, const char *x_display) {
 	snprintf(env_wayland, sizeof env_wayland, "%s", wayland_display ? wayland_display : "");
 	snprintf(env_x, sizeof env_x, "%s", x_display ? x_display : "");
+}
+
+bool apps_sandboxed(void) {
+	const char *v = getenv("SPRITE_SANDBOX");
+	return !(v && !strcmp(v, "0"));
 }
 
 int apps_count(void) { return n_apps; }
@@ -80,6 +93,7 @@ static void load_dir(const char *dir) {
 		snprintf(a->id, sizeof a->id, "%.*s", (int)(len - 4), de->d_name);
 		a->color = 0x3a4a5a;
 		a->handle = SPRITE_HANDLE_NORMAL;
+		a->pidfd = -1;
 		char line[768];
 		while (fgets(line, sizeof line, f)) {
 			trim(line);
@@ -138,7 +152,28 @@ static pid_t parent_of(pid_t pid) {
 	return ppid;
 }
 
+// A sandboxed app's processes are all in its unit's cgroup: "0::/system.slice/sprite-app-<id>.service".
+static struct sprite_app *app_for_unit(pid_t pid) {
+	char path[64], line[512];
+	snprintf(path, sizeof path, "/proc/%d/cgroup", pid);
+	FILE *f = fopen(path, "r");
+	if (!f) return NULL;
+	struct sprite_app *found = NULL;
+	if (fgets(line, sizeof line, f)) {
+		char *u = strstr(line, "/sprite-app-"), *e;
+		if (u && (e = strstr(u += 12, ".service\n"))) {
+			*e = 0;
+			for (int i = 0; i < n_apps && !found; i++)
+				if (!apps[i].hidden && !strcmp(apps[i].id, u)) found = &apps[i];
+		}
+	}
+	fclose(f);
+	return found;
+}
+
 struct sprite_app *apps_for_pid(pid_t pid) {
+	struct sprite_app *in_unit = pid > 1 ? app_for_unit(pid) : NULL;
+	if (in_unit) return in_unit;
 	for (pid_t p = pid; p > 1; p = parent_of(p))
 		for (int i = 0; i < n_apps; i++)
 			if (apps[i].pid == p) return &apps[i];
@@ -153,6 +188,7 @@ struct sprite_app *apps_for_pid(pid_t pid) {
 	snprintf(a->name, sizeof a->name, "Window %d", pid);
 	a->hidden = true;
 	a->pid = pid;
+	a->pidfd = -1;
 	a->handle = SPRITE_HANDLE_NORMAL;
 	return a;
 }
@@ -168,7 +204,8 @@ static int keeper_readable(int fd, uint32_t mask, void *data) {
 	return 0;
 }
 
-static void start_keeper(const char *user) {
+// kind is "localuser" or "localgroup": sandboxed apps are let in by their group, sprite-apps.
+static void start_keeper(const char *kind, const char *name) {
 	int p[2];
 	if (keeper_pid || !env_x[0] || pipe(p) != 0) return;
 	pid_t pid = fork();
@@ -180,8 +217,8 @@ static void start_keeper(const char *user) {
 		xcb_connection_t *c = xcb_connect(env_x, NULL);
 		char ok = 'n';
 		if (!xcb_connection_has_error(c)) {
-			char entry[80]; // server-interpreted address: "localuser" NUL user
-			int len = snprintf(entry, sizeof entry, "localuser%c%s", 0, user);
+			char entry[80]; // server-interpreted address: "localuser" or "localgroup", NUL, name
+			int len = snprintf(entry, sizeof entry, "%s%c%s", kind, 0, name);
 			xcb_void_cookie_t ck = xcb_change_hosts_checked(c, XCB_HOST_MODE_INSERT,
 				XCB_FAMILY_SERVER_INTERPRETED, len, (const uint8_t *)entry);
 			xcb_generic_error_t *err = xcb_request_check(c, ck);
@@ -214,11 +251,59 @@ void apps_x11_ready(bool ready) {
 	}
 }
 
+static void exited(struct sprite_app *a);
+
+static int app_gone(int fd, uint32_t mask, void *data) {
+	struct sprite_app *a = data;
+	wl_event_source_remove(a->exit_src);
+	a->exit_src = NULL;
+	close(a->pidfd);
+	a->pidfd = -1;
+	wlr_log(WLR_INFO, "%s exited", a->name);
+	a->pid = 0;
+	exited(a);
+	shell_apps_changed();
+	return 0;
+}
+
+static void launched(char *reply, void *data) {
+	struct sprite_app *a = data;
+	a->pending = false;
+	const char *st = helper_reply_status(reply);
+	int pid = 0;
+	if (strcmp(st, "ok") || sscanf(reply, "pid %d", &pid) != 1 || pid <= 1) {
+		wlr_log(WLR_ERROR, "%s didn't start: %s", a->name, st);
+		char s[160];
+		snprintf(s, sizeof s, "%s couldn't be opened", a->name);
+		shell_notice(s);
+		exited(a);
+		shell_apps_changed();
+		return;
+	}
+	a->pid = pid;
+	a->pidfd = pidfd_open(pid, 0);
+	if (a->pidfd >= 0)
+		a->exit_src = wl_event_loop_add_fd(sprite_event_loop(), a->pidfd, WL_EVENT_READABLE, app_gone, a);
+	wlr_log(WLR_INFO, "launched %s in its sandbox (pid %d)", a->name, pid);
+	if (!a->exit_src) app_gone(-1, 0, a); // gone already
+	else shell_apps_changed();
+}
+
 void apps_launch(struct sprite_app *app) {
 	if (app->builtin || app->pid || app->pending) return;
-	if (app->x11 && !x_open && getuid() == 0) { // as root, Xwayland must be opened to the apps' user
+	// Xwayland admits only its own user until it's opened to the apps' (or their group)
+	if (app->x11 && !x_open && (apps_sandboxed() || getuid() == 0)) {
 		app->pending = true;
-		start_keeper(getenv("SPRITE_USER") ? getenv("SPRITE_USER") : "of");
+		if (apps_sandboxed()) start_keeper("localgroup", "sprite-apps");
+		else start_keeper("localuser", getenv("SPRITE_USER") ? getenv("SPRITE_USER") : "of");
+		return;
+	}
+	if (apps_sandboxed()) {
+		char req[128];
+		snprintf(req, sizeof req, "app-start %s %s\n", app->id, app->x11 ? env_x : "");
+		app->pending = true;
+		wlr_log(WLR_INFO, "starting %s: %s", app->name, app->exec);
+		helper_request(req, launched, app);
 		return;
 	}
 	const char *user = getenv("SPRITE_USER") ? getenv("SPRITE_USER") : "of";
@@ -286,6 +371,13 @@ static int restart_cb(void *data) {
 static int close_cb(void *data) {
 	struct sprite_app *a = data;
 	if (a->pid <= 0) return 0;
+	if (a->exit_src) { // sandboxed: its unit stops it, SIGKILL 2 s after SIGTERM
+		char req[96];
+		snprintf(req, sizeof req, "app-stop %.63s", a->id);
+		wlr_log(WLR_INFO, "%s still running: stopping its unit", a->name);
+		sysinfo_helper(req);
+		return 0;
+	}
 	pid_t target = a->hidden ? a->pid : -a->pid; // launched apps lead their own process group
 	if (++a->close_stage == 1) {
 		wlr_log(WLR_INFO, "%s still running: SIGTERM", a->name);
@@ -338,6 +430,12 @@ void apps_end_all(void) {
 	int left = 0;
 	for (int i = 0; i < n_apps; i++) {
 		if (apps[i].pid <= 0 || apps[i].hidden) continue;
+		if (apps[i].exit_src) { // bound to sprite.service, but sprite may be running by hand
+			char req[96];
+			snprintf(req, sizeof req, "app-stop %.63s", apps[i].id);
+			sysinfo_helper(req);
+			continue;
+		}
 		kill(-apps[i].pid, SIGTERM);
 		left++;
 	}
@@ -346,13 +444,13 @@ void apps_end_all(void) {
 		usleep(100000);
 		left = 0;
 		for (int i = 0; i < n_apps; i++) {
-			if (apps[i].pid <= 0 || apps[i].hidden) continue;
+			if (apps[i].pid <= 0 || apps[i].hidden || apps[i].exit_src) continue;
 			if (waitpid(apps[i].pid, NULL, WNOHANG) == apps[i].pid) apps[i].pid = 0;
 			else left++;
 		}
 	}
 	for (int i = 0; i < n_apps; i++)
-		if (apps[i].pid > 0 && !apps[i].hidden) {
+		if (apps[i].pid > 0 && !apps[i].hidden && !apps[i].exit_src) {
 			wlr_log(WLR_INFO, "%s still running at exit: SIGKILL", apps[i].name);
 			kill(-apps[i].pid, SIGKILL);
 		}
@@ -373,7 +471,7 @@ bool apps_reap(void) {
 	}
 	for (int i = 0; i < n_apps; i++) {
 		struct sprite_app *a = &apps[i];
-		if (a->pid <= 0 || a->hidden) continue;
+		if (a->pid <= 0 || a->hidden || a->exit_src) continue; // a sandboxed app isn't our child
 		int status;
 		if (waitpid(a->pid, &status, WNOHANG) == a->pid) {
 			wlr_log(WLR_INFO, "%s exited (%s %d)", a->name, WIFEXITED(status) ? "status" : "signal",

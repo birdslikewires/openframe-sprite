@@ -4,6 +4,7 @@
 #  Once per system, sprite takes tty1 from the login prompt (getty@tty1), so it starts at
 #  boot; disabling it afterwards sticks. The settings file goes onto OF-BOOT if there isn't
 #  one, for editing from a PC. On an upgrade, a running sprite restarts on the new version.
+#  Sandboxed apps get their group (sysusers.d) and socket directory (tmpfiles.d).
 
 set -e
 
@@ -17,6 +18,10 @@ in_chroot() {
 
 case "$1" in
 	configure)
+		# the group sandboxed apps share, and (outside a chroot) their socket directory
+		systemd-sysusers openframe-sprite.conf 2>/dev/null || getent group sprite-apps >/dev/null ||
+			groupadd --system sprite-apps
+		in_chroot || systemd-tmpfiles --create openframe-sprite.conf || true
 		in_chroot || systemctl daemon-reload 2>/dev/null || true
 		systemctl enable --quiet sprite-helper.socket 2>/dev/null || true
 		in_chroot || systemctl start sprite-helper.socket 2>/dev/null || true

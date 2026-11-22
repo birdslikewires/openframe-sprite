@@ -54,7 +54,7 @@ static int request_readable(int fd, uint32_t mask, void *data) {
 }
 
 // Send text to the helper; done() gets its whole reply when the helper hangs up.
-static void helper_request(const char *text, void (*done)(char *reply, void *ctx), void *ctx) {
+void helper_request(const char *text, void (*done)(char *reply, void *ctx), void *ctx) {
 	struct request *r = calloc(1, sizeof *r);
 	if (!r) { done(NULL, ctx); return; }
 	r->done = done;
@@ -75,7 +75,7 @@ static void helper_request(const char *text, void (*done)(char *reply, void *ctx
 }
 
 // The reply's last line: "ok", or "error: <reason>". The lines before it are the answer.
-static const char *reply_status(char *reply) {
+const char *helper_reply_status(char *reply) {
 	if (!reply) return "error: sprite's helper isn't running";
 	size_t n = strlen(reply);
 	while (n && reply[n - 1] == '\n') reply[--n] = 0;
@@ -140,7 +140,7 @@ static int by_signal(const void *a, const void *b) {
 static void scan_done(char *reply, void *p) {
 	struct scan_ctx c = *(struct scan_ctx *)p;
 	free(p);
-	const char *st = reply_status(reply);
+	const char *st = helper_reply_status(reply);
 	static struct wifi_net nets[WIFI_NETS_MAX];
 	int n = 0;
 	if (!strcmp(st, "ok")) {
@@ -196,7 +196,7 @@ struct status_ctx { wifi_status_cb cb; void *data; };
 static void status_done(char *reply, void *p) {
 	struct status_ctx c = *(struct status_ctx *)p;
 	free(p);
-	const char *st = reply_status(reply);
+	const char *st = helper_reply_status(reply);
 	struct wifi_status s = { 0 };
 	if (!strcmp(st, "ok")) {
 		s.present = true;
@@ -230,7 +230,7 @@ struct done_ctx { wifi_done_cb cb; void *data; };
 static void change_done(char *reply, void *p) {
 	struct done_ctx c = *(struct done_ctx *)p;
 	free(p);
-	const char *st = reply_status(reply);
+	const char *st = helper_reply_status(reply);
 	c.cb(strcmp(st, "ok") ? st : NULL, c.data);
 }
 

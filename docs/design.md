@@ -224,6 +224,8 @@ the long-press sheet, the Restart and Switch off questions, and the calibration 
   a `color=` for the icon, and an icon glyph keyword.
 - **`handle=faint` or `handle=hidden`** for apps whose content needs the bottom edge clear.
   The pill's touch zone still works.
+- **In a sandbox,** with only what `allow=` asks for (see the README). Starting one costs
+  about 0.8 s, most of it systemd's: worth watching, as the first thing seen after a tap.
 
 ## Still to settle
 

@@ -5,13 +5,17 @@
 #include <assert.h>
 #include <drm_fourcc.h>
 #include <linux/input-event-codes.h>
+#include <errno.h>
+#include <grp.h>
 #include <pthread.h>
 #include <pwd.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
 #include <math.h>
 #include <time.h>
 #include <unistd.h>
@@ -914,6 +918,35 @@ static int on_sigchld(int sig, void *data) {
 	return 0;
 }
 
+// Sandboxed apps reach the display through sockets of the sprite-apps group, the one group
+// they share with sprite (see sprite-helper): a Wayland socket of their own, in
+// /run/sprite-apps (made by the package's tmpfiles.d, setgid sprite-apps), and Xwayland's.
+#define APP_SOCKET_DIR "/run/sprite-apps"
+static void open_display_to_apps(struct wl_display *display, const char *x_display) {
+	struct group *g = getgrnam("sprite-apps");
+	if (!g) { wlr_log(WLR_ERROR, "no sprite-apps group: sandboxed apps can't reach the display"); return; }
+	const char *path = APP_SOCKET_DIR "/wayland-0";
+	struct sockaddr_un sa = { .sun_family = AF_UNIX };
+	snprintf(sa.sun_path, sizeof sa.sun_path, "%s", path);
+	int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	unlink(path);
+	if (fd < 0 || bind(fd, (struct sockaddr *)&sa, sizeof sa) != 0 || chown(path, -1, g->gr_gid) != 0 ||
+	    chmod(path, 0660) != 0 || listen(fd, 128) != 0 || wl_display_add_socket_fd(display, fd) != 0) {
+		wlr_log(WLR_ERROR, "no Wayland socket for apps at %s: %s", path, strerror(errno));
+		if (fd >= 0) close(fd);
+	} else {
+		wlr_log(WLR_INFO, "Wayland socket for apps at %s", path);
+	}
+	// Xwayland's socket (wlroots made it, as us): the group may connect, as well as its owner.
+	// X then decides who it lets in, and the X keeper lets in the group.
+	if (x_display && x_display[0] == ':') {
+		char x[64];
+		snprintf(x, sizeof x, "/tmp/.X11-unix/X%s", x_display + 1);
+		if (chown(x, -1, g->gr_gid) != 0 || chmod(x, 0770) != 0)
+			wlr_log(WLR_ERROR, "%s can't be opened to apps: %s", x, strerror(errno));
+	}
+}
+
 // The Wayland socket must be reachable by the unprivileged user apps run as.
 static void prepare_runtime_dir(uid_t uid, gid_t gid) {
 	const char *dir = getenv("XDG_RUNTIME_DIR");
@@ -1032,6 +1065,7 @@ int main(int argc, char **argv) {
 		if (chown(path, pw->pw_uid, pw->pw_gid) != 0) wlr_log(WLR_ERROR, "chown %s failed", path);
 	}
 	apps_set_env(socket, S.xwayland ? S.xwayland->display_name : NULL);
+	if (apps_sandboxed()) open_display_to_apps(S.display, S.xwayland ? S.xwayland->display_name : NULL);
 
 	// LVGL: the shell renders into the buffer above, on this thread, from the event loop.
 	settings_load(); // the shell reads some (the clock's format) as it's built

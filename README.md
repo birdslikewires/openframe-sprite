@@ -43,17 +43,48 @@ own) or `/usr/share/sprite/apps/` (installed by packages, such as
 [openframe-hamclock](https://github.com/birdslikewires/openframe-hamclock)):
 
 ```
-name=Clock
-exec=xclock -update 1
-icon=clock        # a keyword (see icon_text in src/shell.c) or up to two letters
-color=2a6f97      # tile colour
-display=x11       # X11 or SDL apps; leave out for native Wayland apps
-handle=faint      # home pill: normal (default), faint or hidden while the app shows
+name=HamClock
+exec=/usr/bin/hamclock -t 10 -b ohb.hamclock.app:80
+icon=radio
+color=b8860b
+display=x11
+allow=network
 ```
 
-Apps run as the `of` user. sprite tells them to draw through X11 for SDL
-(`SDL_VIDEODRIVER=x11`), because SDL's Wayland support needs EGL, which this hardware lacks.
-The package brings only Settings: every other app comes in its own package, as HamClock does.
+- `icon=`: a keyword (see `icon_text` in `src/shell.c`) or up to two letters
+- `color=`: the tile's colour
+- `display=x11`: for X11 and SDL apps; leave it out for native Wayland apps
+- `handle=`: the home pill while the app shows, `normal` (the default), `faint` or `hidden`
+- `allow=`: what the app may have beyond the display, `network` and `sound`, separated by
+  spaces; without it, an app has neither
+
+Comments go on lines of their own, starting with `#`. The package brings only Settings:
+every other app comes in its own package, as HamClock does. sprite tells apps to draw
+through X11 for SDL (`SDL_VIDEODRIVER=x11`), because SDL's Wayland support needs EGL, which
+this hardware lacks.
+
+### Sandboxes
+
+Each app runs in a sandbox: `sprite-helper` starts it as a systemd unit,
+`sprite-app-<id>.service`, under a user of its own (`DynamicUser=`) in the `sprite-apps`
+group. That group can reach sprite's display sockets (`/run/sprite-apps/wayland-0`, and
+Xwayland's, which sprite's X keeper opens to the group) and nothing else of sprite's. What
+it runs comes from its manifest, never from sprite. It has:
+
+- no sudo, no capabilities, and no way to gain privileges (`NoNewPrivileges=`), with a
+  seccomp filter (`@system-service`)
+- a read-only system, no `/home`, no `/boot` (where `wifi.txt` is, readable by anyone, as
+  FAT has no permissions), its own `/tmp`, and no other processes to see
+- one directory of its own, `/var/lib/sprite-apps/<id>` (its `$HOME`, kept between runs)
+- no network unless `allow=network`, and no sound devices unless `allow=sound`
+- a lower share of the CPU than sprite, and limits of 192 MB of memory, 64 MB of swap
+  (zram, which is RAM too) and 64 processes; past the memory limit the kernel ends the app,
+  not something else. The limits need a kernel with `MEMCG` and `CGROUP_PIDS`
+
+It's bound to `sprite.service`, so it stops when sprite does. sprite knows an app's windows
+by its unit's cgroup, and its exit by a pidfd. Starting one takes about 0.8 s on the OF1,
+0.4 s of it systemd setting up the sandbox. `SPRITE_SANDBOX=0` in sprite's environment
+starts apps the old way instead, as sprite's own user, for trying things out.
 
 ## Building
 
@@ -107,8 +138,9 @@ app.
 A few things need root, and go through `sprite-helper` (`system/`), which systemd starts
 for each connection to `/run/sprite-helper.sock` (group `of`). It takes one request and
 validates it: `set <key> <value>` for `startup`, `calibration`, `clock` and `seconds` in the
-settings file, `reboot` and `poweroff`, and for Wi-Fi `wifi-scan`, `wifi-status`, `wifi-join`
-and `wifi-forget` (see Wi-Fi below). The header of `system/sprite-helper` describes each.
+settings file, `reboot` and `poweroff`, for Wi-Fi `wifi-scan`, `wifi-status`, `wifi-join`
+and `wifi-forget` (see Wi-Fi below), and `app-start` and `app-stop` for apps (see Sandboxes
+above). The header of `system/sprite-helper` describes each.
 
 It also expects the touchscreen calibration in `spike/touch/` to be installed.
 
@@ -160,9 +192,8 @@ can still be joined.
 - Sound and time zone in Settings
 - The app store: an index repository of app manifests, added to by pull request, with apps
   as i386 `.deb` packages
-- Apps in sandboxes: each started by `sprite-helper` as a systemd unit under a user of its
-  own (`DynamicUser=`), without sudo, with the permissions its manifest asks for (network,
-  sound) and limits on memory, processes and CPU. `of` then loses `NOPASSWD`.
+- `of` losing `NOPASSWD` and the shared password, now that apps don't run as `of`
+- A CPU cap on apps in the background (`CPUQuota=`, which the kernel can do now)
 - Arranging the home screen: dragging tiles to place them, across up to three pages (common
   apps first, games on the next, and so on), with the layout kept. No folders.
 

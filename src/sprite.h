@@ -57,9 +57,11 @@ struct sprite_app {
 	bool builtin;       // handled inside sprite (settings), no process
 	bool hidden;        // not shown on the home screen (adopted windows)
 	bool x11;           // needs Xwayland (manifest: display=x11)
-	bool pending;       // waiting for Xwayland before launching
+	bool pending;       // waiting for Xwayland, or the helper, before it runs
 	float handle;       // home handle opacity while this app shows (manifest: handle=normal|faint|hidden)
 	pid_t pid;          // launched process, 0 when not running
+	int pidfd;          // a sandboxed app's main process, watched for its exit (-1 if not)
+	struct wl_event_source *exit_src;
 	struct sprite_view *view; // the app's main mapped window, if any
 	// closing and restarting
 	bool closing;       // closed from the shell: don't restart it
@@ -73,7 +75,8 @@ struct sprite_app {
 void apps_load(const char *dirs);             // colon-separated directories of manifests
 int apps_count(void);
 struct sprite_app *apps_get(int i);
-struct sprite_app *apps_for_pid(pid_t pid);  // follows parent pids up to a launched app
+struct sprite_app *apps_for_pid(pid_t pid);  // the app a process belongs to (its unit, or parents)
+bool apps_sandboxed(void);                    // apps start through the helper, in sandboxes
 void apps_launch(struct sprite_app *app);
 bool apps_reap(void);                         // collect exited apps; true if any app changed
 void apps_set_env(const char *wayland_display, const char *x_display);
@@ -137,6 +140,11 @@ void sysinfo_run(const char *cmd);            // fire and forget
 #define HELPER_SOCKET "/run/sprite-helper.sock"
 // Ask sprite's root helper to do something (one line, e.g. "reboot"), without waiting.
 void sysinfo_helper(const char *line);
+// wifi.c: a request to the helper without waiting; done() gets the whole reply (NULL if the
+// helper couldn't be reached) from the event loop. helper_reply_status() splits off the
+// reply's last line, "ok" or "error: <reason>", and returns it.
+void helper_request(const char *text, void (*done)(char *reply, void *ctx), void *ctx);
+const char *helper_reply_status(char *reply);
 
 /* wifi.c: Wi-Fi through the helper, which owns settings/wifi.txt. Each call answers later,
    from the event loop; error is NULL on success, or the reason. */

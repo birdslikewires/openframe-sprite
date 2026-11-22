@@ -1,0 +1,3 @@
+# sprite's sandboxed apps each run as a user of their own (see sprite-helper), all in this
+# group, which can reach sprite's display sockets. sprite.service has it too.
+g sprite-apps -

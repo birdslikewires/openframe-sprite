@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-## sprite-helper v26.11.22 (22nd November 2026)
+## sprite-helper v26.11.27 (22nd November 2026)
 ##  Does the few things sprite (which runs as the 'of' user) can't do itself. systemd
 ##  starts one of these per connection to /run/sprite-helper.sock, with the connection
 ##  as stdin and stdout. It reads one request, answers "ok" or "error: <reason>", and
@@ -25,10 +25,25 @@
 ##                            into settings/wifi.txt, as name= and password=, and of-netplan
 ##                            applies them, as it would at boot. Answers once they're written.
 ##    wifi-forget           empty name= and password= in settings/wifi.txt, and apply that
+##    app-start <id> [:N]   start an app in a sandbox (see Apps below), with X display :N for
+##                            an X11 app: answers "pid <main pid>", then "ok"
+##    app-stop <id>         stop an app: SIGTERM to all its processes, SIGKILL 2 s later
 ##
 ##  Wi-Fi is set up the OpenFrame way (see of-netplan): settings/wifi.txt on the boot volume,
 ##  editable from any computer, turned into a netplan configuration. Only name= and
 ##  password= are changed here: a fixed address in the file stays as it is.
+##
+##  Apps: each runs as a transient systemd unit, sprite-app-<id>.service, under a user of
+##  its own (DynamicUser), in the sprite-apps group, which can reach sprite's display
+##  sockets and nothing else of sprite's. What it runs comes only from its manifest (in
+##  one of sprite's app directories, all root's), never from the request. It has no sudo,
+##  no capabilities, a read-only system, no /home or /boot (where wifi.txt is), its own
+##  /tmp, no other processes to see, and one directory of its own to keep things in
+##  (/var/lib/sprite-apps/<id>, kept between runs). The manifest's
+##  allow= line names what more it may have: network (otherwise it has none) and sound
+##  (/dev/snd). It has less of the CPU than sprite, and is held to 192 MB of memory, 64 MB of
+##  swap and 64 processes (with MEMCG and CGROUP_PIDS in the kernel), past which the kernel
+##  ends it, not something else. It's bound to sprite.service, so it stops when sprite does.
 
 SETTINGS="/boot/settings/sprite.txt"
 TEMPLATE="/opt/sprite/share/sprite/sprite.txt"
@@ -36,6 +51,9 @@ WIFITXT="/boot/settings/wifi.txt"
 WIFITEMPLATE="/usr/lib/openframe/settings/wifi.txt"
 WPACTRL="/run/wpa_supplicant"          # where netplan's wpa_supplicant listens
 SCANCTRL="/run/sprite-helper-wpa"      # ... and ours, when we start one to scan
+
+APPDIRS="/opt/sprite/share/sprite/apps /usr/share/sprite/apps /usr/local/share/sprite/apps"
+APPSOCKET="/run/sprite-apps/wayland-0" # sprite's Wayland socket for apps (group sprite-apps)
 
 answer() { echo "$*"; exit 0; }
 
@@ -106,6 +124,117 @@ wifi_write() {
 	chmod 600 "$NEW"
 	boot_write "$NEW" "$WIFITXT"
 	systemctl --no-block start of-netplan.service || answer "error: of-netplan didn't start"
+}
+
+# An app's manifest: the first directory to have the id wins, as in sprite.
+app_manifest() {
+	local d
+	for d in $APPDIRS; do
+		[ -f "$d/$1.app" ] && { echo "$d/$1.app"; return 0; }
+	done
+	return 1
+}
+
+# A manifest's values, read as sprite reads them (key=value lines, the last one for a key,
+# # lines skipped, trailing spaces trimmed), into M_EXEC, M_BUILTIN, M_DISPLAY and M_ALLOW.
+# In bash alone: each process started costs time on the Atom, and this is on the way to
+# an app's window.
+app_read() {
+	local LINE K
+	M_EXEC="" M_BUILTIN="" M_DISPLAY="" M_ALLOW=""
+	while IFS= read -r LINE || [ -n "$LINE" ]; do
+		LINE="${LINE%"${LINE##*[![:space:]]}"}"
+		[[ "$LINE" == \#* || "$LINE" != *=* ]] && continue
+		K="${LINE%%=*}"
+		case "$K" in
+			exec) M_EXEC="${LINE#*=}" ;;
+			builtin) M_BUILTIN="${LINE#*=}" ;;
+			display) M_DISPLAY="${LINE#*=}" ;;
+			allow) M_ALLOW="${LINE#*=}" ;;
+		esac
+	done < "$1"
+}
+
+# Waits up to 5 s for an app's unit to finish stopping, so it can be started again.
+app_settle() {
+	local _ STATE
+	for _ in $(seq 25); do
+		STATE=$(systemctl show -P ActiveState "sprite-app-$1.service" 2>/dev/null)
+		case "$STATE" in deactivating|activating|reloading) sleep 0.2 ;; *) return 0 ;; esac
+	done
+	return 1
+}
+
+# The main process of an app's unit: the first in its cgroup.
+app_pid() {
+	local PID=""
+	read -r PID 2>/dev/null < "/sys/fs/cgroup/system.slice/sprite-app-$1.service/cgroup.procs"
+	[ "${PID:-0}" -gt 1 ] && echo "$PID"
+}
+
+app_start() {
+	local ID="$1" DISP="$2" M UNIT PID
+	M=$(app_manifest "$ID") || answer "error: no app $ID"
+	app_read "$M"
+	[ -n "$M_EXEC" ] || answer "error: $ID has nothing to run"
+	[ -z "$M_BUILTIN" ] || answer "error: $ID is part of sprite"
+	UNIT="sprite-app-$ID.service"
+
+	local P=(
+		--quiet --unit="$UNIT" --description="sprite app $ID" --expand-environment=no
+		-p Type=exec -p CollectMode=inactive-or-failed -p TimeoutStopSec=2
+		-p BindsTo=sprite.service -p After=sprite.service
+		# who it is, and where it may write
+		-p DynamicUser=yes -p Group=sprite-apps -p UMask=0077
+		-p StateDirectory="sprite-apps/$ID" -p RuntimeDirectory="sprite-app-$ID"
+		-p WorkingDirectory="/var/lib/sprite-apps/$ID"
+		-p ProtectSystem=strict -p ProtectHome=yes -p PrivateTmp=yes -p ProtectProc=invisible
+		# OF-BOOT is FAT, so everything on it is anyone's to read: wifi.txt's password too
+		-p InaccessiblePaths=-/boot
+		# no way up
+		-p NoNewPrivileges=yes -p CapabilityBoundingSet= -p RestrictSUIDSGID=yes
+		-p ProtectKernelTunables=yes -p ProtectKernelModules=yes -p ProtectKernelLogs=yes
+		-p ProtectControlGroups=yes -p ProtectClock=yes -p ProtectHostname=yes
+		-p RestrictNamespaces=yes -p RestrictRealtime=yes -p LockPersonality=yes
+		-p SystemCallArchitectures=native -p SystemCallFilter=@system-service
+		# its share: sprite comes first. Swap is zram, which is RAM too, so it's limited as well.
+		-p OOMScoreAdjust=500 -p CPUWeight=50 -p MemoryMax=192M -p MemorySwapMax=64M -p TasksMax=64
+		# the display
+		--setenv=WAYLAND_DISPLAY="$APPSOCKET"
+		--setenv=XDG_RUNTIME_DIR="/run/sprite-app-$ID"
+		--setenv=HOME="/var/lib/sprite-apps/$ID"
+		--setenv=SDL_VIDEODRIVER=x11 # SDL's Wayland backend needs EGL, which we don't have
+		--setenv=SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS=0 # sprite keeps it, in the background
+		# sdl12-compat loads our Mesa-free SDL2 at run time
+		--setenv=LD_LIBRARY_PATH=/opt/sprite/lib:/opt/sprite/lib/i386-linux-gnu
+	)
+	if [ "$M_DISPLAY" = x11 ]; then
+		[[ "$DISP" =~ ^:[0-9]{1,2}$ ]] || answer "error: $ID needs X, which isn't there"
+		P+=(--setenv=DISPLAY="$DISP" -p BindPaths=/tmp/.X11-unix)
+	fi
+	if [[ " $M_ALLOW " == *" network "* ]]; then
+		P+=(-p "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK")
+	else
+		P+=(-p PrivateNetwork=yes -p RestrictAddressFamilies=AF_UNIX)
+	fi
+	if [[ " $M_ALLOW " == *" sound "* ]]; then
+		P+=(-p DevicePolicy=closed -p "DeviceAllow=char-alsa rw" -p SupplementaryGroups=audio)
+	else
+		P+=(-p PrivateDevices=yes)
+	fi
+	# Straight to systemd-run, which refuses if the unit is still there: only then is it
+	# worth asking systemd (about 0.1 s a time) whether it's running or stopping.
+	if ! systemd-run "${P[@]}" /bin/sh -c "$M_EXEC" >/dev/null 2>&1; then
+		app_settle "$ID" || answer "error: $ID is still stopping"
+		if [ "$(systemctl show -P ActiveState "$UNIT")" = active ] && PID=$(app_pid "$ID"); then
+			echo "pid $PID"
+			answer ok
+		fi
+		systemd-run "${P[@]}" /bin/sh -c "$M_EXEC" >/dev/null 2>&1 || answer "error: $ID didn't start"
+	fi
+	PID=$(app_pid "$ID") || answer "error: $ID ended as it started"
+	echo "pid $PID"
+	answer ok
 }
 
 read -r -t 5 CMD ARG || [ -n "$CMD" ] || answer "error: no request"
@@ -201,6 +330,18 @@ case "$CMD" in
 		;;
 	wifi-forget)
 		wifi_write "" ""
+		answer ok
+		;;
+	app-start|app-stop)
+		ID="${ARG%% *}"
+		DISP=""
+		[ "$ID" = "$ARG" ] || DISP="${ARG#* }"
+		# an app's id is its manifest's file name, which is also in its unit's name
+		[[ "$ID" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,47}$ ]] || answer "error: bad app id"
+		if [ "$CMD" = app-start ]; then
+			app_start "$ID" "$DISP"
+		fi
+		systemctl --no-block stop "sprite-app-$ID.service" 2>/dev/null
 		answer ok
 		;;
 	*)
