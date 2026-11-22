@@ -1,13 +1,13 @@
-# sprite: design ground rules
+# Sprite: design ground rules
 
-The rules sprite's own screens follow, and that apps made for it should follow too. They were
+The rules Sprite's own screens follow, and that apps made for it should follow too. They were
 settled on the OpenFrame 1's panel (800×480, single touch, Atom Z520 with no GPU) in November
 2026. The numbers are the ones in the code (`src/shell.c`, `src/sprite.h`). Change them there
 and here together.
 
 ## 1. Sprightly first
 
-sprite should surprise people with how quick it feels on 2008 hardware. **Anything that
+Sprite should surprise people with how quick it feels on 2008 hardware. **Anything that
 moves runs at 60 frames a second, or it doesn't ship.** Where a look and smoothness
 conflict, smoothness wins: the flat look was chosen over a glossy one because the glossy one
 couldn't redraw a page at 60 fps.
@@ -18,7 +18,7 @@ couldn't redraw a page at 60 fps.
   far more than a solid shape when drawn in software.
 - **Draw in step with the display.** The shell draws from the compositor's frame event, one
   frame per refresh, and only what has changed. Nothing redraws when nothing changes:
-  sprite uses about 0.2% CPU at idle.
+  Sprite uses about 0.2% CPU at idle.
 - **Measure every change that moves.** Run `SPRITE_TRACE_PERF=1` (or `2` for each late frame),
   and drive it with `scripts/touchsim.py`, which drags like the real touchscreen. Report
   frames per second and late frames, before and after.
@@ -50,7 +50,7 @@ glyph). From left to right:
 - **network icons** (20 px), ending 8 px before the gear, in this order:
   - **a warning**, an amber triangle, while of-netplan has something to say about the
     settings files (a fixed address in ethernet.txt that isn't one, say). It used to be on
-    the login prompt, which sprite covers; it stays until the file's put right and the
+    the login prompt, which Sprite covers; it stays until the file's put right and the
     unit restarted, and the Network tab in Settings has an amber dot beside its name;
   - **Wi-Fi**, unless it's switched off (interface down, or radio blocked) or missing. It shows
     the signal as a dot and up to three arcs, all faint while it isn't connected. The
@@ -64,7 +64,7 @@ glyph). From left to right:
 - **the Settings gear**: a 48 px-wide box, the bar's height, hard against the top and right
   edges, with the 18 px radius on all four corners like any other box.
 
-The bar is the same on every sprite screen. The **page dots are one touch target**, as tall as
+The bar is the same on every Sprite screen. The **page dots are one touch target**, as tall as
 the bar: each tap turns to the next page, wrapping round from the last to the first. They're
 too small to tap one by one, and dragging is the main way of turning pages anyway.
 **Settings is reached from the bar**, never from a tile, so it can't be pushed onto a later
@@ -107,7 +107,7 @@ page: from the gear, or the network icons for its Network tab.
   250 ms) and ease out. Nothing waits for an animation to finish.
 - **Drags are smoothed:** the touchscreen reports 36 times a second, so each frame gets a
   position interpolated between the last two reports, one report (28 ms) behind.
-- **Scrolling behaves the same as paging,** and sprite does it, not LVGL, so there's one swipe
+- **Scrolling behaves the same as paging,** and Sprite does it, not LVGL, so there's one swipe
   behaviour everywhere:
   - an up/down drag takes over after 12 px (LVGL's own scrolling waits for 24, so it never
     starts first);
@@ -135,7 +135,7 @@ proportion), rounded, up to 18 px.** A fixed radius would make small boxes look 
 
 Only circles and pills are rounder: dots, the home pill, switches and slider ends. In the code,
 `rounded()` applies the rule now and whenever the box is resized. LVGL's buttons and message
-boxes get it from sprite's theme layer, so new ones can't drift from it.
+boxes get it from Sprite's theme layer, so new ones can't drift from it.
 
 
 | Role | Colour |
@@ -212,7 +212,7 @@ Buttons in a row are 20 px apart.
 
 ## 8. Typing
 
-**A screen for typing** has one field, and sprite's own keyboard filling the bottom 276 px:
+**A screen for typing** has one field, and Sprite's own keyboard filling the bottom 276 px:
 
 - **The top row:** a back button, and what's wanted beside it ("Password for ...").
 - **The field** below it, 48 px tall, with a 2 px accent border and the cursor showing; then

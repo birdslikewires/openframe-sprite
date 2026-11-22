@@ -76,7 +76,7 @@ void helper_request(const char *text, void (*done)(char *reply, void *ctx), void
 
 // The reply's last line: "ok", or "error: <reason>". The lines before it are the answer.
 const char *helper_reply_status(char *reply) {
-	if (!reply) return "error: sprite's helper isn't running";
+	if (!reply) return "error: Sprite's helper isn't running";
 	size_t n = strlen(reply);
 	while (n && reply[n - 1] == '\n') reply[--n] = 0;
 	char *last = strrchr(reply, '\n');

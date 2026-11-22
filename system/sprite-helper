@@ -185,7 +185,7 @@ app_start() {
 	M=$(app_manifest "$ID") || answer "error: no app $ID"
 	app_read "$M"
 	[ -n "$M_EXEC" ] || answer "error: $ID has nothing to run"
-	[ -z "$M_BUILTIN" ] || answer "error: $ID is part of sprite"
+	[ -z "$M_BUILTIN" ] || answer "error: $ID is part of Sprite"
 	UNIT="sprite-app-$ID.service"
 
 	local P=(

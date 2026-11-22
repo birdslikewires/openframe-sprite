@@ -1,5 +1,5 @@
 [Unit]
-Description=sprite's helper for things that need root
+Description=Sprite's helper for things that need root
 
 [Socket]
 ListenStream=/run/sprite-helper.sock

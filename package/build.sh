@@ -70,7 +70,7 @@ Maintainer: OpenFrame Project <noreply@openbeak.net>
 Installed-Size: $size
 Depends: $deps
 Homepage: https://github.com/birdslikewires/openframe-sprite
-Description: sprite, the OpenFrame touch shell
+Description: Sprite, the OpenFrame touch shell
  A touch shell for the OpenFrame's 800x480 screen: a home screen of apps, settings, and one
  app at a time full screen, drawn in software. It's a Wayland compositor (wlroots) and the
  shell (LVGL) in one program, with Xwayland for X11 and SDL apps, built without Mesa.

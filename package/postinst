@@ -26,7 +26,7 @@ case "$1" in
 		if ! systemd-sysusers openframe-sprite.conf 2>/dev/null; then # no systemd (a container)
 			getent group sprite-apps >/dev/null || groupadd --system sprite-apps
 			getent passwd sprite >/dev/null || useradd --system --home-dir /var/lib/sprite \
-				--shell /usr/sbin/nologin --comment "sprite, the OpenFrame touch shell" sprite
+				--shell /usr/sbin/nologin --comment "Sprite, the OpenFrame touch shell" sprite
 			usermod -a -G sprite-apps sprite
 		fi
 		getent passwd of >/dev/null && usermod -a -G sprite-apps of || true

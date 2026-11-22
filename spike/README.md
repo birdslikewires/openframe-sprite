@@ -1,6 +1,6 @@
-# sprite: display stack spike, 2026-11-21
+# Sprite: display stack spike, 2026-11-21
 
-Hardware checks before building the sprite shell. The question was whether a Wayland compositor
+Hardware checks before building the Sprite shell. The question was whether a Wayland compositor
 drawn entirely in software, with LVGL for the UI and Xwayland for X11 and SDL apps, works on an
 OpenFrame 1 and fits its 512 MB RAM and 1 GB MMC.
 
@@ -32,7 +32,7 @@ on the Mac (`stack/`):
 
 - wlroots 0.18.2 built with `-Drenderers= -Dallocators=`, which leaves pixman only: 1.45 MB.
 - Xwayland 24.1.6 built with `-Dglamor=false -Dglx=false`: 2.4 MB.
-- cage 0.2.0 (kiosk compositor, a stand-in for the sprite compositor): 77 KB.
+- cage 0.2.0 (kiosk compositor, a stand-in for the Sprite compositor): 77 KB.
 - SDL2 2.32.4 with X11 and ALSA only, plus sdl12-compat 1.2.68.
 - Runtime libraries from Debian: about 6.5 MB, of which about 3.3 MB were new on this image.
   They are libinput, pixman, libseat, libdisplay-info, libliftoff, the xcb extensions, libXfont2,
@@ -75,7 +75,7 @@ The driver in 9.3 supports only partial render mode on shm, with a single buffer
 copies the frame and waits on the compositor, and the copying and the compositor's own CPU use
 also slow down rendering. Two conclusions:
 
-- The sprite shell should render LVGL straight into the compositor's own buffers, in the same
+- The Sprite shell should render LVGL straight into the compositor's own buffers, in the same
   process, not as a Wayland client.
 - First-party LVGL apps will need a better Wayland flush than LVGL's stock one: direct mode, two
   shm buffers, damage only.
@@ -106,7 +106,7 @@ edges, so edge gestures must start within about 20 px of an edge.
 Still open:
 - Only one unit was measured, with one or two finger taps per target.
 - Check another OF1, and the OF2's touchscreen, before shipping the range in openframe-linux.
-- Consider a calibration screen in sprite's settings, in case units differ.
+- Consider a calibration screen in Sprite's settings, in case units differ.
 
 To repeat the test, run `runapp.sh SDL_VIDEODRIVER=x11 ./sdl12test 1 60`. It shows five
 targets and prints where each tap lands.
@@ -115,7 +115,7 @@ targets and prints where each tap lands.
 
 - This image keeps the apt package cache in RAM: `/var/cache/apt` is a 256 MB tmpfs. Installing
   about 250 MB of packages left 177 MB of `.deb` files there, which showed up as "shared" memory,
-  until `apt-get clean`. sprite's store must run `apt-get clean` after every install, or the
+  until `apt-get clean`. Sprite's store must run `apt-get clean` after every install, or the
   image should cap or move that tmpfs.
 - wlroots logs `Failed to parse EDID` for the LVDS panel. It's harmless, but the output has no
   make or model.

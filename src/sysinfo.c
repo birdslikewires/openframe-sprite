@@ -428,7 +428,7 @@ void sysinfo_summary(char *buf, size_t len) {
 		 "Storage: %ld MB free\n"
 		 "Up: %dh %02dm\n"
 		 "Kernel: %s\n"
-		 "sprite: %s",
+		 "Sprite: %s",
 		 host,
 		 n.eth_ip[0] ? n.eth_ip : n.eth_up ? "connected, no address" : "not connected",
 		 wifi, mem_avail / 1024, mem_total / 1024, root_free, up / 3600, (up / 60) % 60, u.release,

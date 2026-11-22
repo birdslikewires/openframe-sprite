@@ -1,5 +1,5 @@
 [Unit]
-Description=sprite's helper (one request)
+Description=Sprite's helper (one request)
 
 [Service]
 ExecStart=/opt/sprite/libexec/sprite-helper
