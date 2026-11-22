@@ -138,6 +138,7 @@ boxes get it from sprite's theme layer, so new ones can't drift from it.
 | Dimmed text | `#8b97a3` |
 | Accent (buttons, switches) | `#3d9be9` |
 | Running dot | `#45d483` (amber `#f2b33d` while starting) |
+| Pressed | white at 20% over whatever's beneath (cells, the gear, the page dots, list rows) |
 
 - **Icons** are a solid rounded square in the app's own colour (`color=` in its manifest)
   with a white glyph. Bright, saturated colours that hold white well are best.
@@ -172,7 +173,7 @@ Buttons in a row are 20 px apart.
 - **A hint under a setting's name** (14 px, dimmed) sits 6 px below it, and says what the
   setting does in plain words.
 - **A list of choices** (the Wi-Fi networks) has rows 48 px tall but only 4 px apart, each
-  pressable as a whole (white at 10% while pressed, with the radius rule), its content inset
+  pressable as a whole (white at 20% while pressed, with the radius rule), its content inset
   12 px: a 20 px icon, the name (20 px, ending in "..." if it's too long), then a note (16 px:
   "Connected" in the accent colour, others dimmed) and a lock for one that needs a password.
   Ones that can't be chosen are dimmed, but still say why when tapped.

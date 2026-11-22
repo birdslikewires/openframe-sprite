@@ -493,7 +493,7 @@ static void build_bar(lv_obj_t *scr) {
 	lv_obj_set_style_pad_hor(dots, 20, 0);
 	rounded(dots);
 	lv_obj_set_style_bg_color(dots, lv_color_white(), LV_STATE_PRESSED);
-	lv_obj_set_style_bg_opa(dots, LV_OPA_10, LV_STATE_PRESSED);
+	lv_obj_set_style_bg_opa(dots, LV_OPA_20, LV_STATE_PRESSED);
 	lv_obj_align(dots, LV_ALIGN_CENTER, 0, 0);
 	lv_obj_remove_flag(dots, LV_OBJ_FLAG_SCROLLABLE);
 	lv_obj_add_flag(dots, LV_OBJ_FLAG_CLICKABLE);
@@ -1805,7 +1805,7 @@ static void wifi_row(int index, const lv_image_dsc_t *icon, const char *symbol, 
 	lv_obj_set_style_pad_hor(r, LIST_ROW_PAD, 0);
 	lv_obj_set_style_pad_column(r, 14, 0);
 	lv_obj_set_style_bg_color(r, lv_color_white(), LV_STATE_PRESSED);
-	lv_obj_set_style_bg_opa(r, LV_OPA_10, LV_STATE_PRESSED);
+	lv_obj_set_style_bg_opa(r, LV_OPA_20, LV_STATE_PRESSED);
 	lv_obj_add_flag(r, LV_OBJ_FLAG_CLICKABLE);
 	lv_obj_remove_flag(r, LV_OBJ_FLAG_SCROLLABLE);
 	lv_obj_add_event_cb(r, wifi_row_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)index);
