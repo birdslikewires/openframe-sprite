@@ -1,0 +1,74 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+## sprite-ping v26.11.1 (22nd November 2026)
+##  Tells openbeak.net that this OpenFrame is running: once after it starts (once its clock
+##  is set), then every hour after that (sprite-ping.timer), so each unit has a minute of its
+##  own and is due again an hour after it was last heard. It's how OpenBeak sees how many
+##  OpenFrames are still running, and whether an update reached them. The first ping after a
+##  start says so (event=boot); a file in /run (memory, gone at the next start) marks it sent.
+##  Sent, and nothing else (Settings' About tab says so too):
+##    the Wi-Fi card's and Ethernet's MAC addresses (the ones the stock software reported, so
+##    a unit can be matched to what it was before), the model, the firmware, sprite's,
+##    openframe-scripts', the firmware package's, the kernel's and Debian's versions, whether
+##    it starts from internal memory or USB, its memory, free and total storage, swap in use,
+##    and how long it's been up.
+##  It's a plain HTTPS GET with those in the query; the server answers 204 and keeps them
+##  without the address it came from. It's part of sprite: removing sprite removes it, and
+##  'systemctl disable --now sprite-ping.timer' stops it.
+
+set -u
+URL=${SPRITE_PING_URL:-https://openbeak.net/ofs/ping}
+EVERY=3600 # seconds between pings (sprite-ping.timer): the server expects the next by then
+SENT=${RUNTIME_DIRECTORY:-/run/sprite-ping}/sent-since-boot
+if [ -e "$SENT" ]; then EVENT=hourly; else EVENT=boot; fi
+
+# An interface's hardware MAC: its permanent address if it has been given another.
+mac() {
+	local perm
+	[ -e "/sys/class/net/$1/address" ] || return 0
+	perm=$(ip -d link show "$1" 2>/dev/null | grep -o 'permaddr [0-9a-f:]*')
+	if [ -n "$perm" ]; then echo "${perm#permaddr }"; else cat "/sys/class/net/$1/address"; fi
+}
+
+ver() { dpkg-query -W -f='${Version}' "$1" 2>/dev/null; }
+dmi() { cat "/sys/class/dmi/id/$1" 2>/dev/null; }
+mem() { awk -v k="$1:" '$1 == k { print int($2 / 1024) }' /proc/meminfo; }
+
+# What the root filesystem is on, from its device in sysfs (the sandbox has no /dev).
+case "$(readlink -f "/sys/dev/block/$(findmnt -n -r -o MAJ:MIN /)")" in
+	*/mmc*) BOOT=mmc ;;
+	*/usb*) BOOT=usb ;;
+	*) BOOT=other ;;
+esac
+read -r _ DISKSIZE _ DISKFREE _ < <(df -m --output=source,size,used,avail / | tail -1)
+SWAPSIZE=$(mem SwapTotal)
+SWAPUSED=$(( SWAPSIZE - $(mem SwapFree) ))
+read -r UP _ < /proc/uptime
+SPRITE=$(ver openframe-sprite)
+
+curl -fsS -G -o /dev/null --max-time 30 --retry 3 --retry-delay 20 --retry-all-errors \
+	-A "sprite-ping/${SPRITE:-unknown}" \
+	--data-urlencode "v=1" \
+	--data-urlencode "event=$EVENT" \
+	--data-urlencode "every=$EVERY" \
+	--data-urlencode "wifi=$(mac wlan0)" \
+	--data-urlencode "eth=$(mac eth0)" \
+	--data-urlencode "model=$(dmi product_name)" \
+	--data-urlencode "fw=$(dmi bios_version)" \
+	--data-urlencode "sprite=$SPRITE" \
+	--data-urlencode "scripts=$(ver openframe-scripts)" \
+	--data-urlencode "fwpkg=$(ver openframe-firmware)" \
+	--data-urlencode "kernel=$(ver "linux-image-$(uname -r)")" \
+	--data-urlencode "debian=$(cat /etc/debian_version 2>/dev/null)" \
+	--data-urlencode "boot=$BOOT" \
+	--data-urlencode "ram=$(mem MemTotal)" \
+	--data-urlencode "disk=$DISKSIZE" \
+	--data-urlencode "free=$DISKFREE" \
+	--data-urlencode "swap=$SWAPSIZE" \
+	--data-urlencode "swapused=$SWAPUSED" \
+	--data-urlencode "up=${UP%.*}" \
+	"$URL"
+status=$?
+[ $status -eq 0 ] && : > "$SENT" 2>/dev/null
+exit $status

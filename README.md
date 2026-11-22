@@ -44,7 +44,7 @@ The ground rules for how it looks, feels and performs are in [docs/design.md](do
   the tab; and remote access: the password for
   logging in as `of` over SSH, which images leave unset, with a warning while a unit still
   has the old shared one), Display (brightness, through `of-backlight`, including automatic
-  brightness; and touch calibration), Time (the clock's format), About (the system) and
+  brightness; and touch calibration), Time (the clock's format), About (the system, and what the hourly ping sends) and
   Power (Restart and Switch off).
 
 ## Apps
@@ -128,6 +128,18 @@ needs Mesa: Debian's own wlroots, Xwayland and SDL2 do, at about 250 MB. It depe
 The first time it's installed, it takes tty1 from the login prompt (marked in
 `/var/lib/openframe-sprite`, so disabling sprite by hand afterwards sticks), and puts
 `settings/sprite.txt` on OF-BOOT if there isn't one. Removing it brings the login prompt back.
+
+**It tells openbeak.net that the unit is running** (`sprite-ping`): once after it starts, when
+its clock is set, and then every hour after that (`sprite-ping.timer`), so each unit has a
+minute of its own and the server knows when to expect it next. It sends the Wi-Fi card's and Ethernet's MAC addresses (the ones the stock
+software reported, so a unit can be matched to what it was before), the model, the firmware,
+the versions of sprite, openframe-scripts, the firmware package, the kernel and Debian,
+whether it starts from internal memory or USB, its memory, free and total storage, and swap
+in use, and how long it's been up. Nothing else. The server keeps it without the address it
+came from. About in Settings says so too. It's part of sprite: removing the package removes
+it, and `systemctl disable --now sprite-ping.timer` stops it (enabled once per system, so
+that sticks). It runs as a throwaway user that can only read the system
+and reach the network, and writes nothing to storage.
 
 ## Running on an OpenFrame
 

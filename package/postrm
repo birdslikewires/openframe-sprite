@@ -13,7 +13,7 @@ in_chroot() {
 
 case "$1" in
 	remove)
-		rm -f /var/lib/openframe-sprite/enable-default
+		rm -f /var/lib/openframe-sprite/enable-default /var/lib/openframe-sprite/ping-default
 		systemctl enable --quiet getty@tty1.service 2>/dev/null || true
 		if ! in_chroot; then
 			systemctl daemon-reload 2>/dev/null || true

@@ -2666,6 +2666,16 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_text_font(about_label, &lv_font_montserrat_20, 0);
 	lv_obj_set_style_text_color(about_label, lv_color_hex(C_TEXT), 0);
 	lv_obj_set_style_text_line_space(about_label, 4, 0);
+	// What sprite-ping sends (system/sprite-ping): said where an owner can find it.
+	lv_obj_t *tl = lv_label_create(pa);
+	lv_label_set_text(tl, "Once an hour, this OpenFrame tells openbeak.net that it's running: its network (MAC) "
+			      "addresses, its model, the versions of its firmware and software, and how full its memory "
+			      "and storage are. Nothing else is sent. It helps us see how many OpenFrames are still "
+			      "running, and whether updates have reached them.");
+	lv_obj_set_width(tl, LV_PCT(100));
+	lv_obj_set_style_margin_top(tl, HEADING_SPACE, 0);
+	lv_obj_set_style_text_font(tl, &lv_font_montserrat_16, 0);
+	lv_obj_set_style_text_color(tl, lv_color_hex(C_DIM), 0);
 
 	// Power
 	lv_obj_t *pp = settings_panel_new(TAB_POWER);

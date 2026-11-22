@@ -23,17 +23,19 @@ install -d "$pkg/DEBIAN" "$pkg$P/bin" "$pkg$P/libexec" "$pkg$P/lib/$multiarch" "
 install -m 755 out/sprite "$pkg$P/bin/sprite"
 install -m 755 "$P/bin/Xwayland" "$pkg$P/bin/Xwayland"
 install -m 755 system/sprite-helper "$pkg$P/libexec/sprite-helper"
+install -m 755 system/sprite-ping "$pkg$P/libexec/sprite-ping"
 cp -a "$P/lib/$multiarch/libwlroots-0.18.so" "$pkg$P/lib/$multiarch/"
 cp -a "$P"/lib/libSDL2-2.0.so* "$P"/lib/libSDL-1.2.so* "$pkg$P/lib/"
 rm -f "$pkg$P"/lib/*.so.*.*.*.debug
 install -m 644 settings/sprite.txt "$pkg$P/share/sprite/sprite.txt"
 install -m 644 apps/settings.app "$pkg$P/share/sprite/apps/"
 install -m 644 system/sprite.service system/sprite-helper.socket system/sprite-helper@.service \
+  system/sprite-ping.service system/sprite-ping.timer \
   "$pkg/usr/lib/systemd/system/"
 install -D -m 644 system/sprite.sysusers "$pkg/usr/lib/sysusers.d/openframe-sprite.conf"
 install -D -m 644 system/sprite.tmpfiles "$pkg/usr/lib/tmpfiles.d/openframe-sprite.conf"
 for f in postinst prerm postrm; do install -m 755 "package/$f" "$pkg/DEBIAN/$f"; done
-find "$pkg$P" -type f \( -name '*.so*' -o -perm -u+x \) ! -name sprite-helper -exec strip --strip-unneeded {} +
+find "$pkg$P" -type f \( -name '*.so*' -o -perm -u+x \) ! -name sprite-helper ! -name sprite-ping -exec strip --strip-unneeded {} +
 
 # Licences: sprite's own, and those of what's built into or shipped with it.
 {
@@ -55,7 +57,7 @@ deps=$(cd "$work/deb" && dpkg-shlibdeps -O --ignore-missing-info -l"$pkg$P/lib/$
 # Not linked, but needed: Xwayland runs xkbcomp on the keymap; SDL loads its X11 and ALSA
 # libraries when an app starts it; and the helper and settings use the OpenFrame scripts
 # (bootrw, of-backlight).
-deps="$deps, x11-xkb-utils, xkb-data, libx11-6, libxext6, libxcursor1, libxfixes3, libxi6, libxrandr2, libxss1, libasound2t64, openframe-scripts"
+deps="$deps, x11-xkb-utils, xkb-data, libx11-6, libxext6, libxcursor1, libxfixes3, libxi6, libxrandr2, libxss1, libasound2t64, openframe-scripts, curl, iproute2"
 
 size=$(du -sk "$pkg/opt" "$pkg/usr" | awk '{ s += $1 } END { print s }')
 cat > "$pkg/DEBIAN/control" <<CONTROL

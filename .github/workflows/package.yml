@@ -89,6 +89,9 @@ jobs:
             echo "app-start ../x" | /opt/sprite/libexec/sprite-helper | grep -q "^error: bad app id"
             echo "app-start nosuch" | /opt/sprite/libexec/sprite-helper | grep -q "^error: no app nosuch"
             test -s /usr/share/doc/openframe-sprite/copyright
+            test -x /opt/sprite/libexec/sprite-ping
+            test -s /usr/lib/systemd/system/sprite-ping.timer
+            test -s /usr/lib/systemd/system/sprite-ping.service
           '
 
       - name: Release

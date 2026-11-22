@@ -1,0 +1,15 @@
+# sprite-ping: once 30 s after the unit starts (the service then waits for the clock to be
+# set, as OpenFrames have no clock battery and HTTPS needs the right time, and for the
+# network), then every hour after that ping. So each unit has a minute of its own, from when
+# it started, and the next ping is always due an hour after the last. Nothing's written to
+# disk: a ping missed while the unit was off is simply missed.
+[Unit]
+Description=Tell openbeak.net hourly that this OpenFrame is running
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=1h
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

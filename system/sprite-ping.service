@@ -1,0 +1,39 @@
+# sprite-ping: tells openbeak.net that this OpenFrame is running (see the script for what's
+# sent). sprite-ping.timer starts it after boot and hourly. It runs as a throwaway user that
+# can only read the system and reach the network; its one file, saying it has pinged since
+# the unit started, is in /run (memory), kept until the next start.
+[Unit]
+Description=Tell openbeak.net this OpenFrame is running
+Documentation=https://github.com/birdslikewires/openframe-sprite
+Wants=network-online.target
+After=network-online.target time-sync.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/sprite/libexec/sprite-ping
+RuntimeDirectory=sprite-ping
+RuntimeDirectoryPreserve=yes
+TimeoutStartSec=3min
+DynamicUser=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+InaccessiblePaths=-/boot
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+MemoryMax=48M
+Nice=10
+IOSchedulingClass=idle
+# Quiet: an hourly ping shouldn't put lines in the journal, only its failures.
+StandardOutput=null
+SyslogLevel=warning
+LogLevelMax=warning
