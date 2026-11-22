@@ -160,6 +160,11 @@ can still be joined.
 - Sound and time zone in Settings
 - The app store: an index repository of app manifests, added to by pull request, with apps
   as i386 `.deb` packages
+- Apps in sandboxes: each started by `sprite-helper` as a systemd unit under a user of its
+  own (`DynamicUser=`), without sudo, with the permissions its manifest asks for (network,
+  sound) and limits on memory, processes and CPU. `of` then loses `NOPASSWD`.
+- Arranging the home screen: dragging tiles to place them, across up to three pages (common
+  apps first, games on the next, and so on), with the layout kept. No folders.
 
 ## Licence
 
