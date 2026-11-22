@@ -47,12 +47,12 @@ glyph). From left to right:
   changes, just after each second begins;
 - **the page dots** in the centre, only when there's more than one page. In Settings, the
   title goes there instead;
-- **network icons** (20 px), ending 8 px before the gear:
-  - **ethernet** while a cable is connected, faint until it has an address;
+- **network icons** (20 px), ending 8 px before the gear, Wi-Fi always on the left of ethernet:
   - **Wi-Fi**, unless it's switched off (interface down, or radio blocked) or missing. It shows
     the signal as a dot and up to three arcs, all faint while it isn't connected. The
     bars go by the signal in dBm, by the same rule as the list of networks: three arcs from
     −55, two from −67, one from −75, below that the dot alone;
+  - **ethernet** while a cable is connected, faint until it has an address;
 - **the Settings gear**: a 48 px-wide box, the bar's height, hard against the top and right
   edges, with the 18 px radius on all four corners like any other box.
 

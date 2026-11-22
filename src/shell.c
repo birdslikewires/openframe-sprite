@@ -520,10 +520,11 @@ static void build_bar(lv_obj_t *scr) {
 	lv_obj_set_style_pad_column(net, 12, 0);
 	lv_obj_align(net, LV_ALIGN_RIGHT_MID, -(GEAR_W + 8), 0);
 	lv_obj_remove_flag(net, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-	net_eth = lv_image_create(net);
-	lv_image_set_src(net_eth, &eth_img);
+	// Wi-Fi on the left and Ethernet on the right, always: the flex row keeps creation order.
 	net_wifi = lv_image_create(net);
 	lv_image_set_src(net_wifi, &wifi_img[0]);
+	net_eth = lv_image_create(net);
+	lv_image_set_src(net_eth, &eth_img);
 	for (lv_obj_t *o = net_eth; o; o = o == net_eth ? net_wifi : NULL) {
 		lv_obj_set_style_image_recolor(o, lv_color_hex(C_TEXT), 0);
 		lv_obj_set_style_image_recolor_opa(o, LV_OPA_COVER, 0);
