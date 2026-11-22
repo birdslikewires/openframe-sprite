@@ -69,7 +69,8 @@ later page.
 - **Labels** start 6 px below the icon: 16 px text, centred, up to two lines, ending in "..."
   beyond that.
 - **A running app** has a 12 px dot on its icon's top-right corner: green with a window,
-  amber while starting. **The startup app** has a small power mark at the bottom-left.
+  amber while starting. **The startup app** (there's only ever one) has a 3 px ring in the
+  accent colour round its icon, 3 px out from it.
 - **A press** lightens the whole cell (white at 20%, with the 18 px radius).
 
 ## 5. Pages and motion

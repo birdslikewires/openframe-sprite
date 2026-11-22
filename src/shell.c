@@ -39,6 +39,9 @@
 #define ICON_TOP 6
 #define LABEL_GAP 6
 #define LABEL_H 38                                          // two lines of 16 px Montserrat
+#define STARTUP_RING_W 3                                    // the startup app's ring
+#define STARTUP_RING_PAD 3
+_Static_assert(STARTUP_RING_W + STARTUP_RING_PAD <= ICON_TOP, "the startup ring must fit in the cell");
 #define PER_PAGE (GRID_COLS * GRID_ROWS)                    // further apps go on further pages
 _Static_assert(GRID_PAD_X + (TILE_W - ICON_SIZE) / 2 == CONTENT_X, "the grid's first icon is at CONTENT_X");
 _Static_assert(GRID_PAD_TOP + ICON_TOP == CONTENT_TOP, "the grid's first icon is at CONTENT_TOP");
@@ -803,16 +806,12 @@ static void make_cell(lv_obj_t *page, struct sprite_app *a) {
 		lv_obj_align(dot, LV_ALIGN_TOP_RIGHT, -6, 6);
 	}
 
-	if (a == apps_autostart()) { // the app that opens at startup: a small power badge
-		lv_obj_t *mark = lv_label_create(badge);
-		lv_label_set_text(mark, LV_SYMBOL_POWER);
-		lv_obj_set_style_text_font(mark, &lv_font_montserrat_14, 0);
-		lv_obj_set_style_text_color(mark, lv_color_white(), 0);
-		lv_obj_set_style_bg_color(mark, lv_color_black(), 0);
-		lv_obj_set_style_bg_opa(mark, LV_OPA_40, 0);
-		lv_obj_set_style_radius(mark, LV_RADIUS_CIRCLE, 0);
-		lv_obj_set_style_pad_all(mark, 4, 0);
-		lv_obj_align(mark, LV_ALIGN_BOTTOM_LEFT, 5, -5);
+	// The app that opens at startup (only ever one): an accent ring round its icon, 3 px out
+	// from it. The ring's top edge is the top of the cell (ICON_TOP is 6).
+	if (a == apps_autostart()) {
+		lv_obj_set_style_outline_color(badge, lv_color_hex(C_ACCENT), 0);
+		lv_obj_set_style_outline_width(badge, STARTUP_RING_W, 0);
+		lv_obj_set_style_outline_pad(badge, STARTUP_RING_PAD, 0);
 	}
 
 	lv_obj_t *name = lv_label_create(tile);
