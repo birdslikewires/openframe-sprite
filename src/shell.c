@@ -38,13 +38,21 @@ static lv_indev_t *indev;
 static int ptr_x, ptr_y;
 static bool ptr_pressed;
 static lv_obj_t *bar_clock, *bar_date, *bar_net, *bar_title;
-static lv_obj_t *page_home, *pages, *page_settings, *toast;
+static lv_obj_t *page_home, *pager, *strip, *page_settings, *toast;
 static lv_obj_t *dots, *gear;         // page dots and the Settings gear, in the status bar
 static int cur_page, n_pages;
 
-// The look, while we choose one: SPRITE_STYLE=flat|neon|glossy (flat by default).
-enum style { STYLE_FLAT, STYLE_NEON, STYLE_GLOSSY };
-static enum style style;
+// Paging: the pages sit side by side on a strip, which follows a sideways drag and then
+// slides to a page. A touch becomes a page drag once it has moved PAGE_DRAG_START sideways
+// (until then it can still be a tap or long press on an app); it turns the page if it went
+// PAGE_TURN_PX, or was moving at PAGE_FLICK_SPEED when it lifted.
+#define PAGE_DRAG_START 12
+#define PAGE_TURN_PX 60
+#define PAGE_FLICK_SPEED 0.4       // px/ms
+#define PAGE_SLIDE_MS 180
+static enum { DRAG_NONE, DRAG_MAYBE, DRAG_PAGING } drag;
+static int drag_x0, drag_y0;
+static void pager_input(int x, int y, bool pressed, bool was_pressed);
 static lv_obj_t *bl_slider, *bl_auto, *about_label;
 static bool visible = true, rebuild_pending;
 static struct sprite_app *opening;
@@ -123,6 +131,8 @@ void shell_pointer(int x, int y, bool pressed) {
 	x = x < 0 ? 0 : x >= SPRITE_W ? SPRITE_W - 1 : x;
 	y = y < 0 ? 0 : y >= SPRITE_H ? SPRITE_H - 1 : y;
 	double now = now_ms();
+	// While paging, the frames move the strip, from interpolated positions (shell_frame)
+	if (!(drag == DRAG_PAGING && pressed && ptr_pressed)) pager_input(x, y, pressed, ptr_pressed);
 	if (pressed && ptr_pressed) { // the finger moving: used by the next frames (shell_frame)
 		smp[0] = smp[1];
 		smp[1].x = x; smp[1].y = y; smp[1].t = now;
@@ -149,11 +159,16 @@ void shell_frame(void) {
 	if (ptr_pressed && nsmp == 2 && smp[1].t > smp[0].t) {
 		double k = (now_ms() - INTERP_DELAY_MS - smp[0].t) / (smp[1].t - smp[0].t);
 		if (k < 0) k = 0;
-		if (k > 1) k = 1;
+		// Page drags carry on at the finger's last speed past its last report, for at most
+		// SPRITE_DEBOUNCE_MS: a lifting finger's release is held that long (it may be a
+		// contact bounce), and the strip shouldn't stop dead while it waits.
+		double kmax = drag == DRAG_PAGING ? 1 + SPRITE_DEBOUNCE_MS / (smp[1].t - smp[0].t) : 1;
+		if (k > kmax) k = kmax;
 		ptr_x = (int)(smp[0].x + (smp[1].x - smp[0].x) * k + 0.5);
 		ptr_y = (int)(smp[0].y + (smp[1].y - smp[0].y) * k + 0.5);
-		lv_indev_read(indev);
-		if (k < 1) sprite_request_frame(); // still catching up with the last report
+		if (drag == DRAG_PAGING) pager_input(ptr_x, ptr_y, true, true); // the strip, smoothly
+		else lv_indev_read(indev);
+		if (k < kmax) sprite_request_frame(); // still catching up, or carrying on
 	}
 	lv_refr_now(disp);
 }
@@ -231,13 +246,8 @@ static void build_bar(lv_obj_t *scr) {
 	lv_obj_t *bar = lv_obj_create(scr);
 	lv_obj_remove_style_all(bar);
 	lv_obj_set_size(bar, SPRITE_W, BAR_H);
-	lv_obj_set_style_bg_color(bar, lv_color_hex(style == STYLE_NEON ? 0x000000 : C_BAR), 0);
-	lv_obj_set_style_bg_opa(bar, style == STYLE_GLOSSY ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
-	if (style == STYLE_NEON) { // O2's bar: a thin line under it
-		lv_obj_set_style_border_side(bar, LV_BORDER_SIDE_BOTTOM, 0);
-		lv_obj_set_style_border_width(bar, 1, 0);
-		lv_obj_set_style_border_color(bar, lv_color_hex(0x1d4f63), 0);
-	}
+	lv_obj_set_style_bg_color(bar, lv_color_hex(C_BAR), 0);
+	lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
 	lv_obj_remove_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
 
 	bar_clock = lv_label_create(bar);
@@ -247,7 +257,7 @@ static void build_bar(lv_obj_t *scr) {
 
 	bar_date = lv_label_create(bar);
 	lv_obj_set_style_text_font(bar_date, &lv_font_montserrat_14, 0);
-	lv_obj_set_style_text_color(bar_date, lv_color_hex(style == STYLE_NEON ? 0x45c8f0 : C_DIM), 0);
+	lv_obj_set_style_text_color(bar_date, lv_color_hex(C_DIM), 0);
 	lv_obj_align(bar_date, LV_ALIGN_LEFT_MID, 84, 1);
 
 	bar_title = lv_label_create(bar);
@@ -473,62 +483,21 @@ static void tile_long_pressed(lv_event_t *e) { open_sheet(lv_event_get_user_data
 
 /* ---- the home grid, in pages ---- */
 
-// An app's icon in the chosen look.
+// An app's icon: a rounded square of its colour, with a white glyph.
 static lv_obj_t *make_badge(lv_obj_t *cell, const struct sprite_app *a) {
-	lv_color_t c = lv_color_hex(a->color);
 	lv_obj_t *badge = lv_obj_create(cell);
 	lv_obj_remove_style_all(badge);
 	lv_obj_set_size(badge, ICON_SIZE, ICON_SIZE);
 	lv_obj_align(badge, LV_ALIGN_TOP_MID, 0, ICON_TOP);
 	lv_obj_set_style_radius(badge, ICON_RADIUS, 0);
+	lv_obj_set_style_bg_color(badge, lv_color_hex(a->color), 0);
 	lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
 	lv_obj_remove_flag(badge, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-	lv_color_t glyph = lv_color_white();
-	switch (style) {
-	case STYLE_NEON: // O2: a dark tile, a bright outline that glows, a coloured glyph
-		lv_obj_set_style_bg_color(badge, lv_color_mix(c, lv_color_black(), 60), 0);
-		lv_obj_set_style_bg_grad_color(badge, lv_color_mix(c, lv_color_black(), 25), 0);
-		lv_obj_set_style_bg_grad_dir(badge, LV_GRAD_DIR_VER, 0);
-		lv_obj_set_style_border_width(badge, 2, 0);
-		lv_obj_set_style_border_color(badge, lv_color_lighten(c, 110), 0);
-		lv_obj_set_style_shadow_width(badge, 14, 0);
-		lv_obj_set_style_shadow_color(badge, lv_color_lighten(c, 60), 0);
-		lv_obj_set_style_shadow_opa(badge, LV_OPA_50, 0);
-		glyph = lv_color_lighten(c, 150);
-		break;
-	case STYLE_GLOSSY: // OpenPeak: a lit-from-above gradient, a gloss highlight, a drop shadow
-		lv_obj_set_style_bg_color(badge, lv_color_lighten(c, 70), 0);
-		lv_obj_set_style_bg_grad_color(badge, lv_color_darken(c, 30), 0);
-		lv_obj_set_style_bg_grad_dir(badge, LV_GRAD_DIR_VER, 0);
-		lv_obj_set_style_border_width(badge, 1, 0);
-		lv_obj_set_style_border_color(badge, lv_color_lighten(c, 140), 0);
-		lv_obj_set_style_border_opa(badge, LV_OPA_60, 0);
-		lv_obj_set_style_shadow_width(badge, 12, 0);
-		lv_obj_set_style_shadow_offset_y(badge, 4, 0);
-		lv_obj_set_style_shadow_color(badge, lv_color_black(), 0);
-		lv_obj_set_style_shadow_opa(badge, LV_OPA_60, 0);
-		lv_obj_t *gloss = lv_obj_create(badge);
-		lv_obj_remove_style_all(gloss);
-		lv_obj_set_size(gloss, ICON_SIZE - 8, ICON_SIZE * 45 / 100);
-		lv_obj_align(gloss, LV_ALIGN_TOP_MID, 0, 4);
-		lv_obj_set_style_radius(gloss, ICON_RADIUS - 4, 0);
-		lv_obj_set_style_bg_color(gloss, lv_color_white(), 0);
-		lv_obj_set_style_bg_main_opa(gloss, LV_OPA_40, 0);
-		lv_obj_set_style_bg_grad_opa(gloss, LV_OPA_0, 0);
-		lv_obj_set_style_bg_grad_color(gloss, lv_color_white(), 0);
-		lv_obj_set_style_bg_grad_dir(gloss, LV_GRAD_DIR_VER, 0);
-		lv_obj_set_style_bg_opa(gloss, LV_OPA_COVER, 0);
-		lv_obj_remove_flag(gloss, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-		break;
-	default: // flat: one solid colour
-		lv_obj_set_style_bg_color(badge, c, 0);
-		break;
-	}
 	char buf[8];
 	lv_obj_t *icon = lv_label_create(badge);
 	lv_label_set_text(icon, icon_text(a, buf, sizeof buf));
 	lv_obj_set_style_text_font(icon, &lv_font_montserrat_40, 0);
-	lv_obj_set_style_text_color(icon, glyph, 0);
+	lv_obj_set_style_text_color(icon, lv_color_white(), 0);
 	lv_obj_center(icon);
 	return badge;
 }
@@ -539,7 +508,6 @@ static void make_cell(lv_obj_t *page, struct sprite_app *a) {
 	lv_obj_set_size(tile, TILE_W, TILE_H);
 	lv_obj_add_flag(tile, LV_OBJ_FLAG_CLICKABLE);
 	lv_obj_remove_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
-	lv_obj_add_flag(tile, LV_OBJ_FLAG_SCROLL_CHAIN_HOR); // a drag that starts on an app turns the page
 	// a short click opens; a long press (which LVGL doesn't follow with SHORT_CLICKED) shows the sheet
 	lv_obj_add_event_cb(tile, tile_clicked, LV_EVENT_SHORT_CLICKED, a);
 	lv_obj_add_event_cb(tile, tile_long_pressed, LV_EVENT_LONG_PRESSED, a);
@@ -586,9 +554,67 @@ static void make_cell(lv_obj_t *page, struct sprite_app *a) {
 	lv_obj_set_style_radius(tile, ICON_RADIUS, 0);
 }
 
+static void slide_exec(void *obj, int32_t x) { lv_obj_set_x(obj, x); }
+
+// Slide the strip to a page.
+static void go_to_page(int p, bool animate) {
+	if (p < 0) p = 0;
+	if (p > n_pages - 1) p = n_pages - 1;
+	cur_page = p;
+	lv_anim_delete(strip, slide_exec);
+	int to = -p * SPRITE_W;
+	if (animate && lv_obj_get_x(strip) != to) {
+		lv_anim_t a;
+		lv_anim_init(&a);
+		lv_anim_set_var(&a, strip);
+		lv_anim_set_exec_cb(&a, slide_exec);
+		lv_anim_set_values(&a, lv_obj_get_x(strip), to);
+		lv_anim_set_duration(&a, PAGE_SLIDE_MS);
+		lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+		lv_anim_start(&a);
+	} else {
+		lv_obj_set_x(strip, to);
+	}
+	update_dots();
+}
+
 static void dot_clicked(lv_event_t *e) {
-	int i = (int)(intptr_t)lv_event_get_user_data(e);
-	lv_tileview_set_tile_by_index(pages, i, 0, LV_ANIM_ON);
+	go_to_page((int)(intptr_t)lv_event_get_user_data(e), true);
+}
+
+// Called with each position the shell is given, before LVGL sees it.
+static void pager_input(int x, int y, bool pressed, bool was_pressed) {
+	bool home = pager && !lv_obj_has_flag(page_home, LV_OBJ_FLAG_HIDDEN) && !sheet && !cal && n_pages > 1;
+	if (pressed && !was_pressed) { // a touch begins
+		drag = home && y >= BAR_H ? DRAG_MAYBE : DRAG_NONE;
+		drag_x0 = x;
+		drag_y0 = y;
+		return;
+	}
+	if (drag == DRAG_NONE) return;
+	int dx = x - drag_x0;
+	if (pressed) {
+		if (drag == DRAG_MAYBE) {
+			if (abs(dx) < PAGE_DRAG_START || abs(dx) < abs(y - drag_y0)) return;
+			drag = DRAG_PAGING; // from here on it's the pager's: no tap or long press on an app
+			lv_anim_delete(strip, slide_exec);
+			lv_indev_reset(indev, NULL);
+			lv_indev_wait_release(indev);
+		}
+		// past the first or last page, the strip moves a third as far as the finger
+		bool edge = (cur_page == 0 && dx > 0) || (cur_page == n_pages - 1 && dx < 0);
+		lv_obj_set_x(strip, -cur_page * SPRITE_W + (edge ? dx / 3 : dx));
+		return;
+	}
+	if (drag == DRAG_PAGING) { // released: turn the page, or settle back (from where the strip is)
+		double v = 0; // px/ms over the last two reports
+		if (nsmp == 2 && smp[1].t > smp[0].t) v = (smp[1].x - smp[0].x) / (smp[1].t - smp[0].t);
+		int p = cur_page;
+		if (dx <= -PAGE_TURN_PX || v <= -PAGE_FLICK_SPEED) p++;
+		else if (dx >= PAGE_TURN_PX || v >= PAGE_FLICK_SPEED) p--;
+		go_to_page(p, true);
+	}
+	drag = DRAG_NONE;
 }
 
 // Dots in the status bar for the pages, the current one bright; none with only one page.
@@ -610,35 +636,29 @@ static void update_dots(void) {
 	}
 }
 
-static void page_changed(lv_event_t *e) {
-	lv_obj_t *t = lv_tileview_get_tile_active(pages);
-	cur_page = t ? (int)lv_obj_get_index(t) : 0;
-	update_dots();
-}
-
 static void rebuild_grid(void *unused) {
 	rebuild_pending = false;
-	lv_obj_clean(pages);
+	lv_obj_clean(strip);
 	int n = 0;
 	for (int i = 0; i < apps_count(); i++) { // Settings is the gear in the bar, not a tile
 		struct sprite_app *a = apps_get(i);
 		if (!a->hidden && !a->builtin) n++;
 	}
 	n_pages = n ? (n + PER_PAGE - 1) / PER_PAGE : 1;
+	lv_obj_set_width(strip, n_pages * SPRITE_W);
 	lv_obj_t *page = NULL;
 	int k = 0, p = 0;
 	for (int i = 0; i < apps_count() || !page; i++) {
 		struct sprite_app *a = i < apps_count() ? apps_get(i) : NULL;
 		if (a && (a->hidden || a->builtin)) continue;
 		if (!page || k == PER_PAGE) {
-			lv_dir_t dir = n_pages == 1 ? LV_DIR_NONE : p == 0 ? LV_DIR_RIGHT : p == n_pages - 1 ? LV_DIR_LEFT : LV_DIR_HOR;
-			page = lv_tileview_add_tile(pages, p++, 0, dir);
+			page = lv_obj_create(strip);
+			lv_obj_remove_style_all(page);
+			lv_obj_set_size(page, SPRITE_W, SPRITE_H - BAR_H);
+			lv_obj_set_pos(page, p++ * SPRITE_W, 0);
 			lv_obj_set_flex_flow(page, LV_FLEX_FLOW_ROW_WRAP);
 			lv_obj_set_style_pad_hor(page, GRID_PAD_X, 0);
 			lv_obj_set_style_pad_top(page, GRID_PAD_TOP, 0);
-			lv_obj_set_style_pad_bottom(page, 0, 0);
-			lv_obj_set_style_pad_column(page, 0, 0);
-			lv_obj_set_style_pad_row(page, 0, 0);
 			lv_obj_remove_flag(page, LV_OBJ_FLAG_SCROLLABLE);
 			k = 0;
 		}
@@ -646,9 +666,7 @@ static void rebuild_grid(void *unused) {
 		make_cell(page, a);
 		k++;
 	}
-	if (cur_page >= n_pages) cur_page = n_pages - 1;
-	lv_tileview_set_tile_by_index(pages, cur_page, 0, LV_ANIM_OFF);
-	update_dots();
+	go_to_page(cur_page, false);
 	if (opening && opening->pid == 0 && !opening->pending) { // it exited before showing a window
 		char s[96];
 		snprintf(s, sizeof s, "%s closed", opening->name);
@@ -659,7 +677,7 @@ static void rebuild_grid(void *unused) {
 
 void shell_apps_changed(void) {
 	// Deferred: this can be called from inside a tile's own click handler.
-	if (rebuild_pending || !pages) return;
+	if (rebuild_pending || !strip) return;
 	rebuild_pending = true;
 	lv_async_call(rebuild_grid, NULL);
 	sprite_lvgl_kick();
@@ -671,12 +689,15 @@ static void build_home(lv_obj_t *scr) {
 	lv_obj_set_size(page_home, SPRITE_W, SPRITE_H - BAR_H);
 	lv_obj_set_pos(page_home, 0, BAR_H);
 
-	// Pages of the grid, side by side: a drag turns the page, and it settles on one
-	pages = lv_tileview_create(page_home);
-	lv_obj_set_size(pages, SPRITE_W, SPRITE_H - BAR_H);
-	lv_obj_set_style_bg_opa(pages, LV_OPA_TRANSP, 0);
-	lv_obj_set_scrollbar_mode(pages, LV_SCROLLBAR_MODE_OFF);
-	lv_obj_add_event_cb(pages, page_changed, LV_EVENT_VALUE_CHANGED, NULL);
+	// The pages of the grid, side by side on a strip that the pager moves (see pager_input)
+	pager = lv_obj_create(page_home);
+	lv_obj_remove_style_all(pager);
+	lv_obj_set_size(pager, SPRITE_W, SPRITE_H - BAR_H);
+	lv_obj_remove_flag(pager, LV_OBJ_FLAG_SCROLLABLE);
+	strip = lv_obj_create(pager);
+	lv_obj_remove_style_all(strip);
+	lv_obj_set_size(strip, SPRITE_W, SPRITE_H - BAR_H);
+	lv_obj_remove_flag(strip, LV_OBJ_FLAG_SCROLLABLE);
 
 	toast = lv_obj_create(scr);
 	lv_obj_remove_style_all(toast);
@@ -1018,15 +1039,8 @@ void shell_init(void *pixels) {
 	lv_indev_set_read_cb(indev, indev_read);
 	lv_indev_set_mode(indev, LV_INDEV_MODE_EVENT); // read when the compositor has input, not on a timer
 
-	const char *st = getenv("SPRITE_STYLE");
-	style = st && !strcmp(st, "neon") ? STYLE_NEON : st && !strcmp(st, "glossy") ? STYLE_GLOSSY : STYLE_FLAT;
-
 	lv_obj_t *scr = lv_screen_active();
-	lv_obj_set_style_bg_color(scr, lv_color_hex(style == STYLE_NEON ? 0x000000 : style == STYLE_GLOSSY ? 0x3a4144 : C_BG), 0);
-	if (style == STYLE_GLOSSY) { // OpenPeak's: dark grey, lighter at the top
-		lv_obj_set_style_bg_grad_color(scr, lv_color_hex(0x101314), 0);
-		lv_obj_set_style_bg_grad_dir(scr, LV_GRAD_DIR_VER, 0);
-	}
+	lv_obj_set_style_bg_color(scr, lv_color_hex(C_BG), 0);
 	lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
 	lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 	build_bar(scr);

@@ -4,6 +4,7 @@
 # pointer, 0-32639 on each axis, left button), that reports a position every 28 ms as the
 # real one does. Run as root on the OpenFrame (it needs /dev/uinput).
 #   touchsim.py drag X1 Y1 X2 Y2 MS [REPEAT]   drag between two screen points, there and back
+#   touchsim.py swipe X1 Y1 X2 Y2 MS          one way only
 #   touchsim.py tap X Y
 import fcntl, os, struct, sys, time
 
@@ -56,6 +57,10 @@ try:
             time.sleep(1.0)
             drag(x2, y2, x1, y1, ms)
             time.sleep(1.0)
+    elif sys.argv[1] == 'swipe':
+        x1, y1, x2, y2, ms = map(float, sys.argv[2:7])
+        drag(x1, y1, x2, y2, ms)
+        time.sleep(0.6)
     elif sys.argv[1] == 'tap':
         x, y = map(float, sys.argv[2:4])
         report(x, y, 1)
