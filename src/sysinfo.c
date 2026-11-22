@@ -154,6 +154,11 @@ out:
 void sysinfo_net(struct sprite_net *n) {
 	memset(n, 0, sizeof *n);
 	n->eth_up = if_up("eth0");
+	n->eth_present = access("/sys/class/net/eth0", F_OK) == 0;
+	if (n->eth_up) { // the kernel says -1 while it doesn't know
+		int mbps = read_int("/sys/class/net/eth0/speed", 0);
+		n->eth_mbps = mbps > 0 ? mbps : 0;
+	}
 	n->wifi_up = if_up("wlan0");
 	n->wifi_present = access("/sys/class/net/wlan0", F_OK) == 0;
 	if (n->wifi_present) {

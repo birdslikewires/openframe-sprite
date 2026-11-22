@@ -125,6 +125,8 @@ void sprite_calibrating(bool on);                 // pass input uncorrected, for
 // sysinfo.c
 struct sprite_net {
 	bool eth_up, wifi_up;
+	bool eth_present;     // there's a wired interface (every OpenFrame has one)
+	int eth_mbps;         // its link speed, with a cable in; 0 when unknown
 	bool wifi_present;    // there's a Wi-Fi interface
 	bool wifi_enabled;    // ... and it's switched on (interface up, radio not blocked)
 	char eth_ip[48], wifi_ip[48];

@@ -593,6 +593,7 @@ void shell_notice(const char *text) {
 
 static void wifi_refresh(void);
 static void ssh_refresh(void);
+static void eth_show(void);
 static lv_obj_t *wifi_status_label;
 
 static void refresh_settings(lv_timer_t *t) {
@@ -601,6 +602,7 @@ static void refresh_settings(lv_timer_t *t) {
 	if (!showing(page_settings)) return;
 	if (wifi_status_label) wifi_refresh();
 	if (!t) ssh_refresh(); // as Settings opens: it changes only when it's set
+	eth_show();
 	static char text[768];
 	sysinfo_summary(text, sizeof text);
 	lv_label_set_text(about_label, text);
@@ -2169,6 +2171,22 @@ static void build_entry(lv_obj_t *scr) {
 /* ---- remote access: the password for logging in as "of" (sprite-helper ssh-status/-password) ---- */
 
 static lv_obj_t *ssh_status_label, *ssh_detail_label;
+static lv_obj_t *eth_status_label, *eth_detail_label;
+
+// The wired network: whether a cable's in, at what speed, and the address it has.
+static void eth_show(void) {
+	if (!eth_status_label) return;
+	struct sprite_net n;
+	sysinfo_net(&n);
+	char t[64];
+	if (!n.eth_up) snprintf(t, sizeof t, "No cable connected");
+	else if (!n.eth_ip[0]) snprintf(t, sizeof t, "Connected, waiting for an address");
+	else if (n.eth_mbps >= 1000) snprintf(t, sizeof t, "Connected at %d Gb/s", n.eth_mbps / 1000);
+	else if (n.eth_mbps > 0) snprintf(t, sizeof t, "Connected at %d Mb/s", n.eth_mbps);
+	else snprintf(t, sizeof t, "Connected");
+	set_text(eth_status_label, t);
+	set_text(eth_detail_label, n.eth_up ? n.eth_ip : "");
+}
 
 static void ssh_status_done(char *reply, void *data) {
 	const char *st = helper_reply_status(reply);
@@ -2276,7 +2294,8 @@ static lv_obj_t *settings_panel_new(int t) {
 	lv_obj_set_flex_flow(p, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_style_pad_left(p, CONTENT_X - 8, 0);
 	lv_obj_set_style_pad_right(p, CONTENT_X, 0);
-	lv_obj_set_style_pad_ver(p, CONTENT_TOP, 0);
+	lv_obj_set_style_pad_top(p, CONTENT_TOP, 0);
+	lv_obj_set_style_pad_bottom(p, 8, 0); // Network, the fullest, ends 16 px from the bottom
 	lv_obj_set_style_pad_row(p, ROW_GAP, 0);
 	lv_obj_set_scroll_dir(p, LV_DIR_VER);
 	lv_obj_set_scrollbar_mode(p, LV_SCROLLBAR_MODE_OFF);
@@ -2335,6 +2354,25 @@ static void build_settings(lv_obj_t *scr) {
 		button(br, LV_SYMBOL_WIFI "  Choose network", BUTTON_MAIN, wifi_choose_clicked, NULL);
 		wifi_forget_btn = button(br, "Forget", BUTTON_OTHER, wifi_forget_ask, NULL);
 		lv_obj_add_flag(wifi_forget_btn, LV_OBJ_FLAG_HIDDEN);
+	}
+	if (net.eth_present) {
+		section(pn, "ETHERNET");
+		lv_obj_t *er = lv_obj_create(pn);
+		lv_obj_remove_style_all(er);
+		lv_obj_set_size(er, LV_PCT(100), ROW_H);
+		lv_obj_set_flex_flow(er, LV_FLEX_FLOW_ROW);
+		lv_obj_set_flex_align(er, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+		lv_obj_set_style_pad_column(er, 20, 0);
+		lv_obj_remove_flag(er, LV_OBJ_FLAG_SCROLLABLE);
+		eth_status_label = lv_label_create(er);
+		lv_label_set_text(eth_status_label, "");
+		lv_label_set_long_mode(eth_status_label, LV_LABEL_LONG_DOT);
+		lv_obj_set_flex_grow(eth_status_label, 1);
+		lv_obj_set_height(eth_status_label, lv_font_get_line_height(lv_obj_get_style_text_font(eth_status_label, 0)));
+		lv_obj_set_style_text_color(eth_status_label, lv_color_hex(C_TEXT), 0);
+		eth_detail_label = lv_label_create(er);
+		lv_label_set_text(eth_detail_label, "");
+		lv_obj_set_style_text_color(eth_detail_label, lv_color_hex(C_DIM), 0);
 	}
 	// Logging in over SSH as "of": images give it no password (every unit used to have the
 	// same one), so this is where an owner sets one, through the helper.

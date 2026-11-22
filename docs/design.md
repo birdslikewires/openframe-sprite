@@ -159,8 +159,8 @@ darker than the background (`#0d1217`), with Home at its top and then a tab per 
 each 52 px tall with a 24 px glyph (Lucide, like the tiles) and its name. The chosen tab
 is a lighter box (white at 10%) with its glyph in the accent colour; the panel beside it
 holds that group's settings, which should fit without scrolling (a panel that outgrows the
-screen scrolls on its own). The groups: **Network** (Wi-Fi, remote access), **Display**
-(brightness, touch), **Time** (the clock; the time zone to come), **About** and **Power**.
+screen scrolls on its own). The groups: **Network** (Wi-Fi, Ethernet, remote access),
+**Display** (brightness, touch), **Time** (the clock; the time zone to come), **About** and **Power**.
 Sound will be a tab of its own. A status line in a panel is one line, ending in "...".
 
 **Every button has one shape** (`button()`): **48 px tall** (the smallest touch target), as
