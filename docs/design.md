@@ -99,10 +99,21 @@ later page.
 
 ## 6. The look: flat
 
-**One corner radius, 18 px, for every box:** icons, buttons, cards, banners, the message box and
-pressed highlights. Only circles and pills are rounder: dots, the home pill, switches and slider
-ends. LVGL's buttons and message boxes get the radius from sprite's theme layer, so new ones
-can't drift from it.
+**One rule for corner radii, for every box** (icons, buttons, cards, banners, the message box,
+pressed highlights): **the radius is the box's shorter side × 0.2045 (18/88, an app icon's
+proportion), rounded, up to 18 px.** A fixed radius would make small boxes look round.
+
+| Box | Shorter side | Radius |
+|---|---|---|
+| App icon | 88 px | 18 px |
+| Gear, page-dot target | 40 px | 8 px |
+| Banner | about 48 px | 10 px |
+| Button | 52–56 px | 11 px |
+| App cell highlight, sheet card, message box | over 88 px | 18 px (the cap) |
+
+Only circles and pills are rounder: dots, the home pill, switches and slider ends. In the code,
+`rounded()` applies the rule now and whenever the box is resized. LVGL's buttons and message
+boxes get it from sprite's theme layer, so new ones can't drift from it.
 
 
 | Role | Colour |

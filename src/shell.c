@@ -13,9 +13,12 @@
 #include "sprite.h"
 
 #define BAR_H 40
-// One corner radius for every box: icons, buttons, cards, banners, pressed highlights. Only
-// circles and pills (dots, the home pill, switches, slider ends) are rounder.
-#define UI_RADIUS 18
+// Corner radii follow one rule for every box (icons, buttons, cards, banners, highlights): in
+// proportion to the box's shorter side, as an app icon's 18 px is to its 88, up to 18 px. A
+// fixed radius would make small boxes look round. Only circles and pills (dots, the home pill,
+// switches, slider ends) are rounder. See rounded().
+#define UI_RADIUS 18                                        // the most any box gets
+#define RADIUS_RATIO (18.0 / 88.0)
 // Where content starts on every screen, below the status bar: the home grid's first icon and
 // Settings' first control sit at the same point, (CONTENT_X, BAR_H + CONTENT_TOP), and the
 // clock in the bar lines up with them.
@@ -32,7 +35,7 @@
 #define TILE_W ((SPRITE_W - 2 * GRID_PAD_X) / GRID_COLS)  // 128
 #define TILE_H 140
 #define ICON_SIZE 88
-#define ICON_RADIUS UI_RADIUS
+#define ICON_RADIUS 18                                      // ICON_SIZE x RADIUS_RATIO
 #define ICON_TOP 6
 #define LABEL_GAP 6
 #define LABEL_H 38                                          // two lines of 16 px Montserrat
@@ -100,6 +103,25 @@ static bool cal_collecting;
 static double cal_prev[6];             // the calibration in use before, to put back on Cancel
 static double cal_new[6];
 static void cal_tap(double x, double y);
+
+/* ---- the radius rule ---- */
+
+static int radius_for(int w, int h) {
+	int r = (int)((w < h ? w : h) * RADIUS_RATIO + 0.5);
+	return r < UI_RADIUS ? r : UI_RADIUS;
+}
+
+static void radius_on_size(lv_event_t *e) {
+	lv_obj_t *o = lv_event_get_target(e);
+	lv_obj_set_style_radius(o, radius_for(lv_obj_get_width(o), lv_obj_get_height(o)), 0);
+}
+
+// Give a box the rule's radius, now and whenever its size changes.
+static void rounded(lv_obj_t *o) {
+	lv_obj_add_event_cb(o, radius_on_size, LV_EVENT_SIZE_CHANGED, NULL);
+	lv_obj_update_layout(o);
+	lv_obj_set_style_radius(o, radius_for(lv_obj_get_width(o), lv_obj_get_height(o)), 0);
+}
 
 /* ---- display and input glue ---- */
 
@@ -425,7 +447,7 @@ static void build_bar(lv_obj_t *scr) {
 	lv_obj_set_flex_align(dots, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_style_pad_column(dots, 14, 0);
 	lv_obj_set_style_pad_hor(dots, 20, 0);
-	lv_obj_set_style_radius(dots, UI_RADIUS, 0);
+	rounded(dots);
 	lv_obj_set_style_bg_color(dots, lv_color_white(), LV_STATE_PRESSED);
 	lv_obj_set_style_bg_opa(dots, LV_OPA_10, LV_STATE_PRESSED);
 	lv_obj_align(dots, LV_ALIGN_CENTER, 0, 0);
@@ -441,7 +463,7 @@ static void build_bar(lv_obj_t *scr) {
 	lv_obj_add_flag(gear, LV_OBJ_FLAG_CLICKABLE);
 	lv_obj_set_style_bg_color(gear, lv_color_white(), LV_STATE_PRESSED);
 	lv_obj_set_style_bg_opa(gear, LV_OPA_20, LV_STATE_PRESSED);
-	lv_obj_set_style_radius(gear, UI_RADIUS, 0);
+	rounded(gear);
 	lv_obj_t *gl = lv_label_create(gear);
 	lv_label_set_text(gl, LV_SYMBOL_SETTINGS);
 	lv_obj_set_style_text_font(gl, &lv_font_montserrat_20, 0);
@@ -608,7 +630,7 @@ static void open_sheet(struct sprite_app *a) {
 	lv_obj_center(card);
 	lv_obj_set_style_bg_color(card, lv_color_hex(0x1c242c), 0);
 	lv_obj_set_style_border_width(card, 0, 0);
-	lv_obj_set_style_radius(card, UI_RADIUS, 0);
+	rounded(card);
 	lv_obj_set_style_pad_all(card, 24, 0);
 	lv_obj_set_style_pad_row(card, 18, 0);
 	lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
@@ -662,7 +684,7 @@ static lv_obj_t *make_badge(lv_obj_t *cell, const struct sprite_app *a) {
 	lv_obj_remove_style_all(badge);
 	lv_obj_set_size(badge, ICON_SIZE, ICON_SIZE);
 	lv_obj_align(badge, LV_ALIGN_TOP_MID, 0, ICON_TOP);
-	lv_obj_set_style_radius(badge, ICON_RADIUS, 0);
+	lv_obj_set_style_radius(badge, radius_for(ICON_SIZE, ICON_SIZE), 0);
 	lv_obj_set_style_bg_color(badge, lv_color_hex(a->color), 0);
 	lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
 	lv_obj_remove_flag(badge, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
@@ -724,7 +746,7 @@ static void make_cell(lv_obj_t *page, struct sprite_app *a) {
 	// pressed look on the whole cell
 	lv_obj_set_style_bg_color(tile, lv_color_white(), LV_STATE_PRESSED);
 	lv_obj_set_style_bg_opa(tile, LV_OPA_20, LV_STATE_PRESSED);
-	lv_obj_set_style_radius(tile, ICON_RADIUS, 0);
+	lv_obj_set_style_radius(tile, radius_for(TILE_W, TILE_H), 0);
 }
 
 static void slide_exec(void *obj, int32_t x) { lv_obj_set_x(obj, x); }
@@ -932,7 +954,7 @@ static void build_home(lv_obj_t *scr) {
 	lv_obj_set_size(toast, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
 	lv_obj_set_style_bg_color(toast, lv_color_hex(0x26313c), 0);
 	lv_obj_set_style_bg_opa(toast, LV_OPA_COVER, 0);
-	lv_obj_set_style_radius(toast, UI_RADIUS, 0);
+	rounded(toast);
 	lv_obj_set_style_pad_hor(toast, 22, 0);
 	lv_obj_set_style_pad_ver(toast, 10, 0);
 	lv_obj_align(toast, LV_ALIGN_BOTTOM_MID, 0, -16);
@@ -1278,14 +1300,13 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_add_flag(page_settings, LV_OBJ_FLAG_HIDDEN);
 }
 
-// sprite's rules over LVGL's default theme: its buttons and message boxes take UI_RADIUS, so
-// nothing made later can drift from it.
+// sprite's rules over LVGL's default theme: its buttons and message boxes follow the radius
+// rule as they're sized, so nothing made later can drift from it.
 static lv_theme_t theme;
-static lv_style_t st_radius;
 
 static void theme_apply(lv_theme_t *th, lv_obj_t *obj) {
 	if (lv_obj_check_type(obj, &lv_button_class) || lv_obj_check_type(obj, &lv_msgbox_class))
-		lv_obj_add_style(obj, &st_radius, 0);
+		lv_obj_add_event_cb(obj, radius_on_size, LV_EVENT_SIZE_CHANGED, NULL);
 }
 
 void shell_init(void *pixels) {
@@ -1304,8 +1325,6 @@ void shell_init(void *pixels) {
 	lv_display_add_event_cb(disp, refr_event, LV_EVENT_RENDER_READY, NULL);
 	lv_theme_t *th = lv_theme_default_init(disp, lv_color_hex(C_ACCENT), lv_color_hex(0x45d483), true,
 					       &lv_font_montserrat_20);
-	lv_style_init(&st_radius);
-	lv_style_set_radius(&st_radius, UI_RADIUS);
 	theme = *th;
 	lv_theme_set_parent(&theme, th);
 	lv_theme_set_apply_cb(&theme, theme_apply);
