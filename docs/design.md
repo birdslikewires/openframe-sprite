@@ -50,7 +50,9 @@ glyph). From left to right:
 - **network icons** (20 px), ending 8 px before the gear:
   - **ethernet** while a cable is connected, faint until it has an address;
   - **Wi-Fi**, unless it's switched off (interface down, or radio blocked) or missing. It shows
-    the signal as a dot and up to three arcs, all faint while it isn't connected;
+    the signal as a dot and up to three arcs, all faint while it isn't connected. The
+    bars go by the signal in dBm, by the same rule as the list of networks: three arcs from
+    −55, two from −67, one from −75, below that the dot alone;
 - **the Settings gear**: a 48 px-wide box, the bar's height, hard against the top and right
   edges, with the 18 px radius on all four corners like any other box.
 

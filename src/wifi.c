@@ -183,6 +183,8 @@ void wifi_scan(wifi_scan_cb cb, void *data) {
 	helper_request("wifi-scan\n", scan_done, c);
 }
 
+// Bars from the signal, for the list and the status bar alike: the usual cut-offs, -67 dBm
+// being the common figure for good enough to stream reliably, below -75 unreliable.
 int wifi_level(int dbm) {
 	return dbm >= -55 ? 4 : dbm >= -67 ? 3 : dbm >= -75 ? 2 : 1;
 }

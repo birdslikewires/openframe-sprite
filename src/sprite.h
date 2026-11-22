@@ -125,7 +125,7 @@ struct sprite_net {
 	bool wifi_present;    // there's a Wi-Fi interface
 	bool wifi_enabled;    // ... and it's switched on (interface up, radio not blocked)
 	char eth_ip[48], wifi_ip[48];
-	int wifi_quality;     // 0-100, -1 when unknown
+	int wifi_dbm;         // the signal of the network joined, in dBm; 0 when unknown
 };
 void sysinfo_net(struct sprite_net *out);
 int sysinfo_backlight(void);                  // 0-100, -1 if unknown

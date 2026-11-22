@@ -425,10 +425,7 @@ static void update_net(lv_timer_t *t) {
 	// (a scan brings the card up for a few seconds: that isn't Wi-Fi being on)
 	if (n.wifi_present && n.wifi_enabled && !(wifi_scanning && !wifi_now.saved[0])) {
 		int level = 0;
-		if (n.wifi_ip[0]) {
-			int q = n.wifi_quality < 0 ? 0 : n.wifi_quality;
-			level = q >= 75 ? 4 : q >= 50 ? 3 : q >= 25 ? 2 : 1;
-		}
+		if (n.wifi_ip[0]) level = n.wifi_dbm < 0 ? wifi_level(n.wifi_dbm) : 1; // as the list does
 		lv_image_set_src(net_wifi, &wifi_img[level]);
 		lv_obj_remove_flag(net_wifi, LV_OBJ_FLAG_HIDDEN);
 	} else {

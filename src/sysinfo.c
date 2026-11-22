@@ -40,7 +40,6 @@ static bool if_up(const char *ifname) {
 
 void sysinfo_net(struct sprite_net *n) {
 	memset(n, 0, sizeof *n);
-	n->wifi_quality = -1;
 	n->eth_up = if_up("eth0");
 	n->wifi_up = if_up("wlan0");
 	n->wifi_present = access("/sys/class/net/wlan0", F_OK) == 0;
@@ -72,7 +71,10 @@ void sysinfo_net(struct sprite_net *n) {
 		}
 		freeifaddrs(ifa);
 	}
-	// /proc/net/wireless: "wlan0: 0000   54.  -56.  -256 ..." link quality out of 70
+	// /proc/net/wireless: "wlan0: 0000   54.  -56.  -256 ..." status, link quality (out of
+	// 70), signal level in dBm, noise. The signal is what the scan's list goes by too, so one
+	// rule (wifi_level) gives the bars everywhere. Should a driver give no dBm level, the
+	// quality is the signal + 110, as cfg80211 makes it.
 	FILE *f = fopen("/proc/net/wireless", "r");
 	if (f) {
 		char line[256];
@@ -80,11 +82,10 @@ void sysinfo_net(struct sprite_net *n) {
 			char *p = strstr(line, "wlan0:");
 			if (!p) continue;
 			unsigned status;
-			float q;
-			if (sscanf(p + 6, "%x %f", &status, &q) == 2) {
-				int pct = (int)(q * 100 / 70);
-				n->wifi_quality = pct < 0 ? 0 : pct > 100 ? 100 : pct;
-			}
+			float q, level;
+			int got = sscanf(p + 6, "%x %f %f", &status, &q, &level);
+			if (got == 3 && level < 0) n->wifi_dbm = (int)level;
+			else if (got >= 2 && q > 0) n->wifi_dbm = (int)q - 110;
 		}
 		fclose(f);
 	}
@@ -201,7 +202,9 @@ void sysinfo_summary(char *buf, size_t len) {
 	sysinfo_net(&n);
 	char wifi[96];
 	const char *wstate = n.wifi_ip[0] ? n.wifi_ip : n.wifi_up ? "connected, no address" : "not connected";
-	if (n.wifi_quality >= 0) snprintf(wifi, sizeof wifi, "%s, signal %d%%", wstate, n.wifi_quality);
+	static const char *strength[] = { "", "weak", "fair", "good", "excellent" };
+	if (n.wifi_ip[0] && n.wifi_dbm < 0)
+		snprintf(wifi, sizeof wifi, "%s, signal %s", wstate, strength[wifi_level(n.wifi_dbm)]);
 	else snprintf(wifi, sizeof wifi, "%s", wstate);
 	snprintf(buf, len,
 		 "Name: %s\n"
