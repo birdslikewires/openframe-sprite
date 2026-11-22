@@ -574,20 +574,52 @@ static void gear_clicked(lv_event_t *e) {
 
 /* ---- long-press sheet: open, close, open at startup ---- */
 
-/* ---- dialogs: one kind for everything that asks something (the long-press sheet, the
-   power questions, the calibration result) ---- */
+/* ---- buttons: one shape for every button, in Settings and in dialogs ---- */
 
-// A card in the middle of a dimmed screen: a title, wrapping text, then a row of buttons, all
-// DIALOG_BUTTON_W by DIALOG_BUTTON_H. The card is as wide as its buttons need, and no narrower
-// than two buttons. Main actions are the accent colour, others grey, destructive ones red.
-#define DIALOG_BUTTON_W 200
-#define DIALOG_BUTTON_H 56
-#define DIALOG_GAP 20
-#define DIALOG_PAD 24
-#define C_CARD 0x1c242c
+// BUTTON_H tall (the smallest touch target), as wide as the label plus BUTTON_PAD each side,
+// and no narrower than BUTTON_MIN_W. Main actions are the accent colour, others grey,
+// destructive ones red. Pressed, a button darkens (the theme's recolour); it doesn't grow,
+// which would push its corners outside its row and cut them off.
+#define BUTTON_H 48
+#define BUTTON_MIN_W 160
+#define BUTTON_PAD 24
 #define C_BUTTON_OTHER 0x3a4a5a
 #define C_BUTTON_DANGER 0xb3403a
 enum button_role { BUTTON_MAIN, BUTTON_OTHER, BUTTON_DANGER };
+
+static lv_obj_t *button(lv_obj_t *parent, const char *text, enum button_role role, lv_event_cb_t cb, void *data) {
+	int w = text_w(text, &lv_font_montserrat_20) + 2 * BUTTON_PAD;
+	lv_obj_t *b = lv_button_create(parent);
+	lv_obj_set_size(b, w > BUTTON_MIN_W ? w : BUTTON_MIN_W, BUTTON_H);
+	lv_obj_set_style_bg_color(b, lv_color_hex(role == BUTTON_MAIN ? C_ACCENT : role == BUTTON_DANGER ? C_BUTTON_DANGER : C_BUTTON_OTHER), 0);
+	lv_obj_t *l = lv_label_create(b);
+	lv_label_set_text(l, text);
+	lv_obj_set_style_text_font(l, &lv_font_montserrat_20, 0);
+	lv_obj_center(l);
+	lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, data);
+	return b;
+}
+
+// A row of buttons, BUTTON_GAP apart
+#define BUTTON_GAP 20
+static lv_obj_t *button_row(lv_obj_t *parent) {
+	lv_obj_t *row = lv_obj_create(parent);
+	lv_obj_remove_style_all(row);
+	lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+	lv_obj_set_style_pad_column(row, BUTTON_GAP, 0);
+	lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+	return row;
+}
+
+/* ---- dialogs: one kind for everything that asks something (the long-press sheet, the
+   power questions, the calibration result) ---- */
+
+// A card in the middle of a dimmed screen: a title, wrapping text, then a row of buttons. The
+// card is DIALOG_MIN_W wide, or as wide as its buttons need.
+#define DIALOG_MIN_W 460
+#define DIALOG_PAD 24
+#define C_CARD 0x1c242c
 static lv_obj_t *dialog_backdrop;    // the open dialog's own dimmed backdrop, if it made one
 
 static void dialog_close(void) {
@@ -615,7 +647,7 @@ static lv_obj_t *dialog_open(lv_obj_t *on, const char *title, const char *body, 
 	}
 	lv_obj_t *card = lv_obj_create(on);
 	lv_obj_remove_style_all(card);
-	lv_obj_set_size(card, 2 * DIALOG_BUTTON_W + DIALOG_GAP + 2 * DIALOG_PAD, LV_SIZE_CONTENT);
+	lv_obj_set_size(card, DIALOG_MIN_W, LV_SIZE_CONTENT);
 	lv_obj_center(card);
 	lv_obj_set_style_bg_color(card, lv_color_hex(C_CARD), 0);
 	lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
@@ -646,24 +678,11 @@ static lv_obj_t *dialog_open(lv_obj_t *on, const char *title, const char *body, 
 // A button on a dialog's card, in its row (made with the first), widening the card to fit.
 static lv_obj_t *dialog_button(lv_obj_t *card, const char *text, enum button_role role, lv_event_cb_t cb, void *data) {
 	lv_obj_t *row = lv_obj_get_user_data(card);
-	if (!row) {
-		row = lv_obj_create(card);
-		lv_obj_remove_style_all(row);
-		lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
-		lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-		lv_obj_set_style_pad_column(row, DIALOG_GAP, 0);
-		lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-		lv_obj_set_user_data(card, row);
-	}
-	lv_obj_t *b = lv_button_create(row);
-	lv_obj_set_size(b, DIALOG_BUTTON_W, DIALOG_BUTTON_H);
-	lv_obj_set_style_bg_color(b, lv_color_hex(role == BUTTON_MAIN ? C_ACCENT : role == BUTTON_DANGER ? C_BUTTON_DANGER : C_BUTTON_OTHER), 0);
-	lv_obj_t *l = lv_label_create(b);
-	lv_label_set_text(l, text);
-	lv_obj_center(l);
-	lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, data);
-	int n = lv_obj_get_child_count(row);
-	int w = n * DIALOG_BUTTON_W + (n - 1) * DIALOG_GAP + 2 * DIALOG_PAD;
+	if (!row) lv_obj_set_user_data(card, row = button_row(card));
+	lv_obj_t *b = button(row, text, role, cb, data);
+	int w = 2 * DIALOG_PAD - BUTTON_GAP;
+	for (uint32_t i = 0; i < lv_obj_get_child_count(row); i++)
+		w += lv_obj_get_style_width(lv_obj_get_child(row, i), 0) + BUTTON_GAP;
 	if (w > lv_obj_get_style_width(card, 0)) lv_obj_set_width(card, w);
 	return b;
 }
@@ -1058,8 +1077,16 @@ static void power_clicked(lv_event_t *e) {
 	dialog_button(card, "Cancel", BUTTON_OTHER, dialog_cancel, NULL);
 }
 
+// A list screen (Settings) is a column of headings and rows, ROW_GAP apart. Every row of
+// controls is ROW_H tall (a button fills it; a switch or slider sits in its middle), so the
+// space above a heading is the same whatever came before it: ROW_GAP plus HEADING_SPACE.
+#define ROW_GAP 12
+#define ROW_H 48
+#define HEADING_SPACE 16
+
 static lv_obj_t *section(lv_obj_t *parent, const char *title) {
 	lv_obj_t *l = lv_label_create(parent);
+	lv_obj_set_style_margin_top(l, HEADING_SPACE, 0);
 	lv_label_set_text(l, title);
 	lv_obj_set_style_text_font(l, &lv_font_montserrat_14, 0);
 	lv_obj_set_style_text_color(l, lv_color_hex(C_DIM), 0);
@@ -1210,7 +1237,7 @@ static void cal_reset(lv_event_t *e) {
 	const double identity[6] = { 1, 0, 0, 0, 1, 0 };
 	sprite_set_calibration(identity);
 	settings_set("calibration", "");
-	show_toast("Standard touch calibration", 3000);
+	show_toast("Touch calibration reset", 3000);
 }
 
 static void clock24_changed(lv_event_t *e) {
@@ -1229,7 +1256,7 @@ static void seconds_changed(lv_event_t *e) {
 static void switch_row(lv_obj_t *parent, const char *text, bool on, lv_event_cb_t cb) {
 	lv_obj_t *row = lv_obj_create(parent);
 	lv_obj_remove_style_all(row);
-	lv_obj_set_size(row, LV_PCT(100), 48);
+	lv_obj_set_size(row, LV_PCT(100), ROW_H);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
@@ -1250,22 +1277,16 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_flex_flow(page_settings, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_style_pad_hor(page_settings, CONTENT_X, 0);
 	lv_obj_set_style_pad_ver(page_settings, CONTENT_TOP, 0);
-	lv_obj_set_style_pad_row(page_settings, 12, 0);
+	lv_obj_set_style_pad_row(page_settings, ROW_GAP, 0);
 	lv_obj_set_scroll_dir(page_settings, LV_DIR_VER);
 	lv_obj_set_scrollbar_mode(page_settings, LV_SCROLLBAR_MODE_OFF);
 
-	lv_obj_t *back = lv_button_create(page_settings);
-	lv_obj_set_size(back, 160, 52);
-	lv_obj_t *bl = lv_label_create(back);
-	lv_label_set_text(bl, LV_SYMBOL_LEFT "  Home");
-	lv_obj_set_style_text_font(bl, &lv_font_montserrat_20, 0);
-	lv_obj_center(bl);
-	lv_obj_add_event_cb(back, back_clicked, LV_EVENT_CLICKED, NULL);
+	button(page_settings, LV_SYMBOL_LEFT "  Home", BUTTON_MAIN, back_clicked, NULL);
 
 	section(page_settings, "BRIGHTNESS");
 	lv_obj_t *row = lv_obj_create(page_settings);
 	lv_obj_remove_style_all(row);
-	lv_obj_set_size(row, LV_PCT(100), 56);
+	lv_obj_set_size(row, LV_PCT(100), ROW_H);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_style_pad_column(row, 24, 0);
@@ -1287,24 +1308,9 @@ static void build_settings(lv_obj_t *scr) {
 	switch_row(page_settings, "Show seconds", clock_secs, seconds_changed);
 
 	section(page_settings, "TOUCH");
-	lv_obj_t *trow = lv_obj_create(page_settings);
-	lv_obj_remove_style_all(trow);
-	lv_obj_set_size(trow, LV_PCT(100), 64);
-	lv_obj_set_flex_flow(trow, LV_FLEX_FLOW_ROW);
-	lv_obj_set_style_pad_column(trow, 20, 0);
-	lv_obj_t *tb = lv_button_create(trow);
-	lv_obj_set_size(tb, 260, 56);
-	lv_obj_t *tl = lv_label_create(tb);
-	lv_label_set_text(tl, LV_SYMBOL_EDIT "  Calibrate touch");
-	lv_obj_center(tl);
-	lv_obj_add_event_cb(tb, cal_start, LV_EVENT_CLICKED, NULL);
-	lv_obj_t *rb = lv_button_create(trow);
-	lv_obj_set_size(rb, 220, 56);
-	lv_obj_set_style_bg_color(rb, lv_color_hex(C_BUTTON_OTHER), 0);
-	lv_obj_t *rl = lv_label_create(rb);
-	lv_label_set_text(rl, "Standard");
-	lv_obj_center(rl);
-	lv_obj_add_event_cb(rb, cal_reset, LV_EVENT_CLICKED, NULL);
+	lv_obj_t *trow = button_row(page_settings);
+	button(trow, LV_SYMBOL_EDIT "  Calibrate touch", BUTTON_MAIN, cal_start, NULL);
+	button(trow, LV_SYMBOL_REFRESH "  Reset", BUTTON_OTHER, cal_reset, NULL);
 
 	section(page_settings, "ABOUT");
 	about_label = lv_label_create(page_settings);
@@ -1313,23 +1319,9 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_text_line_space(about_label, 4, 0);
 
 	section(page_settings, "POWER");
-	lv_obj_t *prow = lv_obj_create(page_settings);
-	lv_obj_remove_style_all(prow);
-	lv_obj_set_size(prow, LV_PCT(100), 64);
-	lv_obj_set_flex_flow(prow, LV_FLEX_FLOW_ROW);
-	lv_obj_set_style_pad_column(prow, 20, 0);
-	const char *labels[] = { LV_SYMBOL_REFRESH "  Restart", LV_SYMBOL_POWER "  Switch off" };
-	const char *whats[] = { "reboot", "poweroff" };
-	for (int i = 0; i < 2; i++) {
-		lv_obj_t *b = lv_button_create(prow);
-		lv_obj_set_size(b, 220, 56);
-		lv_obj_set_style_bg_color(b, lv_color_hex(i ? C_BUTTON_DANGER : C_BUTTON_OTHER), 0);
-		lv_obj_t *l = lv_label_create(b);
-		lv_label_set_text(l, labels[i]);
-		lv_obj_set_style_text_font(l, &lv_font_montserrat_20, 0);
-		lv_obj_center(l);
-		lv_obj_add_event_cb(b, power_clicked, LV_EVENT_CLICKED, (void *)whats[i]);
-	}
+	lv_obj_t *prow = button_row(page_settings);
+	button(prow, LV_SYMBOL_REFRESH "  Restart", BUTTON_OTHER, power_clicked, "reboot");
+	button(prow, LV_SYMBOL_POWER "  Switch off", BUTTON_DANGER, power_clicked, "poweroff");
 	lv_timer_create(refresh_settings, 3000, NULL);
 	lv_obj_add_flag(page_settings, LV_OBJ_FLAG_HIDDEN);
 }

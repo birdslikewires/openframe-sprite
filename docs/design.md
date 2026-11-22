@@ -108,7 +108,7 @@ proportion), rounded, up to 18 px.** A fixed radius would make small boxes look 
 | App icon | 88 px | 18 px |
 | Gear, page-dot target | 40 px | 8 px |
 | Banner | about 48 px | 10 px |
-| Button | 52–56 px | 11 px |
+| Button | 48 px | 10 px |
 | App cell highlight, dialog card | over 88 px | 18 px (the cap) |
 
 Only circles and pills are rounder: dots, the home pill, switches and slider ends. In the code,
@@ -137,7 +137,25 @@ boxes get it from sprite's theme layer, so new ones can't drift from it.
 | 28 px | titles |
 | 40 px | icon glyphs |
 
-## 7. Dialogs
+## 7. Buttons and list screens
+
+**Every button has one shape** (`button()`): **48 px tall** (the smallest touch target), as
+wide as its label plus 24 px each side, and **never narrower than 160 px**. Text is 20 px.
+Buttons in a row are 20 px apart.
+
+- **Coloured by role:** the main action in the accent blue, others grey `#3a4a5a`,
+  destructive ones red `#b3403a`.
+- **Pressed, a button darkens.** It doesn't grow (LVGL's `LV_THEME_DEFAULT_GROW` is off): a
+  grown button's corners poke out of its row and get cut off square.
+- **Labels say what happens** in words anyone knows: "Reset", not "Standard".
+
+**List screens** (Settings, and any like it) are a column of headings and rows, 12 px apart:
+- **Every row of controls is 48 px tall.** A button fills it; a switch or slider sits in its
+  middle.
+- **Headings** (14 px, dimmed, capitals) get **16 px more space above them**, so a section
+  starts 28 px below whatever came before it, whatever that was.
+
+## 8. Dialogs
 
 **Anything that asks something uses the one dialog** (`dialog_open()` and `dialog_button()`):
 the long-press sheet, the Restart and Switch off questions, and the calibration result.
@@ -146,17 +164,14 @@ the long-press sheet, the Restart and Switch off questions, and the calibration 
   between its parts: a **title** (28 px), **text** (20 px, dimmed, wrapping inside the card;
   never one long line), anything particular to it (the sheet's startup switch), then **a row
   of buttons**.
-- **Dialog buttons are 200×56, 20 px apart,** left-aligned. The card is as wide as its
-  buttons need (three make it 688 px), and never narrower than two.
-- **Buttons are coloured by role:** the main action in the accent blue (Open, Save,
-  Restart), others grey `#3a4a5a` (Again, Cancel), destructive ones red `#b3403a` (Close,
-  Switch off). The main action comes first.
+- **Buttons are the ordinary ones,** left-aligned, the main action first (Open, Save,
+  Restart). The card is 460 px wide, or as wide as its buttons need.
 - **A tap outside the card closes a dialog that only asks** (the sheet, the power questions),
   as Cancel would. One that needs an answer (the calibration result) waits for a button.
 - Text says what happened or will happen in a sentence or two. Titles are short: the app's
   name, or the question.
 
-## 8. Touch
+## 9. Touch
 
 - **Targets are at least 48 px in their smaller dimension.** Calibrated taps land within
   about 10 px of where you aim, and on the bare factory calibration up to 16 px out. Never
@@ -168,7 +183,7 @@ the long-press sheet, the Restart and Switch off questions, and the calibration 
   strokes. Motion carries on through that wait, so nothing visibly stops.
 - **No hover:** the touchscreen only reports while it's touched.
 
-## 9. Apps
+## 10. Apps
 
 - **Full screen at 800×480,** drawn in software (no GL). Wayland apps connect directly; X11
   and SDL apps go through Xwayland.
