@@ -154,6 +154,8 @@ Buttons in a row are 20 px apart.
   middle.
 - **Headings** (14 px, dimmed, capitals) get **16 px more space above them**, so a section
   starts 28 px below whatever came before it, whatever that was.
+- **A hint under a setting's name** (14 px, dimmed) sits 6 px below it, and says what the
+  setting does in plain words.
 
 ## 8. Dialogs
 

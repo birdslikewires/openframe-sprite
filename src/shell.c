@@ -620,6 +620,7 @@ static lv_obj_t *button_row(lv_obj_t *parent) {
 #define DIALOG_MIN_W 460
 #define DIALOG_PAD 24
 #define C_CARD 0x1c242c
+#define HINT_GAP 6         // between a setting's name and the hint under it
 static lv_obj_t *dialog_backdrop;    // the open dialog's own dimmed backdrop, if it made one
 
 static void dialog_close(void) {
@@ -738,11 +739,12 @@ static void open_sheet(struct sprite_app *a) {
 	lv_obj_remove_style_all(text);
 	lv_obj_set_size(text, 300, LV_SIZE_CONTENT);
 	lv_obj_set_flex_flow(text, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_style_pad_row(text, HINT_GAP, 0);
 	lv_obj_t *l1 = lv_label_create(text);
 	lv_label_set_text(l1, "Open at startup");
 	lv_obj_set_style_text_color(l1, lv_color_hex(C_TEXT), 0);
 	lv_obj_t *l2 = lv_label_create(text);
-	lv_label_set_text(l2, "Opens when the OpenFrame starts, and again if it closes.");
+	lv_label_set_text(l2, "Choose this app to launch automatically at startup.");
 	lv_label_set_long_mode(l2, LV_LABEL_LONG_WRAP);
 	lv_obj_set_width(l2, 300);
 	lv_obj_set_style_text_font(l2, &lv_font_montserrat_14, 0);
@@ -1071,7 +1073,7 @@ static void power_clicked(lv_event_t *e) {
 	bool reboot = !strcmp(lv_event_get_user_data(e), "reboot");
 	lv_obj_t *card = dialog_open(NULL, reboot ? "Restart the OpenFrame?" : "Switch off the OpenFrame?",
 				     reboot ? "It will be back in about half a minute."
-					    : "Unplug it and plug it back in to switch it on again.", true);
+					    : "After shutdown, turn it off at the plug.", true);
 	dialog_button(card, reboot ? LV_SYMBOL_REFRESH "  Restart" : LV_SYMBOL_POWER "  Switch off",
 		      reboot ? BUTTON_MAIN : BUTTON_DANGER, confirm_cb, reboot ? "reboot" : "poweroff");
 	dialog_button(card, "Cancel", BUTTON_OTHER, dialog_cancel, NULL);
