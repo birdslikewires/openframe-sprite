@@ -42,6 +42,7 @@ find "$pkg$P" -type f \( -name '*.so*' -o -perm -u+x \) ! -name sprite-helper -e
     printf '\n\n==== %s ====\n\n' "$l"; cat "$P/share/licences/$l"
   done
   printf '\n\n==== lvgl ====\n\n'; cat third_party/lvgl/LICENCE.txt
+  printf '\n\n==== lucide ====\n\n'; cat src/icons-lucide-LICENSE
 } > "$pkg/usr/share/doc/$PKGNAME/copyright"
 
 # Dependencies from the binaries, beyond the libraries the package carries itself.

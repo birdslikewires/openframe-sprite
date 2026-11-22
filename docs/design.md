@@ -67,7 +67,9 @@ later page.
 - **6 columns by 3 rows,** 18 apps a page, as OpenPeak's own home screen had (O2's had 5×3).
 - **Cells are 128×140,** with 16 px side margins and 10 px above the first row. The whole
   cell takes the touch.
-- **Icons are 88×88** with 18 px corners, 10 px from the top of the cell.
+- **Icons are 88×88** with 18 px corners, 10 px from the top of the cell: a white glyph, 40 px,
+  on the app's colour. Glyphs are Lucide's (line icons, ISC licence), the ones listed in
+  `src/icons.txt`; an app names one with `icon=`. Without one, it gets up to two letters.
 - **Labels** start 6 px below the icon: 16 px text, centred, up to two lines (36 px), ending in "..."
   beyond that.
 - **A running app** has a 12 px dot on its icon's top-right corner: green with a window,
@@ -229,8 +231,8 @@ the long-press sheet, the Restart and Switch off questions, and the calibration 
 
 ## Still to settle
 
-- **Icon artwork** for apps that bring their own (an 88×88 image in the manifest?), alongside
-  the glyph tiles.
+- **Icon artwork** for apps that bring their own (an 88×88 PNG, its corners rounded as it's
+  loaded?), alongside the glyph tiles.
 - **Light or dark,** and whether the look follows the time of day or the light sensor.
 - **Settings' layout** as it grows: sound, time zone.
 - **Fonts beyond ASCII,** for network and app names with accents or emoji: each size built

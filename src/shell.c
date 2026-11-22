@@ -12,6 +12,7 @@
 #include "lvgl/lvgl.h"
 #include "lvgl/lvgl_private.h" // lv_theme_t, to layer sprite's rules over LVGL's default theme
 #include "sprite.h"
+#include "icons_table.h"
 
 #define BAR_H 40
 // Corner radii follow one rule for every box (icons, buttons, cards, banners, highlights): in
@@ -264,23 +265,22 @@ void shell_set_visible(bool v) {
 
 /* ---- icons ---- */
 
-static const char *icon_text(const struct sprite_app *a, char *buf, size_t len) {
-	static const struct { const char *k, *sym; } map[] = {
-		{ "audio", LV_SYMBOL_AUDIO }, { "music", LV_SYMBOL_AUDIO }, { "video", LV_SYMBOL_VIDEO },
-		{ "image", LV_SYMBOL_IMAGE }, { "photo", LV_SYMBOL_IMAGE }, { "settings", LV_SYMBOL_SETTINGS },
-		{ "home", LV_SYMBOL_HOME }, { "gps", LV_SYMBOL_GPS }, { "map", LV_SYMBOL_GPS },
-		{ "wifi", LV_SYMBOL_WIFI }, { "keyboard", LV_SYMBOL_KEYBOARD }, { "terminal", LV_SYMBOL_KEYBOARD },
-		{ "eye", LV_SYMBOL_EYE_OPEN }, { "clock", LV_SYMBOL_BELL }, { "bell", LV_SYMBOL_BELL },
-		{ "list", LV_SYMBOL_LIST }, { "file", LV_SYMBOL_FILE }, { "play", LV_SYMBOL_PLAY },
-		{ "refresh", LV_SYMBOL_REFRESH }, { "touch", LV_SYMBOL_EDIT }, { "power", LV_SYMBOL_POWER },
-		{ "radio", LV_SYMBOL_VOLUME_MAX }, { "chart", LV_SYMBOL_BARS },
-	};
-	for (size_t i = 0; i < sizeof map / sizeof map[0]; i++)
-		if (!strcasecmp(a->icon, map[i].k)) return map[i].sym;
+// A tile's icon: a Lucide glyph named by the manifest's icon= (the names are in src/icons.txt,
+// made into icons_40.c by scripts/make-icons.sh), or else up to two letters from icon=, or
+// the name's first letter. buf gets the text; the font to draw it in is returned.
+extern const lv_font_t sprite_icons_40;
+
+static const lv_font_t *icon_text(const struct sprite_app *a, char *buf, size_t len) {
+	for (size_t i = 0; i < sizeof icon_names / sizeof icon_names[0]; i++)
+		if (!strcasecmp(a->icon, icon_names[i].name)) {
+			uint32_t c = icon_names[i].cp; // all in the private use area: three bytes of UTF-8
+			snprintf(buf, len, "%c%c%c", 0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
+			return &sprite_icons_40;
+		}
 	const char *src = a->icon[0] ? a->icon : a->name;
 	snprintf(buf, len, "%.2s", src);
 	if (!a->icon[0]) buf[1] = 0; // one initial from the name
-	return buf;
+	return &lv_font_montserrat_40;
 }
 
 /* ---- status bar ---- */
@@ -826,8 +826,9 @@ static lv_obj_t *make_badge(lv_obj_t *cell, const struct sprite_app *a) {
 	lv_obj_remove_flag(badge, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 	char buf[8];
 	lv_obj_t *icon = lv_label_create(badge);
-	lv_label_set_text(icon, icon_text(a, buf, sizeof buf));
-	lv_obj_set_style_text_font(icon, &lv_font_montserrat_40, 0);
+	const lv_font_t *font = icon_text(a, buf, sizeof buf);
+	lv_label_set_text(icon, buf);
+	lv_obj_set_style_text_font(icon, font, 0);
 	lv_obj_set_style_text_color(icon, lv_color_white(), 0);
 	lv_obj_center(icon);
 	return badge;

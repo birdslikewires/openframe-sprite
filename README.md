@@ -51,7 +51,9 @@ display=x11
 allow=network
 ```
 
-- `icon=`: a keyword (see `icon_text` in `src/shell.c`) or up to two letters
+- `icon=`: a glyph, by its name in [Lucide](https://lucide.dev/icons) (those listed in
+  `src/icons.txt`, which `scripts/make-icons.sh` makes into `src/icons_40.c`), or up to two
+  letters
 - `color=`: the tile's colour
 - `display=x11`: for X11 and SDL apps; leave it out for native Wayland apps
 - `handle=`: the home pill while the app shows, `normal` (the default), `faint` or `hidden`
@@ -203,6 +205,6 @@ sprite is under the GNU General Public License, version 3 or (at your option) an
 (see [LICENSE](LICENSE)). Copyright 2026 Andrew Davison.
 
 What it's built on keeps its own terms: LVGL (MIT), downloaded into `third_party/` at build
-time, and wlroots and Xwayland (MIT/X11) and SDL2 and sdl12-compat (zlib), built from Debian's
-sources by `build/stack.sh`. The package carries all of their licences. `src/lv_conf.h` is
+time; the tile glyphs, from Lucide (ISC, in `src/icons_40.c`); and wlroots and Xwayland
+(MIT/X11) and SDL2 and sdl12-compat (zlib), built from Debian's sources by `build/stack.sh`. The package carries all of their licences. `src/lv_conf.h` is
 generated from LVGL's configuration template.

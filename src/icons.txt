@@ -1,0 +1,67 @@
+# The glyphs app tiles can have: icon=<name> in a manifest. Names are Lucide's
+# (https://lucide.dev/icons, version in scripts/make-icons.sh); a line "alias = name" lets an
+# older or shorter keyword stand for one. scripts/make-icons.sh turns this list into
+# src/icons_40.c (the glyphs, as a 40 px LVGL font) and src/icons_table.h (the names). Each
+# glyph costs about 0.5 KB, so add the ones apps need rather than the whole set.
+
+# time and weather
+clock alarm-clock timer hourglass calendar calendar-days bell
+sun moon cloud cloud-sun cloud-rain snowflake wind thermometer umbrella droplets flame
+
+# radio and sound
+radio radio-tower antenna satellite satellite-dish signal music headphones podcast mic speaker
+volume-2 disc-3 guitar drum piano cassette-tape
+
+# pictures and video
+play tv video film clapperboard image images camera monitor
+
+# places, news and reading
+map map-pin globe earth compass navigation newspaper rss book-open library notebook-pen
+sticky-note clipboard-list list-todo list
+
+# people
+mail message-square phone users user contact
+
+# tools and computers
+terminal code settings wrench hammer cpu server database hard-drive download upload printer
+scan qr-code bot keyboard layout-grid
+
+# measuring and energy
+activity chart-line chart-column gauge trending-up zap plug battery-full lightbulb
+
+# home and network
+house lock key shield wifi bluetooth
+
+# games
+gamepad-2 joystick puzzle dice-5 trophy crown swords ghost target flag
+
+# money
+calculator wallet banknote piggy-bank shopping-cart receipt
+
+# travel
+train-front bus car bike plane ship sailboat rocket footprints
+
+# general
+heart star sparkles smile eye pointer hand power refresh-cw file folder info circle-help
+
+# nature
+cat dog bird fish paw-print bug leaf tree-pine flower-2 mountain tent
+
+# food and drink
+utensils coffee chef-hat cake gift wine
+
+# making and learning
+palette brush pen-tool flask-conical graduation-cap stethoscope pill dumbbell baby
+
+# aliases: sprite's first keywords, and a few obvious words
+audio = music
+photo = image
+home = house
+gps = map-pin
+touch = pointer
+refresh = refresh-cw
+chart = chart-line
+weather = cloud-sun
+game = gamepad-2
+games = gamepad-2
+help = circle-help

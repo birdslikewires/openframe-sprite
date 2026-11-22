@@ -13,5 +13,6 @@ Shipped with it, under /opt/sprite, built from Debian Trixie's sources without M
   sdl12-compat 1.2 (zlib), lib/libSDL-1.2.so.0
 Built into sprite:
   LVGL 9.3 (MIT), https://lvgl.io
+  Lucide 0.460 (ISC), https://lucide.dev: the tile icons, as glyphs in a font
 
 Their licences follow.
