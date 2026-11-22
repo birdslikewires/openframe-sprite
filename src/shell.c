@@ -31,6 +31,12 @@
 // clock in the bar lines up with them.
 #define CONTENT_X 36
 #define CONTENT_TOP 20
+// Every screen's back button (Home in Settings' rail, Settings on the Wi-Fi screen, and so
+// on) is in the same place, top left: BACK_X from the left, CONTENT_TOP below the bar, and the
+// one button height and one width (that of Settings' tabs), so it doesn't jump about from
+// screen to screen.
+#define BACK_X 16
+#define BACK_W (RAIL_W - 2 * BACK_X) // 176: the width of Settings' tabs
 #define NET_ICON 20                                         // the network icons in the bar
 #define GEAR_W 48                                           // the Settings gear's touch area
 // The home grid: 6 columns by 3 rows of apps, as OpenPeak's own home screen had. Each app has a
@@ -71,7 +77,7 @@ static lv_obj_t *dots, *gear;         // page dots and the Settings gear, in the
 static int cur_page, n_pages;
 // Settings' tabs (see build_settings)
 #define RAIL_W 208
-#define RAIL_PAD 16
+#define RAIL_PAD BACK_X
 #define TAB_H 52
 #define C_RAIL 0x0d1217   // a step between the bar and the background
 enum { TAB_NETWORK, TAB_DISPLAY, TAB_TIME, TAB_ABOUT, TAB_POWER, N_TABS };
@@ -1898,7 +1904,8 @@ static void wifi_back_clicked(lv_event_t *e) {
 static void build_wifi(lv_obj_t *scr) {
 	page_wifi = list_page(scr);
 	lv_obj_t *br = button_row(page_wifi);
-	button(br, LV_SYMBOL_LEFT "  Settings", BUTTON_MAIN, wifi_back_clicked, NULL);
+	lv_obj_set_style_translate_x(br, BACK_X - CONTENT_X, 0); // the back button's place (BACK_X)
+	lv_obj_set_width(button(br, LV_SYMBOL_LEFT "  Settings", BUTTON_MAIN, wifi_back_clicked, NULL), BACK_W);
 	wifi_rescan = button(br, LV_SYMBOL_REFRESH "  Look again", BUTTON_OTHER, wifi_rescan_clicked, NULL);
 	section(page_wifi, "NETWORKS");
 	wifi_note = lv_label_create(page_wifi);
@@ -2072,10 +2079,9 @@ static void open_entry(enum entry_mode mode, const char *ssid) {
 	// back to where it came from: Wi-Fi, or Settings for the login password
 	const char *from = mode == ENTRY_SSH ? LV_SYMBOL_LEFT "  Settings" : LV_SYMBOL_LEFT "  Wi-Fi";
 	lv_label_set_text(lv_obj_get_child(entry_back_btn, 0), from);
-	int bw = text_w(from, &lv_font_montserrat_20) + 2 * BUTTON_PAD;
-	lv_obj_set_width(entry_back_btn, bw > BUTTON_MIN_W ? bw : BUTTON_MIN_W);
+	lv_obj_set_width(entry_back_btn, BACK_W);
 	lv_obj_update_layout(entry_back_btn);
-	lv_obj_set_width(entry_title, SPRITE_W - 2 * CONTENT_X - lv_obj_get_width(entry_back_btn) - BUTTON_GAP);
+	lv_obj_set_width(entry_title, SPRITE_W - CONTENT_X - BACK_X - lv_obj_get_width(entry_back_btn) - BUTTON_GAP);
 	lv_obj_align_to(entry_title, entry_back_btn, LV_ALIGN_OUT_RIGHT_MID, BUTTON_GAP, 0);
 	show_page(page_entry);
 	if (mode == ENTRY_SSH) lv_label_set_text(bar_title, "Settings");
@@ -2093,9 +2099,10 @@ static void build_entry(lv_obj_t *scr) {
 
 	// the top row: back, and what's wanted
 	lv_obj_t *back = entry_back_btn = button(page_entry, LV_SYMBOL_LEFT "  Wi-Fi", BUTTON_MAIN, entry_back, NULL);
-	lv_obj_set_pos(back, CONTENT_X, CONTENT_TOP);
+	lv_obj_set_width(back, BACK_W);
+	lv_obj_set_pos(back, BACK_X, CONTENT_TOP);
 	lv_obj_update_layout(back);
-	int tx = CONTENT_X + lv_obj_get_width(back) + BUTTON_GAP;
+	int tx = BACK_X + lv_obj_get_width(back) + BUTTON_GAP;
 	entry_title = lv_label_create(page_entry);
 	lv_label_set_long_mode(entry_title, LV_LABEL_LONG_DOT);
 	lv_obj_set_width(entry_title, SPRITE_W - CONTENT_X - tx);
@@ -2321,6 +2328,7 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_pad_row(rail, 4, 0);
 	lv_obj_remove_flag(rail, LV_OBJ_FLAG_SCROLLABLE);
 	lv_obj_t *home = button(rail, LV_SYMBOL_LEFT "  Home", BUTTON_MAIN, back_clicked, NULL);
+	lv_obj_set_width(home, BACK_W); // the tabs' width: its arrow and colour set it apart
 	lv_obj_set_style_margin_bottom(home, HEADING_SPACE, 0);
 	settings_tab_new(rail, TAB_NETWORK, UI_ICON_WIFI, "Network");
 	settings_tab_new(rail, TAB_DISPLAY, UI_ICON_SUN, "Display");

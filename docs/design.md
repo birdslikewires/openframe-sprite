@@ -163,6 +163,11 @@ screen scrolls on its own). The groups: **Network** (Wi-Fi, Ethernet, remote acc
 **Display** (brightness, touch), **Time** (the clock; the time zone to come), **About** and **Power**.
 Sound will be a tab of its own. A status line in a panel is one line, ending in "...".
 
+**Back buttons are always in one place and one size**, top left: 16 px from the left edge
+and 20 px below the bar, 176 px wide (the width of Settings' tabs) and 48 px tall (Home in
+Settings' rail, Settings on the Wi-Fi screen, and the rest), so moving between screens
+they don't jump about. Their arrow and accent colour set them apart.
+
 **Every button has one shape** (`button()`): **48 px tall** (the smallest touch target), as
 wide as its label plus 24 px each side, and **never narrower than 160 px**. Text is 20 px.
 Buttons in a row are 20 px apart.
