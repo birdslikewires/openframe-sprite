@@ -8,6 +8,8 @@
 #   touchsim.py tap X Y
 #   touchsim.py hold X Y MS                   press and hold (for screenshots of pressed states)
 #   touchsim.py lift X1 Y1 X2 Y2 MS [END_MS]   long press, drag to X2 Y2 in MS, hold END_MS, let go
+#   touchsim.py sweep X1 Y1 X2 Y2 SECS [STROKE_MS]  hold down and go back and forth between the
+#                                                   points for SECS, a stroke each way (500 ms), then let go
 import fcntl, os, struct, sys, time
 
 UI_SET_EVBIT, UI_SET_KEYBIT, UI_SET_ABSBIT = 0x40045564, 0x40045565, 0x40045567
@@ -84,6 +86,20 @@ try:
         for _ in range(int(end / 1000 / PERIOD)):
             time.sleep(PERIOD)
             report(x2, y2)
+        time.sleep(PERIOD)
+        emit(EV_KEY, BTN_LEFT, 0)
+        emit(EV_SYN, 0, 0)
+        time.sleep(0.5)
+    elif sys.argv[1] == 'sweep':
+        x1, y1, x2, y2, secs = map(float, sys.argv[2:7])
+        stroke = (float(sys.argv[7]) if len(sys.argv) > 7 else 500) / 1000
+        report(x1, y1, 1)
+        t0 = time.monotonic()
+        while (t := time.monotonic() - t0) < secs:
+            time.sleep(PERIOD)
+            f = (t / stroke) % 2
+            f = f if f < 1 else 2 - f  # there, then back
+            report(x1 + (x2 - x1) * f, y1 + (y2 - y1) * f)
         time.sleep(PERIOD)
         emit(EV_KEY, BTN_LEFT, 0)
         emit(EV_SYN, 0, 0)
