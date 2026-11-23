@@ -1249,6 +1249,12 @@ static void drag_input(int x, int y, bool pressed, bool was_pressed) {
 				scroll_y0 = lv_obj_get_scroll_y(drag_scroll);
 				scroll_max = scroll_y0 + lv_obj_get_scroll_bottom(drag_scroll);
 				if (scroll_max < 0) scroll_max = 0;
+			} else if (abs(dx) >= PAGE_DRAG_START) {
+				// sideways, and not a page turn: LVGL's (a slider's, say) until the finger lifts.
+				// Without this a slider worked back and forth, the finger drifting up or down
+				// as it does, became a scroll as it passed where it began, and stopped dead.
+				drag = DRAG_NONE;
+				return;
 			} else {
 				return;
 			}
