@@ -116,6 +116,7 @@ static struct {
 	struct wl_event_source *release_timer; // see SPRITE_DEBOUNCE_MS
 	bool release_pending;
 	uint32_t release_button, release_time;
+	double release_x, release_y;            // where a held lift left off (SPRITE_BRIDGE_PX)
 	struct wl_event_source *lv_timer, *sigchld;
 	struct wl_listener new_output, new_input, new_xdg_toplevel, new_xdg_popup, new_xw_surface,
 		xw_ready, cursor_motion, cursor_motion_abs, cursor_button, cursor_axis, cursor_frame,
@@ -631,12 +632,18 @@ static void input_motion(double x, double y, uint32_t t) {
 	}
 }
 
+static void finish_release(double x, double y, uint32_t t, uint32_t button);
 static void input_press(double x, double y, uint32_t t, uint32_t button) {
-	if (S.release_pending) { // contact bounce: the same stroke carrying on
+	if (S.release_pending) {
 		S.release_pending = false;
 		wl_event_source_timer_update(S.release_timer, 0);
-		input_motion(x, y, t);
-		return;
+		// contact bounce: the same stroke carrying on; past the plain bounce (a slider's longer
+		// hold), only near where it left off
+		if (t - S.release_time <= SPRITE_DEBOUNCE_MS || fabs(y - S.release_y) <= SPRITE_BRIDGE_PX) {
+			input_motion(x, y, t);
+			return;
+		}
+		finish_release(S.release_x, S.release_y, S.release_time, S.release_button); // a new touch elsewhere
 	}
 	S.button_down = true;
 	if (S.fg) {
@@ -687,7 +694,9 @@ static void input_release(double x, double y, uint32_t t, uint32_t button) {
 	S.release_pending = true;
 	S.release_button = button;
 	S.release_time = t;
-	wl_event_source_timer_update(S.release_timer, SPRITE_DEBOUNCE_MS);
+	S.release_x = x;
+	S.release_y = y;
+	wl_event_source_timer_update(S.release_timer, S.gesture == G_SHELL ? shell_release_hold_ms() : SPRITE_DEBOUNCE_MS);
 }
 
 static void cursor_motion(struct wl_listener *l, void *data) {

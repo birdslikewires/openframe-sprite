@@ -4188,12 +4188,21 @@ static void build_settings(lv_obj_t *scr) {
 // rule as they're sized, so nothing made later can drift from it.
 static lv_theme_t theme;
 
+// A slider of the shell's being held: main.c then holds a lift longer before it's a release
+// (SPRITE_SLIDER_HOLD_MS), so a finger losing contact as it works it isn't letting go.
+static bool slider_held;
+static void slider_held_cb(lv_event_t *e) { slider_held = lv_event_get_user_data(e) != NULL; }
+uint32_t shell_release_hold_ms(void) { return slider_held ? SPRITE_SLIDER_HOLD_MS : SPRITE_DEBOUNCE_MS; }
+
 static void theme_apply(lv_theme_t *th, lv_obj_t *obj) {
 	if (lv_obj_check_type(obj, &lv_button_class) || lv_obj_check_type(obj, &lv_msgbox_class))
 		lv_obj_add_event_cb(obj, radius_on_size, LV_EVENT_SIZE_CHANGED, NULL);
 	// A slider's knobs white, as a switch's is, so they stand out from the bar, and a known
 	// size past it (SLIDER_KNOB_PAD), so what holds a slider can leave room for them.
 	if (lv_obj_check_type(obj, &lv_slider_class)) {
+		lv_obj_add_event_cb(obj, slider_held_cb, LV_EVENT_PRESSED, (void *)1);
+		lv_obj_add_event_cb(obj, slider_held_cb, LV_EVENT_RELEASED, NULL);
+		lv_obj_add_event_cb(obj, slider_held_cb, LV_EVENT_PRESS_LOST, NULL);
 		static lv_style_t knob;
 		if (!knob.prop_cnt) {
 			lv_style_init(&knob);

@@ -46,6 +46,12 @@
 // a release and then a new press 28-56 ms later, further along. A release is held this long,
 // and a press within it is taken as the same finger still moving.
 #define SPRITE_DEBOUNCE_MS 64
+// ... and while one of the shell's sliders is held, longer: a finger working one loses contact
+// for up to about a third of a second at a time, several times a second (traced on a unit).
+// Past SPRITE_DEBOUNCE_MS, a press counts as the same stroke only within SPRITE_BRIDGE_PX up
+// or down of where it left off; anywhere else it's a new touch, the slider let go first.
+#define SPRITE_SLIDER_HOLD_MS 400
+#define SPRITE_BRIDGE_PX 60
 
 struct sprite_view;
 
@@ -102,6 +108,7 @@ struct wl_event_loop *sprite_event_loop(void);
 // shell.c
 void shell_init(void *pixels);                // pixels: SPRITE_W x SPRITE_H XRGB8888
 void shell_pointer(int x, int y, bool pressed);
+uint32_t shell_release_hold_ms(void);        // how long a lift is held before it's a release
 void shell_apps_changed(void);                // running state or list changed
 void shell_set_visible(bool visible);
 void shell_set_bar_app(struct sprite_app *app); // an app is in front below the bar (NULL: none)
