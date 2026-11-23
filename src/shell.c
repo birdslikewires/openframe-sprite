@@ -1698,11 +1698,13 @@ static void bl_now_tick(lv_timer_t *t) {
 // what it should be as it's let go (the limits saved, or the level set).
 //
 // Sent only as the hardware's level (one of its few steps) changes, and at most every
-// BL_SEND_MS, always ending with the latest: a finger moves the slider far more often than
-// that, and of-backlight's service, in bash, takes a few milliseconds over each. Sent at every
-// change, they queued faster than it could take them, the light lagging further behind for
-// as long as the slider was held.
-#define BL_SEND_MS 40
+// BL_SEND_MS, always ending with the latest: the slider moves at every frame while it's
+// dragged, and of-backlight's service, in bash, takes a few milliseconds over each, on a CPU
+// Sprite is busy drawing with. Sent at every change, they queued faster than it could take
+// them, the light lagging further behind for as long as the slider was held. (The service
+// also skips any it's fallen behind on, showing only the latest.) Ten a second is plenty to
+// see the brightness by.
+#define BL_SEND_MS 100
 static int bl_shown = -1, bl_want = -1;  // the hardware level last sent; the level last asked for
 static uint32_t bl_sent_at;
 static lv_timer_t *bl_send_timer;        // the latest, when it came too soon after the last
