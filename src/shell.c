@@ -810,6 +810,7 @@ void shell_notice(const char *text) {
 
 static void wifi_refresh(void);
 static void ssh_refresh(void);
+static void name_refresh(void);
 static void upd_refresh(void);
 static void eth_show(void);
 static void netinfo_show(void);
@@ -823,6 +824,7 @@ static void refresh_settings(lv_timer_t *t) {
 	if (!showing(page_settings)) return;
 	if (wifi_status_label) wifi_refresh();
 	if (!t) ssh_refresh(); // as Settings opens: it changes only when it's set
+	if (!t) name_refresh();
 	if (settings_tab == TAB_UPDATES) upd_refresh();
 	eth_show();
 	net_notes_show();
@@ -2045,7 +2047,7 @@ static lv_obj_t *list_page(lv_obj_t *scr) {
 #define WIFI_TROUBLE_AFTER_MS 6000 // ignore "trouble" this soon: it may be the old network's
 #define WIFI_RESCAN_MS 30000       // a list older than this is looked for again on opening
 
-enum entry_mode { ENTRY_PASSWORD, ENTRY_OPEN_PASSWORD, ENTRY_NAME, ENTRY_SSH };
+enum entry_mode { ENTRY_PASSWORD, ENTRY_OPEN_PASSWORD, ENTRY_NAME, ENTRY_SSH, ENTRY_DEVNAME };
 static void open_entry(enum entry_mode mode, const char *ssid);
 
 static lv_obj_t *wifi_detail_label, *wifi_forget_btn;     // in Settings (and wifi_status_label)
@@ -2436,6 +2438,7 @@ static void entry_validate(void) {
 	bool ok = entry_mode == ENTRY_NAME ? n >= 1 && n <= WIFI_SSID_MAX
 					  : (n >= 8 && n <= 64) || (entry_mode == ENTRY_OPEN_PASSWORD && n == 0);
 	if (entry_mode == ENTRY_SSH) ok = n >= 8 && n <= 64;
+	if (entry_mode == ENTRY_DEVNAME) ok = n <= 64; // none: openframe
 	if (ok) lv_obj_remove_state(entry_go, LV_STATE_DISABLED);
 	else lv_obj_add_state(entry_go, LV_STATE_DISABLED);
 }
@@ -2478,8 +2481,9 @@ static void entry_clear(void) {
 	if (entry_ta) lv_textarea_set_text(entry_ta, "");
 }
 
-static void entry_back(lv_event_t *e) { show_page(entry_mode == ENTRY_SSH ? page_settings : page_wifi); }
+static void entry_back(lv_event_t *e) { show_page(entry_mode == ENTRY_SSH || entry_mode == ENTRY_DEVNAME ? page_settings : page_wifi); }
 static void ssh_set_now(const char *password);
+static void name_set_now(const char *name);
 
 static void entry_go_clicked(lv_event_t *e) {
 	if (lv_obj_has_state(entry_go, LV_STATE_DISABLED)) return;
@@ -2490,6 +2494,7 @@ static void entry_go_clicked(lv_event_t *e) {
 		return;
 	}
 	if (entry_mode == ENTRY_SSH) ssh_set_now(lv_textarea_get_text(entry_ta));
+	else if (entry_mode == ENTRY_DEVNAME) name_set_now(lv_textarea_get_text(entry_ta));
 	else wifi_join_now(entry_ssid, lv_textarea_get_text(entry_ta)); // leaving the screen clears it
 }
 
@@ -2505,31 +2510,37 @@ static void open_entry(enum entry_mode mode, const char *ssid) {
 	char t[80];
 	if (mode == ENTRY_NAME) snprintf(t, sizeof t, "The network's name");
 	else if (mode == ENTRY_SSH) snprintf(t, sizeof t, "A password for logging in");
+	else if (mode == ENTRY_DEVNAME) snprintf(t, sizeof t, "A name for this OpenFrame");
 	else snprintf(t, sizeof t, "Password for %s", ssid);
 	lv_label_set_text(entry_title, t);
 	lv_label_set_text(entry_hint, mode == ENTRY_NAME ? "Exactly as it's written, capitals and all"
 				      : mode == ENTRY_OPEN_PASSWORD ? "8 to 63 characters, or none for an open network"
 				      : mode == ENTRY_SSH ? "For logging in as \"of\" over SSH: 8 to 64 characters"
+				      : mode == ENTRY_DEVNAME ? "Any name, such as Kitchen. None for openframe"
 								    : "8 to 63 characters");
-	lv_label_set_text(lv_obj_get_child(entry_go, 0), mode == ENTRY_NAME ? "Next" : mode == ENTRY_SSH ? "Set" : "Connect");
+	bool plain = mode == ENTRY_NAME || mode == ENTRY_DEVNAME; // what's typed is shown
+	lv_label_set_text(lv_obj_get_child(entry_go, 0), mode == ENTRY_NAME ? "Next" : mode == ENTRY_SSH ? "Set"
+							 : mode == ENTRY_DEVNAME ? "Save" : "Connect");
 	lv_textarea_set_max_length(entry_ta, mode == ENTRY_NAME ? WIFI_SSID_MAX : 64);
-	lv_textarea_set_password_mode(entry_ta, mode != ENTRY_NAME);
-	if (mode == ENTRY_NAME) lv_obj_add_flag(entry_eye, LV_OBJ_FLAG_HIDDEN);
+	lv_textarea_set_password_mode(entry_ta, !plain);
+	if (plain) lv_obj_add_flag(entry_eye, LV_OBJ_FLAG_HIDDEN);
 	else lv_obj_remove_flag(entry_eye, LV_OBJ_FLAG_HIDDEN);
 	lv_label_set_text(lv_obj_get_child(entry_eye, 0), LV_SYMBOL_EYE_OPEN);
 	kb_shift = SHIFT_OFF;
 	kb_syms = false;
 	kb_layout();
 	// back to where it came from: Wi-Fi, or Settings for the login password
-	const char *from = mode == ENTRY_SSH ? LV_SYMBOL_LEFT "  Settings" : LV_SYMBOL_LEFT "  Wi-Fi";
+	bool from_settings = mode == ENTRY_SSH || mode == ENTRY_DEVNAME;
+	const char *from = from_settings ? LV_SYMBOL_LEFT "  Settings" : LV_SYMBOL_LEFT "  Wi-Fi";
 	lv_label_set_text(lv_obj_get_child(entry_back_btn, 0), from);
 	lv_obj_set_width(entry_back_btn, BACK_W);
 	lv_obj_update_layout(entry_back_btn);
 	lv_obj_set_width(entry_title, SPRITE_W - CONTENT_X - BACK_X - lv_obj_get_width(entry_back_btn) - BUTTON_GAP);
 	lv_obj_align_to(entry_title, entry_back_btn, LV_ALIGN_OUT_RIGHT_MID, BUTTON_GAP, 0);
 	show_page(page_entry);
-	if (mode == ENTRY_SSH) lv_label_set_text(bar_title, "Settings");
+	if (from_settings) lv_label_set_text(bar_title, "Settings");
 	entry_clear();
+	if (mode == ENTRY_DEVNAME) lv_textarea_set_text(entry_ta, ssid); // the name it has, to change
 	entry_validate();
 }
 
@@ -2853,6 +2864,45 @@ static void ssh_off_done(char *reply, void *data) {
 static void ssh_off_go(lv_event_t *e) {
 	dialog_close();
 	helper_request("ssh-off\n", ssh_off_done, NULL);
+}
+
+/* ---- the OpenFrame's name: name.txt on OF-BOOT, through sprite-helper's name-set ---- */
+
+static lv_obj_t *name_label, *name_host_label;
+
+static void name_refresh(void) {
+	if (!name_label) return;
+	char name[96], host[72], t[96];
+	sysinfo_name(name, sizeof name, host, sizeof host);
+	set_text(name_label, name);
+	snprintf(t, sizeof t, "%s.local", host);
+	set_text(name_host_label, t);
+}
+
+static void name_set_done(char *reply, void *data) {
+	const char *st = helper_reply_status(reply);
+	if (strcmp(st, "ok")) {
+		lv_obj_t *card = dialog_open(NULL, "The name wasn't changed", reason_text(st), true);
+		dialog_button(card, "OK", BUTTON_MAIN, dialog_cancel, NULL);
+	} else show_toast("Renamed", 2500);
+	name_refresh();
+}
+
+static void name_set_now(const char *name) {
+	char req[96 + 16], n[72];
+	// spaces at either end are no part of a name
+	while (*name == ' ') name++;
+	snprintf(n, sizeof n, "%s", name);
+	for (size_t l = strlen(n); l && n[l - 1] == ' '; l--) n[l - 1] = 0;
+	snprintf(req, sizeof req, "name-set\n%s\n", n);
+	helper_request(req, name_set_done, NULL);
+	show_page(page_settings);
+}
+
+static void name_clicked(lv_event_t *e) {
+	char name[96], host[72];
+	sysinfo_name(name, sizeof name, host, sizeof host);
+	open_entry(ENTRY_DEVNAME, name);
 }
 
 static void ssh_off_clicked(lv_event_t *e) {
@@ -3710,6 +3760,26 @@ static void build_settings(lv_obj_t *scr) {
 
 	// About
 	lv_obj_t *pa = settings_panel_new(TAB_ABOUT);
+	// Its name (name.txt), and what other computers on the network can reach it as
+	section(pa, "NAME");
+	lv_obj_t *nr = lv_obj_create(pa);
+	lv_obj_remove_style_all(nr);
+	lv_obj_set_flex_flow(nr, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(nr, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_column(nr, 20, 0);
+	lv_obj_remove_flag(nr, LV_OBJ_FLAG_SCROLLABLE);
+	name_label = lv_label_create(nr);
+	lv_label_set_text(name_label, "");
+	lv_label_set_long_mode(name_label, LV_LABEL_LONG_DOT);
+	lv_obj_set_style_text_color(name_label, lv_color_hex(C_TEXT), 0);
+	lv_obj_set_flex_grow(name_label, 1);
+	lv_obj_set_height(name_label, lv_font_get_line_height(lv_obj_get_style_text_font(name_label, 0)));
+	name_host_label = lv_label_create(nr);
+	lv_label_set_text(name_host_label, "");
+	lv_obj_set_style_text_color(name_host_label, lv_color_hex(C_DIM), 0);
+	lv_obj_set_style_text_font(name_host_label, &lv_font_montserrat_16, 0);
+	row_pressable(nr, name_clicked, NULL);
+	name_refresh();
 	section(pa, "ABOUT");
 	about_label = lv_label_create(pa);
 	lv_obj_set_style_text_font(about_label, &lv_font_montserrat_20, 0);

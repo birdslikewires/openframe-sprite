@@ -387,6 +387,33 @@ void sysinfo_helper(const char *line) {
 	if (pid > 0) waitpid(pid, NULL, 0);
 }
 
+// The unit's name as its owner wrote it (the pretty hostname in /etc/machine-info, which
+// openframe-scripts' name-settings keeps from name.txt), or the hostname without one; and
+// the hostname.
+void sysinfo_name(char *name, size_t n, char *host, size_t hn) {
+	if (gethostname(host, hn) != 0) snprintf(host, hn, "openframe");
+	host[hn - 1] = 0;
+	snprintf(name, n, "%s", host);
+	FILE *f = fopen("/etc/machine-info", "r");
+	if (!f) return;
+	char line[256];
+	while (fgets(line, sizeof line, f)) {
+		if (strncmp(line, "PRETTY_HOSTNAME=", 16)) continue;
+		// "..." with \ escapes (as name-settings writes it), or bare
+		const char *v = line + 16;
+		bool q = *v == '"';
+		if (q) v++;
+		size_t o = 0;
+		for (; *v && *v != '\n' && o + 1 < n; v++) {
+			if (q && *v == '"') break;
+			if (q && *v == '\\' && v[1]) v++;
+			name[o++] = *v;
+		}
+		if (o) name[o] = 0;
+	}
+	fclose(f);
+}
+
 // A request straight into of-backlight's service (its control pipe, which anyone may write
 // and it holds open): many a second while a slider's dragged, with no process started for
 // each. Without the service there's no pipe, and nothing happens.
@@ -406,8 +433,6 @@ void sysinfo_set_backlight(const char *arg) {
 }
 
 void sysinfo_summary(char *buf, size_t len) {
-	char host[64] = "?";
-	gethostname(host, sizeof host);
 	struct utsname u;
 	uname(&u);
 	int up = 0;
@@ -434,7 +459,6 @@ void sysinfo_summary(char *buf, size_t len) {
 		snprintf(wifi, sizeof wifi, "%s, signal %s", wstate, strength[wifi_level(n.wifi_dbm)]);
 	else snprintf(wifi, sizeof wifi, "%s", wstate);
 	snprintf(buf, len,
-		 "Name: %s\n"
 		 "Ethernet: %s\n"
 		 "Wi-Fi: %s\n"
 		 "Memory: %ld MB free of %ld MB\n"
@@ -442,7 +466,6 @@ void sysinfo_summary(char *buf, size_t len) {
 		 "Up: %dh %02dm\n"
 		 "Kernel: %s\n"
 		 "Sprite: %s%s",
-		 host,
 		 n.eth_ip[0] ? n.eth_ip : n.eth_up ? "connected, no address" : "not connected",
 		 wifi, mem_avail / 1024, mem_total / 1024, root_free, up / 3600, (up / 60) % 60, u.release,
 		 SPRITE_VERSION,

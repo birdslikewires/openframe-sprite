@@ -36,6 +36,11 @@
 ##    ssh-password          set the password of "of": the request line, then a line with the
 ##                            password (8 to 64 characters, no control characters), and start
 ##                            the SSH server, which images keep off until someone can log in
+##    name-set              the OpenFrame's name: the request line, then a line with the name
+##                            (up to 64 characters, any but control characters; empty for
+##                            openframe), into settings/name.txt, which openframe-scripts'
+##                            name-settings then applies (the hostname made from it, and the
+##                            name kept as written)
 ##    ssh-off               no way in over SSH: "of" loses its password and its keys, root its
 ##                            keys, ssh.txt its key= lines (or they'd come back at the next
 ##                            start), and the SSH server stops, ending every SSH session. A
@@ -80,6 +85,7 @@ SETTINGS="/boot/settings/sprite.txt"
 TEMPLATE="/opt/sprite/share/sprite/sprite.txt"
 WIFITXT="/boot/settings/wifi.txt"
 SSHTXT="/boot/settings/ssh.txt"
+NAMETXT="/boot/settings/name.txt"
 WIFITEMPLATE="/usr/lib/openframe/settings/wifi.txt"
 WPACTRL="/run/wpa_supplicant"          # where netplan's wpa_supplicant listens
 SCANCTRL="/run/sprite-helper-wpa"      # ... and ours, when we start one to scan
@@ -402,6 +408,31 @@ case "$CMD" in
 		unset PASS
 		# The SSH server waits for a way in (openframe-linux's ssh.service.d): there is one now.
 		systemctl --no-block start ssh.service 2>/dev/null
+		answer ok
+		;;
+	name-set)
+		IFS= read -r -t 5 NAME || answer "error: no name"
+		[ -x /usr/lib/openframe/name-settings ] || answer "error: this system can't be named until it's updated"
+		export LC_ALL=C.UTF-8
+		(( ${#NAME} <= 64 )) || answer "error: the name must be 64 characters or fewer"
+		[[ "$NAME" =~ [[:cntrl:]] ]] && answer "error: control characters aren't allowed"
+		NEW=$(mktemp) || answer "error: no temporary file"
+		trap 'rm -f "$NEW"' EXIT
+		if [ -f "$NAMETXT" ]; then cp "$NAMETXT" "$NEW"
+		elif [ -f /usr/lib/openframe/settings/name.txt ]; then cp /usr/lib/openframe/settings/name.txt "$NEW"
+		fi
+		# name= in double quotes (name-settings takes one pair off), in place of the first, the
+		# rest of them gone; the value reaches awk through the environment, backslashes intact
+		N="$NAME" awk '
+			function line(v) { return v == "" ? "name=" : "name=\"" v "\"" }
+			index($0, "=") && $0 !~ /^[[:space:]]*#/ {
+				k = substr($0, 1, index($0, "=") - 1); gsub(/[[:space:]]/, "", k)
+				if (tolower(k) == "name") { if (!done) print line(ENVIRON["N"]); done = 1; next }
+			}
+			{ print }
+			END { if (!done) print line(ENVIRON["N"]) }' "$NEW" > "$NEW.2" && mv "$NEW.2" "$NEW" || answer "error: preparing name.txt failed"
+		boot_write "$NEW" "$NAMETXT"
+		/usr/lib/openframe/name-settings >/dev/null 2>&1 || answer "error: the name couldn't be applied"
 		answer ok
 		;;
 	ssh-off)

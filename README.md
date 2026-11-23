@@ -51,7 +51,7 @@ The ground rules for how it looks, feels and performs are in [docs/design.md](do
   `off_below`; and touch calibration), Time (the clock's format), Updates (openframe-scripts'
   automatic updates: what they're doing, with progress, what's waiting, OpenBeak's first, each
   with its "What's new", checking, updating or restarting now, and the time of day they
-  install), About (the system, what the hourly ping sends, and Erase everything, which puts the unit back as it came for its next owner: openframe-scripts' `of-reset`) and
+  install), About (its name, as written and as `<name>.local` on the network, in openframe-scripts' `settings/name.txt`; the system, what the hourly ping sends, and Erase everything, which puts the unit back as it came for its next owner: openframe-scripts' `of-reset`) and
   Power (Restart and Switch off).
 
 ## Apps
@@ -198,7 +198,7 @@ for each connection to `/run/sprite-helper.sock` (group `sprite`). It takes one 
 validates it: `set <key> <value>` for `startup`, `calibration`, `clock` and `seconds` in the
 settings file, `reboot` and `poweroff`, for Wi-Fi `wifi-scan`, `wifi-status`, `wifi-join`
 and `wifi-forget` (see Wi-Fi below), `app-start` and `app-stop` for apps (see Sandboxes
-above), and `ssh-status`, `ssh-password` and `ssh-off` for the login password (never giving out the
+above), and `ssh-status`, `ssh-password` and `ssh-off` for the login password, `name-set` for the name (never giving out the
 password or its hash). The header of `system/sprite-helper` describes each.
 
 It also expects the touchscreen calibration in `spike/touch/` to be installed.
