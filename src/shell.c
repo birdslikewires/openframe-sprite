@@ -1261,7 +1261,8 @@ static void update_dots(void) {
 // Each app has a place: a slot on one of up to MAX_PAGES pages, kept in
 // /var/lib/sprite/layout (layout_path) as "<slot> <app id>" lines (slot = page * PER_PAGE + cell).
 // Apps the file doesn't place (new ones) take the first free slots. A long press lifts a
-// tile: let go where it is and the sheet opens; drag it and it follows the finger, the slot
+// tile: keep holding it still (SHEET_HOLD_MS), or let go where it is, and the sheet opens;
+// drag it and it follows the finger, the slot
 // under it lit, and dropping it there swaps it with whatever was there. Held at a side
 // edge, the pages turn; while a tile is up there's an empty page after the last (up to
 // MAX_PAGES), to start a new one.
@@ -1269,6 +1270,7 @@ static void update_dots(void) {
 #define MAX_SLOTS (MAX_PAGES * PER_PAGE)
 #define EDGE_W 40                  // px at either side where a held tile turns the page
 #define EDGE_HOLD_MS 600
+#define SHEET_HOLD_MS 500          // a lifted tile held still this long opens its sheet
 static struct sprite_app *slots[MAX_SLOTS];
 static struct { char id[64]; int slot; } placed[MAX_SLOTS];
 static int n_placed = -1;          // -1: the file hasn't been read yet
@@ -1277,6 +1279,7 @@ static lv_obj_t *lift_tile, *floater, *marker;
 static struct sprite_app *lift_app;
 static int lift_from, lift_to, lift_dx, lift_dy, edge_dir;
 static bool lift_moved;
+static lv_timer_t *sheet_timer;    // SHEET_HOLD_MS after a lift, unless it moves first
 static lv_timer_t *edge_timer;
 
 // In sprite's state directory (/var/lib/sprite, StateDirectory= in sprite.service), or, run
@@ -1402,6 +1405,15 @@ static void edge_turn(lv_timer_t *t) {
 	mark_slot(slot_at(ptr_x, ptr_y)); // the cell at the edge the finger's on, on the new page
 }
 
+static void tile_drop(bool place);
+
+// Held still since the lift: the sheet, with the finger still down (lifting it then does
+// nothing: the touch is already LVGL's no more, and the drag is over).
+static void tile_still(lv_timer_t *t) {
+	sheet_timer = NULL;
+	if (drag == DRAG_TILE && !lift_moved) tile_drop(true);
+}
+
 static void tile_lift(lv_obj_t *tile, struct sprite_app *a) {
 	if (drag == DRAG_TILE || sheet) return;
 	lift_from = -1;
@@ -1440,6 +1452,8 @@ static void tile_lift(lv_obj_t *tile, struct sprite_app *a) {
 		new_page(n_pages++);
 		lv_obj_set_width(strip, n_pages * SPRITE_W);
 	}
+	sheet_timer = lv_timer_create(tile_still, SHEET_HOLD_MS, NULL);
+	lv_timer_set_repeat_count(sheet_timer, 1);
 	lv_obj_remove_state(tile, LV_STATE_PRESSED);
 	lv_indev_reset(indev, NULL); // the drag is ours now: nothing more for LVGL from this touch
 	lv_indev_wait_release(indev);
@@ -1452,6 +1466,7 @@ static void tile_drop(bool place) {
 	if (drag != DRAG_TILE) return;
 	drag = DRAG_NONE;
 	if (edge_timer) { lv_timer_delete(edge_timer); edge_timer = NULL; }
+	if (sheet_timer) { lv_timer_delete(sheet_timer); sheet_timer = NULL; }
 	lv_obj_delete(floater);
 	floater = marker = NULL; // the marker goes with the grid, rebuilt below
 	struct sprite_app *a = lift_app;
@@ -1472,6 +1487,7 @@ static void tile_drop(bool place) {
 static void tile_follow(int x, int y) {
 	if (!lift_moved && abs(x - drag_x0) < PAGE_DRAG_START && abs(y - drag_y0) < PAGE_DRAG_START) return;
 	lift_moved = true;
+	if (sheet_timer) { lv_timer_delete(sheet_timer); sheet_timer = NULL; } // a drag, not the sheet
 	lv_obj_set_pos(floater, x - lift_dx, y - lift_dy);
 	int dir = x < EDGE_W ? -1 : x >= SPRITE_W - EDGE_W ? 1 : 0;
 	if (dir != edge_dir || !dir) {

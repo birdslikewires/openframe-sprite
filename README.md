@@ -24,7 +24,8 @@ The ground rules for how it looks, feels and performs are in [docs/design.md](do
 - **Going home:** while an app shows, a small pill sits at the bottom centre of the screen.
   Touch it, or swipe up from it, to go home. With a USB keyboard, Alt+Esc also goes home, and
   Ctrl+Alt+Backspace quits sprite.
-- **Long press on a tile** lifts it. Let go without moving and a sheet opens with Open, Close
+- **Long press on a tile** lifts it. Keep holding it still for half a second more, or let go
+  without moving, and a sheet opens with Open, Close
   (when the app is running) and **Open at startup**. Close asks the app's window to close,
   then stops its sandbox 2 s later if it's still running.
 - **Arranging:** a lifted tile follows the finger, and dropping it on a cell puts it there,
@@ -239,6 +240,11 @@ can still be joined.
 - Letting apps change the home pill while they run (a small Wayland protocol), and screen
   blanking
 - Sound and time zone in Settings
+- Automatic brightness as a range: a two-ended slider for its lowest and highest, and a
+  switch for whether the screen goes off in the dark or stays at its dimmest (what
+  `backlight.txt` holds, in Settings)
+- Apps choosing full screen (the pill as the app asks) or the bar kept above them, so a
+  small app like a calculator feels part of Sprite rather than replacing it
 - The app store: an index repository of app manifests, added to by pull request, with apps
   as i386 `.deb` packages
 - A CPU cap on apps in the background (`CPUQuota=`, which the kernel can do now)
