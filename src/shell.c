@@ -3738,7 +3738,11 @@ static void upd_status_done(char *reply, void *data) {
 	}
 	upd_busy(!idle);
 	if (!idle) return;
-	show_if(upd_now_btn, pending > 0 && !needs_restart);
+	// After an update that didn't work, its button again, to try again: with nothing waiting
+	// too, as when an earlier update was left half done (of-update finishes it), so it can
+	// always be put right from here, without a command line.
+	show_if(upd_now_btn, (pending > 0 || failed) && !needs_restart);
+	set_text(lv_obj_get_child(upd_now_btn, 0), failed ? LV_SYMBOL_REFRESH "  Try again" : LV_SYMBOL_DOWNLOAD "  Update now");
 	show_if(upd_restart_btn, needs_restart);
 	show_if(upd_check_btn, true);
 }
