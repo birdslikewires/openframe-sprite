@@ -1567,13 +1567,24 @@ static void confirm_cb(lv_event_t *e) {
 
 static void dialog_cancel(lv_event_t *e) { dialog_close(); }
 
+// A helper's "error: reason" as a sentence to show on its own: a capital, and a full stop.
+static const char *reason_text(const char *st) {
+	static char buf[256];
+	const char *r = strncmp(st, "error: ", 7) ? st : st + 7;
+	snprintf(buf, sizeof buf, "%s", r);
+	size_t n = strlen(buf);
+	if (n) buf[0] = (char)toupper((unsigned char)buf[0]);
+	if (n && n < sizeof buf - 1 && !strchr(".!?", buf[n - 1])) { buf[n] = '.'; buf[n + 1] = 0; }
+	return buf;
+}
+
 /* ---- erasing it for its next owner (sprite-helper factory-reset, of-reset) ---- */
 
 static void reset_started(char *reply, void *data) {
 	const char *st = helper_reply_status(reply);
 	if (!strcmp(st, "ok")) return; // it restarts when it's done; the dialog stays till then
 	dialog_close();
-	lv_obj_t *card = dialog_open(NULL, "It wasn't erased", strncmp(st, "error: ", 7) ? st : st + 7, true);
+	lv_obj_t *card = dialog_open(NULL, "It wasn't erased", reason_text(st), true);
 	dialog_button(card, "OK", BUTTON_MAIN, dialog_cancel, NULL);
 }
 
@@ -1948,7 +1959,7 @@ static void wifi_joined(const char *error, void *data) {
 	wifi_watch_stop();
 	char t[80];
 	snprintf(t, sizeof t, "Couldn't join %s", wifi_target);
-	lv_obj_t *card = dialog_open(NULL, t, !strncmp(error, "error: ", 7) ? error + 7 : error, true);
+	lv_obj_t *card = dialog_open(NULL, t, reason_text(error), true);
 	dialog_button(card, "Close", BUTTON_OTHER, dialog_cancel, NULL);
 	wifi_refresh();
 }
@@ -1971,7 +1982,7 @@ static void wifi_join_now(const char *ssid, const char *password) {
 
 static void wifi_forgot(const char *error, void *data) {
 	if (error) {
-		lv_obj_t *card = dialog_open(NULL, "Couldn't forget the network", !strncmp(error, "error: ", 7) ? error + 7 : error, true);
+		lv_obj_t *card = dialog_open(NULL, "Couldn't forget the network", reason_text(error), true);
 		dialog_button(card, "Close", BUTTON_OTHER, dialog_cancel, NULL);
 	}
 	wifi_refresh();
@@ -2629,7 +2640,7 @@ static void ssh_refresh(void) {
 static void ssh_set_done(char *reply, void *data) {
 	const char *st = helper_reply_status(reply);
 	if (strcmp(st, "ok")) {
-		lv_obj_t *card = dialog_open(NULL, "The password wasn't set", strncmp(st, "error: ", 7) ? st : st + 7, true);
+		lv_obj_t *card = dialog_open(NULL, "The password wasn't set", reason_text(st), true);
 		dialog_button(card, "OK", BUTTON_MAIN, dialog_cancel, NULL);
 		return;
 	}
@@ -3014,7 +3025,7 @@ static void upd_refresh(void) {
 static void upd_started(char *reply, void *data) {
 	const char *st = helper_reply_status(reply);
 	if (strcmp(st, "ok")) {
-		lv_obj_t *card = dialog_open(NULL, "Couldn't start", strncmp(st, "error: ", 7) ? st : st + 7, true);
+		lv_obj_t *card = dialog_open(NULL, "Couldn't start", reason_text(st), true);
 		dialog_button(card, "OK", BUTTON_MAIN, dialog_cancel, NULL);
 	}
 	upd_refresh();
