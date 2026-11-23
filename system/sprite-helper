@@ -46,6 +46,9 @@
 ##    update-news           what's new in OpenBeak's waiting updates, as of-update news prints
 ##                            it (part= and news= lines), then "ok"
 ##    after-update <what>   reboot or poweroff once the update being installed has finished
+##    factory-reset         erase the OpenFrame for its next owner and restart it
+##                            (openframe-scripts' of-reset --yes), answering at once: it carries
+##                            on by itself, as a service of its own, while Sprite waits
 ##
 ##  Wi-Fi is set up the OpenFrame way (see of-netplan): settings/wifi.txt on the boot volume,
 ##  editable from any computer, turned into a netplan configuration. Only name= and
@@ -408,6 +411,12 @@ case "$CMD" in
 	update-news)
 		[ -x /usr/local/sbin/of-update ] || answer "error: this system doesn't update itself"
 		/usr/local/sbin/of-update news
+		answer ok
+		;;
+	factory-reset)
+		[ -x /usr/local/sbin/of-reset ] || answer "error: this system can't be erased from here (its openframe-scripts is too old)"
+		systemd-run --no-block --quiet --collect --unit=of-reset /usr/local/sbin/of-reset --yes >/dev/null 2>&1 ||
+			answer "error: the erase didn't start"
 		answer ok
 		;;
 	after-update)

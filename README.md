@@ -46,7 +46,7 @@ The ground rules for how it looks, feels and performs are in [docs/design.md](do
   has the old shared one), Display (brightness, through `of-backlight`, including automatic
   brightness; and touch calibration), Time (the clock's format), Updates (openframe-scripts'
   automatic updates: what they're doing, with progress, what's waiting, OpenBeak's first, each
-  with its "What's new", and checking, updating or restarting now), About (the system, and what the hourly ping sends) and
+  with its "What's new", and checking, updating or restarting now), About (the system, what the hourly ping sends, and Erase everything, which puts the unit back as it came for its next owner: openframe-scripts' `of-reset`) and
   Power (Restart and Switch off).
 
 ## Apps

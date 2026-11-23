@@ -1567,6 +1567,40 @@ static void confirm_cb(lv_event_t *e) {
 
 static void dialog_cancel(lv_event_t *e) { dialog_close(); }
 
+/* ---- erasing it for its next owner (sprite-helper factory-reset, of-reset) ---- */
+
+static void reset_started(char *reply, void *data) {
+	const char *st = helper_reply_status(reply);
+	if (!strcmp(st, "ok")) return; // it restarts when it's done; the dialog stays till then
+	dialog_close();
+	lv_obj_t *card = dialog_open(NULL, "It wasn't erased", strncmp(st, "error: ", 7) ? st : st + 7, true);
+	dialog_button(card, "OK", BUTTON_MAIN, dialog_cancel, NULL);
+}
+
+static void reset_go(lv_event_t *e) {
+	dialog_close();
+	// nothing to press, and no tapping it away: the OpenFrame restarts when it's done
+	dialog_open(NULL, "Erasing...", "This takes a few minutes. The OpenFrame restarts by itself when it's done. "
+				      "Don't switch it off.", false);
+	helper_request("factory-reset\n", reset_started, NULL);
+}
+
+static void reset_sure(lv_event_t *e) {
+	dialog_close();
+	lv_obj_t *card = dialog_open(NULL, "Are you sure?", "Everything on this OpenFrame is erased. This can't be undone.", true);
+	dialog_button(card, LV_SYMBOL_TRASH "  Erase everything", BUTTON_DANGER, reset_go, NULL);
+	dialog_button(card, "Cancel", BUTTON_OTHER, dialog_cancel, NULL);
+}
+
+static void reset_ask(lv_event_t *e) {
+	lv_obj_t *card = dialog_open(NULL, "Erase this OpenFrame?",
+				     "Its Wi-Fi and network settings, the SSH password and keys, its apps and their data, "
+				     "the home screen and anything else that's been installed all go. It keeps its updates "
+				     "and touch calibration, then restarts as it came.", true);
+	dialog_button(card, "Erase", BUTTON_DANGER, reset_sure, NULL);
+	dialog_button(card, "Cancel", BUTTON_OTHER, dialog_cancel, NULL);
+}
+
 static void after_update_cb(lv_event_t *e) {
 	const char *what = lv_event_get_user_data(e);
 	dialog_close();
@@ -3286,6 +3320,16 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_margin_top(tl, HEADING_SPACE, 0);
 	lv_obj_set_style_text_font(tl, &lv_font_montserrat_16, 0);
 	lv_obj_set_style_text_color(tl, lv_color_hex(C_DIM), 0);
+	// Erasing it for its next owner (openframe-scripts' of-reset), asked twice
+	section(pa, "ERASE");
+	lv_obj_t *el = lv_label_create(pa);
+	lv_label_set_text(el, "Puts this OpenFrame back as it came, for its next owner. Its updates and touch "
+			      "calibration stay; everything else that's been set up on it goes.");
+	lv_obj_set_width(el, LV_PCT(100));
+	lv_obj_set_style_text_font(el, &lv_font_montserrat_16, 0);
+	lv_obj_set_style_text_color(el, lv_color_hex(C_DIM), 0);
+	lv_obj_t *erow = button_row(pa);
+	button(erow, LV_SYMBOL_TRASH "  Erase everything", BUTTON_DANGER, reset_ask, NULL);
 
 	// Power
 	lv_obj_t *pp = settings_panel_new(TAB_POWER);
