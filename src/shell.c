@@ -85,7 +85,7 @@ static int cur_page, n_pages;
 // Settings' tabs (see build_settings)
 #define RAIL_W 208
 #define RAIL_PAD BACK_X
-#define TAB_H 52
+#define TAB_H 50
 #define C_RAIL 0x0d1217   // a step between the bar and the background
 enum { TAB_NETWORK, TAB_DISPLAY, TAB_TIME, TAB_UPDATES, TAB_ABOUT, TAB_POWER, N_TABS };
 static lv_obj_t *tab_btn[N_TABS], *tab_icon[N_TABS], *tab_panel[N_TABS];
@@ -3479,6 +3479,9 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_t *home = button(rail, LV_SYMBOL_LEFT "  Home", BUTTON_MAIN, back_clicked, NULL);
 	lv_obj_set_width(home, BACK_W); // the tabs' width: its arrow and colour set it apart
 	lv_obj_set_style_margin_bottom(home, HEADING_SPACE, 0);
+	// The tabs for settings, in alphabetical order; then, under a line, About and Power, which
+	// aren't settings so much as the unit itself (alphabetical too).
+	settings_tab_new(rail, TAB_DISPLAY, UI_ICON_SUN, "Display");
 	lv_obj_t *nt = settings_tab_new(rail, TAB_NETWORK, UI_ICON_WIFI, "Network");
 	net_tab_dot = lv_obj_create(nt); // there while the network settings have a problem
 	lv_obj_remove_style_all(net_tab_dot);
@@ -3490,9 +3493,15 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_bg_opa(net_tab_dot, LV_OPA_COVER, 0);
 	lv_obj_remove_flag(net_tab_dot, LV_OBJ_FLAG_CLICKABLE);
 	lv_obj_add_flag(net_tab_dot, LV_OBJ_FLAG_HIDDEN);
-	settings_tab_new(rail, TAB_DISPLAY, UI_ICON_SUN, "Display");
 	settings_tab_new(rail, TAB_TIME, UI_ICON_CLOCK, "Time");
 	settings_tab_new(rail, TAB_UPDATES, UI_ICON_REFRESH_CW, "Updates");
+	lv_obj_t *rule = lv_obj_create(rail); // a hairline, inset as the tabs' glyphs are
+	lv_obj_remove_style_all(rule);
+	lv_obj_set_size(rule, BACK_W - 2 * 14, 1);
+	lv_obj_set_style_margin_left(rule, 14, 0);
+	lv_obj_set_style_margin_ver(rule, 4, 0);
+	lv_obj_set_style_bg_color(rule, lv_color_white(), 0);
+	lv_obj_set_style_bg_opa(rule, LV_OPA_10, 0);
 	settings_tab_new(rail, TAB_ABOUT, UI_ICON_INFO, "About");
 	settings_tab_new(rail, TAB_POWER, UI_ICON_POWER, "Power");
 
