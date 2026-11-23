@@ -44,7 +44,8 @@ The ground rules for how it looks, feels and performs are in [docs/design.md](do
   unit's name; of-netplan's complaints about the settings files show in amber at the top of
   the tab; and remote access: the password for
   logging in as `of` over SSH, which images leave unset, with a warning while a unit still
-  has the old shared one), Display (brightness, through `of-backlight`, including automatic
+  has the old shared one, and a Turn off that takes every way in away again: the password,
+  the keys, ssh.txt's keys, and anyone logged in), Display (brightness, through `of-backlight`, including automatic
   brightness, whose slider then sets the lowest and highest it goes to, with a switch for the
   screen going off in the dark or staying at its lowest: `backlight.txt`'s `min`, `max` and
   `off_below`; and touch calibration), Time (the clock's format), Updates (openframe-scripts'
@@ -197,7 +198,7 @@ for each connection to `/run/sprite-helper.sock` (group `sprite`). It takes one 
 validates it: `set <key> <value>` for `startup`, `calibration`, `clock` and `seconds` in the
 settings file, `reboot` and `poweroff`, for Wi-Fi `wifi-scan`, `wifi-status`, `wifi-join`
 and `wifi-forget` (see Wi-Fi below), `app-start` and `app-stop` for apps (see Sandboxes
-above), and `ssh-status` and `ssh-password` for the login password (never giving out the
+above), and `ssh-status`, `ssh-password` and `ssh-off` for the login password (never giving out the
 password or its hash). The header of `system/sprite-helper` describes each.
 
 It also expects the touchscreen calibration in `spike/touch/` to be installed.

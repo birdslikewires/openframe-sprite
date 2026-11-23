@@ -2583,7 +2583,7 @@ static void build_entry(lv_obj_t *scr) {
 
 /* ---- remote access: the password for logging in as "of" (sprite-helper ssh-status/-password) ---- */
 
-static lv_obj_t *ssh_status_label, *ssh_detail_label;
+static lv_obj_t *ssh_status_label, *ssh_detail_label, *ssh_off_button;
 static lv_obj_t *eth_status_label, *eth_detail_label;
 
 // The wired network: whether a cable's in, at what speed, and the address it has.
@@ -2774,6 +2774,8 @@ static void ssh_status_done(char *reply, void *data) {
 	const char *ip = sprite_net_best_ip(&n); // Ethernet's, with both
 	snprintf(t, sizeof t, "%s%s", ip[0] ? "ssh of@" : "", ip);
 	set_text(ssh_detail_label, strcmp(pw, "none") || keys ? t : "");
+	// a way to turn it off again, while there's a way in
+	if (ssh_off_button) lv_obj_set_flag(ssh_off_button, LV_OBJ_FLAG_HIDDEN, !strcmp(pw, "none") && !keys);
 }
 
 static void ssh_refresh(void) {
@@ -2800,6 +2802,28 @@ static void ssh_set_now(const char *password) {
 }
 
 static void ssh_set_clicked(lv_event_t *e) { open_entry(ENTRY_SSH, ""); }
+
+static void ssh_off_done(char *reply, void *data) {
+	const char *st = helper_reply_status(reply);
+	if (strcmp(st, "ok")) {
+		lv_obj_t *card = dialog_open(NULL, "Remote access is still on", reason_text(st), true);
+		dialog_button(card, "OK", BUTTON_MAIN, dialog_cancel, NULL);
+	} else show_toast("Remote access is off", 2500);
+	ssh_refresh();
+}
+
+static void ssh_off_go(lv_event_t *e) {
+	dialog_close();
+	helper_request("ssh-off\n", ssh_off_done, NULL);
+}
+
+static void ssh_off_clicked(lv_event_t *e) {
+	lv_obj_t *card = dialog_open(NULL, "Turn off remote access?",
+				     "The password for logging in is removed, along with any keys, and anyone logged in "
+				     "now is disconnected. Setting a password turns it on again.", true);
+	dialog_button(card, "Turn off", BUTTON_DANGER, ssh_off_go, NULL);
+	dialog_button(card, "Cancel", BUTTON_OTHER, dialog_cancel, NULL);
+}
 
 /* ---- updates: the Updates tab (sprite-helper's update-* requests, of-update) ---- */
 
@@ -3508,6 +3532,8 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_text_color(ssh_detail_label, lv_color_hex(C_DIM), 0);
 	lv_obj_t *srow = button_row(pn);
 	button(srow, LV_SYMBOL_KEYBOARD "  Set password", BUTTON_MAIN, ssh_set_clicked, NULL);
+	ssh_off_button = button(srow, "Turn off", BUTTON_OTHER, ssh_off_clicked, NULL);
+	lv_obj_add_flag(ssh_off_button, LV_OBJ_FLAG_HIDDEN);
 
 	// Display: brightness and touch
 	lv_obj_t *pd = settings_panel_new(TAB_DISPLAY);

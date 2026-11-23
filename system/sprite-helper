@@ -36,6 +36,10 @@
 ##    ssh-password          set the password of "of": the request line, then a line with the
 ##                            password (8 to 64 characters, no control characters), and start
 ##                            the SSH server, which images keep off until someone can log in
+##    ssh-off               no way in over SSH: "of" loses its password and its keys, root its
+##                            keys, ssh.txt its key= lines (or they'd come back at the next
+##                            start), and the SSH server stops, ending every SSH session. A
+##                            password, here or in ssh.txt, turns it on again.
 ##    update-status         the automatic updates (openframe-scripts' of-update), as its status
 ##                            prints them, key=value lines, then "ok": state (idle, checking,
 ##                            preparing, downloading, installing), last, result, message,
@@ -75,6 +79,7 @@
 SETTINGS="/boot/settings/sprite.txt"
 TEMPLATE="/opt/sprite/share/sprite/sprite.txt"
 WIFITXT="/boot/settings/wifi.txt"
+SSHTXT="/boot/settings/ssh.txt"
 WIFITEMPLATE="/usr/lib/openframe/settings/wifi.txt"
 WPACTRL="/run/wpa_supplicant"          # where netplan's wpa_supplicant listens
 SCANCTRL="/run/sprite-helper-wpa"      # ... and ours, when we start one to scan
@@ -397,6 +402,25 @@ case "$CMD" in
 		unset PASS
 		# The SSH server waits for a way in (openframe-linux's ssh.service.d): there is one now.
 		systemctl --no-block start ssh.service 2>/dev/null
+		answer ok
+		;;
+	ssh-off)
+		usermod -p '*' of || answer "error: the password couldn't be removed"
+		rm -f "$(getent passwd of | cut -d: -f6)"/.ssh/authorized_keys{,2} /root/.ssh/authorized_keys{,2}
+		if [ -f "$SSHTXT" ] && grep -qiE '^[[:space:]]*key[[:space:]]*=[[:space:]]*[^[:space:]]' "$SSHTXT"; then
+			NEW=$(mktemp) || answer "error: no temporary file"
+			trap 'rm -f "$NEW"' EXIT
+			# every key= line goes, an empty one left where the first was
+			awk 'index($0, "=") && $0 !~ /^[[:space:]]*#/ {
+					k = substr($0, 1, index($0, "=") - 1); gsub(/[[:space:]]/, "", k)
+					if (tolower(k) == "key") { if (!done) print "key="; done = 1; next }
+				}
+				{ print }' "$SSHTXT" > "$NEW" || answer "error: preparing ssh.txt failed"
+			boot_write "$NEW" "$SSHTXT"
+		fi
+		# The server, and the sessions it started (which outlive it: each is its own process)
+		systemctl stop ssh.service 2>/dev/null
+		pkill -x sshd-session 2>/dev/null || pkill -f '^sshd: ' 2>/dev/null
 		answer ok
 		;;
 	update-status)
