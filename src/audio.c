@@ -210,6 +210,11 @@ bool audio_test_sound(void) {
 		ts_state = 1;                   // (after one that couldn't)
 	}
 	ts_started = now_s();
+	// ALSA reads its settings once in a process and keeps them (it looks again only if its
+	// own alsa.conf changes, not /etc/asound.conf, which of-audio writes): dropped here, on
+	// the shell's thread, so the sound goes where the output is now, not where it was when
+	// sprite first made a sound.
+	snd_config_update_free_global();
 	pthread_t th;
 	pthread_attr_t a;
 	pthread_attr_init(&a);
