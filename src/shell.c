@@ -2911,6 +2911,43 @@ static void show_if(lv_obj_t *o, bool show) {
 
 static void upd_started(char *reply, void *data);
 
+// The progress bar: a percentage, or a segment sliding along it while there's nothing to measure.
+#define UPD_NO_BAR (-2)
+#define UPD_SLIDING (-1)
+#define UPD_SLIDE_W 30   // the sliding segment, in percent of the bar
+
+static void upd_slide(void *bar, int32_t v) {
+	int s = v - UPD_SLIDE_W, e = v;
+	lv_bar_set_start_value(bar, s < 0 ? 0 : s, LV_ANIM_OFF);
+	lv_bar_set_value(bar, e > 100 ? 100 : e, LV_ANIM_OFF);
+}
+
+static void upd_bar_show(int progress) {
+	show_if(upd_bar, progress != UPD_NO_BAR);
+	bool sliding = lv_anim_get(upd_bar, upd_slide) != NULL;
+	if (progress == UPD_SLIDING) {
+		if (sliding) return;
+		lv_bar_set_mode(upd_bar, LV_BAR_MODE_RANGE);
+		lv_anim_t a;
+		lv_anim_init(&a);
+		lv_anim_set_var(&a, upd_bar);
+		lv_anim_set_exec_cb(&a, upd_slide);
+		lv_anim_set_values(&a, 0, 100 + UPD_SLIDE_W);
+		lv_anim_set_duration(&a, 1400);
+		lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+		lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+		lv_anim_start(&a);
+		return;
+	}
+	if (sliding) {
+		lv_anim_delete(upd_bar, upd_slide);
+		lv_bar_set_mode(upd_bar, LV_BAR_MODE_NORMAL);
+		lv_bar_set_start_value(upd_bar, 0, LV_ANIM_OFF);
+		lv_bar_set_value(upd_bar, 0, LV_ANIM_OFF);
+	}
+	if (progress >= 0) lv_bar_set_value(upd_bar, progress, LV_ANIM_ON);
+}
+
 static void upd_status_done(char *reply, void *data) {
 	upd_asking = false;
 	const char *st = helper_reply_status(reply);
@@ -2925,7 +2962,8 @@ static void upd_status_done(char *reply, void *data) {
 	}
 	char state[16] = "idle", result[16] = "", message[160] = "", restart[8] = "", firmware[12] = "";
 	long last = 0, checked = 0, got = 0, size = 0;
-	int pending = 0, n_items = 0, n_done = 0;
+	int pending = 0, n_items = 0, n_done = 0, n_partial = 0;
+	char now_pkg[64] = "";
 	static char items[64][96];
 	char *save = NULL;
 	for (char *l = strtok_r(reply, "\n", &save); l; l = strtok_r(NULL, "\n", &save)) {
@@ -2937,6 +2975,8 @@ static void upd_status_done(char *reply, void *data) {
 		}
 		else if (!strncmp(l, "got=", 4)) got = atol(l + 4);
 		else if (!strncmp(l, "size=", 5)) size = atol(l + 5);
+		else if (!strncmp(l, "partial=", 8)) n_partial = atoi(l + 8);
+		else if (!strncmp(l, "now=", 4)) snprintf(now_pkg, sizeof now_pkg, "%s", l + 4);
 		else if (!strncmp(l, "state=", 6)) snprintf(state, sizeof state, "%s", l + 6);
 		else if (!strncmp(l, "result=", 7)) snprintf(result, sizeof result, "%s", l + 7);
 		else if (!strncmp(l, "message=", 8)) snprintf(message, sizeof message, "%s", l + 8);
@@ -2953,16 +2993,20 @@ static void upd_status_done(char *reply, void *data) {
 			upd_requested = 0;          // it's started, it's done, or it never will
 		else {
 			upd_busy(true);             // not started yet: still as tapped
+			upd_bar_show(UPD_SLIDING);
 			return;
 		}
 	}
 	char t[96] = "", d[48] = "", w[24];
 	uint32_t colour = C_TEXT;
-	int progress = -1; // percent, while downloading or installing
-	if (!strcmp(state, "checking")) snprintf(t, sizeof t, "Checking for updates...");
+	// The bar: a percentage while there's something to measure; UPD_SLIDING while it's busy
+	// with nothing to measure yet (looking, planning, a download not begun); UPD_NO_BAR idle.
+	int progress = UPD_NO_BAR;
+	if (!strcmp(state, "checking")) { snprintf(t, sizeof t, "Checking for updates..."); progress = UPD_SLIDING; }
 	else if (!strcmp(state, "downloading")) {
 		snprintf(t, sizeof t, "Downloading updates...");
-		if (size > 0) {
+		progress = UPD_SLIDING;
+		if (size > 0 && got > 0) {
 			progress = (int)(got * 100 / size);
 			if (size >= 1024 * 1024) snprintf(d, sizeof d, "%.1f of %.1f MB", got / 1048576.0, size / 1048576.0);
 			else snprintf(d, sizeof d, "%ld of %ld KB", got / 1024, size / 1024);
@@ -2972,9 +3016,18 @@ static void upd_status_done(char *reply, void *data) {
 		snprintf(t, sizeof t, "Finishing up...");
 		progress = 100;
 	} else if (!strcmp(state, "installing")) {
-		snprintf(t, sizeof t, "Installing updates...");
+		// what's going in, by name; before the first, unattended-upgrades works out the order
+		if (now_pkg[0]) {
+			const char *name = !strncmp(now_pkg, "openframe-", 10) || !strncmp(now_pkg, "linux-image-", 12) ? upd_part(now_pkg)
+					   : !strncmp(now_pkg, "ofapp-", 6) ? now_pkg + 6 : now_pkg;
+			snprintf(t, sizeof t, "Installing %s...", name);
+		} else if (!n_done) snprintf(t, sizeof t, "Getting ready to install...");
+		else snprintf(t, sizeof t, "Installing updates...");
+		progress = UPD_SLIDING;
 		if (n_items > 0) {
-			progress = n_done * 100 / n_items;
+			// an unpacked one, not yet configured, is half in: so even one update moves
+			int p = (n_done * 2 + n_partial) * 50 / n_items;
+			if (p > 0) progress = p;
 			snprintf(d, sizeof d, "%d of %d", n_done, n_items);
 		}
 	}
@@ -2998,8 +3051,7 @@ static void upd_status_done(char *reply, void *data) {
 		set_text(upd_note_label, m);
 		show_if(upd_note_label, true);
 	} else show_if(upd_note_label, false);
-	show_if(upd_bar, progress >= 0);
-	if (progress >= 0) lv_bar_set_value(upd_bar, progress, LV_ANIM_ON);
+	upd_bar_show(progress);
 	upd_show_list(items, idle && needs_restart ? 0 : n_items, !strcmp(firmware, "pending"));
 	// A list older than six hours is looked at again as the tab shows it (a check, no more).
 	static time_t auto_asked;
@@ -3041,6 +3093,7 @@ static void upd_check_clicked(lv_event_t *e) {
 	set_text(upd_status_label, "Checking for updates...");
 	set_text(upd_detail_label, "");
 	upd_busy(true);
+	upd_bar_show(UPD_SLIDING);
 	upd_requested = time(NULL);
 	helper_request("update-check\n", upd_started, NULL);
 }
@@ -3049,6 +3102,7 @@ static void upd_now_clicked(lv_event_t *e) {
 	set_text(upd_status_label, "Checking for updates...");
 	set_text(upd_detail_label, "");
 	upd_busy(true);
+	upd_bar_show(UPD_SLIDING);
 	upd_requested = time(NULL);
 	helper_request("update-now\n", upd_started, NULL);
 }
