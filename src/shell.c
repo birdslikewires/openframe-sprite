@@ -2663,6 +2663,9 @@ static void ssh_set_clicked(lv_event_t *e) { open_entry(ENTRY_SSH, ""); }
 static lv_obj_t *upd_status_label, *upd_detail_label, *upd_note_label, *upd_now_btn, *upd_restart_btn, *upd_check_btn;
 static lv_obj_t *upd_bar, *upd_buttons, *upd_list;
 static bool upd_asking;
+// When Check now or Update now was tapped: the helper answers before of-update has started, so
+// until the status shows it running, or a look newer than the tap, it isn't taken as idle.
+static time_t upd_requested;
 static void show_if(lv_obj_t *o, bool show);
 static char upd_listed[2048]; // what the list shows now, to redraw it only when that changes
 
@@ -2955,6 +2958,15 @@ static void upd_status_done(char *reply, void *data) {
 		else if (!strncmp(l, "pending=", 8)) pending = atoi(l + 8);
 	}
 	bool idle = !strcmp(state, "idle"), needs_restart = !strcmp(restart, "yes"), failed = !strcmp(result, "failed");
+	if (upd_requested) {
+		time_t now = time(NULL);
+		if (!idle || checked >= upd_requested || last >= upd_requested || now - upd_requested > 20)
+			upd_requested = 0;          // it's started, it's done, or it never will
+		else {
+			upd_busy(true);             // not started yet: still as tapped
+			return;
+		}
+	}
 	char t[96] = "", d[48] = "", w[24];
 	uint32_t colour = C_TEXT;
 	int progress = -1; // percent, while downloading or installing
@@ -3005,7 +3017,10 @@ static void upd_status_done(char *reply, void *data) {
 	time_t now = time(NULL);
 	if (idle && checked && now - checked > 6 * 3600 && now - auto_asked > 600 && settings_tab == TAB_UPDATES && showing(page_settings)) {
 		auto_asked = now;
+		set_text(upd_status_label, "Checking for updates...");
+		set_text(upd_detail_label, "");
 		upd_busy(true);
+		upd_requested = now;
 		helper_request("update-check\n", upd_started, NULL);
 		return;
 	}
@@ -3025,6 +3040,7 @@ static void upd_refresh(void) {
 static void upd_started(char *reply, void *data) {
 	const char *st = helper_reply_status(reply);
 	if (strcmp(st, "ok")) {
+		upd_requested = 0; // it won't start: back to the buttons
 		lv_obj_t *card = dialog_open(NULL, "Couldn't start", reason_text(st), true);
 		dialog_button(card, "OK", BUTTON_MAIN, dialog_cancel, NULL);
 	}
@@ -3036,6 +3052,7 @@ static void upd_check_clicked(lv_event_t *e) {
 	set_text(upd_status_label, "Checking for updates...");
 	set_text(upd_detail_label, "");
 	upd_busy(true);
+	upd_requested = time(NULL);
 	helper_request("update-check\n", upd_started, NULL);
 }
 
@@ -3043,6 +3060,7 @@ static void upd_now_clicked(lv_event_t *e) {
 	set_text(upd_status_label, "Checking for updates...");
 	set_text(upd_detail_label, "");
 	upd_busy(true);
+	upd_requested = time(NULL);
 	helper_request("update-now\n", upd_started, NULL);
 }
 
