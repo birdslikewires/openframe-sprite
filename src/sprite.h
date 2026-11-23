@@ -161,6 +161,8 @@ struct sprite_netinfo {
 void sysinfo_netinfo(struct sprite_netinfo *out);
 int wifi_signal(const char *ifname);          // dBm of the network joined (nl80211), 0 if unknown
 int sysinfo_backlight(void);                  // 0-100, -1 if unknown
+int audio_volume(const char *card, const char *ctl);               // 0-100 (as it sounds), -1 if unknown
+bool audio_set_volume(const char *card, const char *ctl, int pct); // audio.c: ALSA's mixer, in-process
 int sysinfo_backlight_max(void);              // the hardware's highest level, -1 if unknown
 bool sysinfo_backlight_auto(void);
 void sysinfo_set_backlight(const char *arg);  // "0".."100" or "auto", runs of-backlight

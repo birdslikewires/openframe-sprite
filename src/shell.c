@@ -88,11 +88,12 @@ static int cur_page, n_pages;
 #define RAIL_PAD BACK_X
 #define TAB_H 50
 #define C_RAIL 0x0d1217   // a step between the bar and the background
-enum { TAB_NETWORK, TAB_DISPLAY, TAB_TIME, TAB_UPDATES, TAB_ABOUT, TAB_POWER, N_TABS };
+enum { TAB_AUDIO, TAB_DISPLAY, TAB_NETWORK, TAB_UPDATES, TAB_ABOUT, TAB_POWER, N_TABS };
 static lv_obj_t *tab_btn[N_TABS], *tab_icon[N_TABS], *tab_panel[N_TABS];
 static int settings_tab;
 static int settings_tab_first = -1; // the top of the rail: where the gear opens Settings
 static void settings_show_tab(int t);
+static void aud_refresh(void);
 
 // Paging: the pages sit side by side on a strip, which follows a sideways drag and then
 // slides to a page. A touch becomes a page drag once it has moved PAGE_DRAG_START sideways
@@ -2927,6 +2928,184 @@ static void ssh_off_go(lv_event_t *e) {
 	helper_request("ssh-off\n", ssh_off_done, NULL);
 }
 
+/* ---- audio: where the sound goes (openframe-scripts' of-audio, through sprite-helper's
+   audio-* requests) and how loud (audio.c, in-process) ---- */
+
+#define AUD_CARDS_MAX 6
+static struct aud_card { char id[32], kind[8], usbid[12], name[80]; } aud_cards[AUD_CARDS_MAX];
+static int aud_n;
+static char aud_out[32], aud_kind[8], aud_mixer[64];
+static bool aud_direct, aud_managed = true, aud_known;
+static lv_obj_t *aud_list, *aud_vol_head, *aud_now, *aud_slider_row, *aud_slider, *aud_direct_row, *aud_note;
+
+// The OpenFrame's own card by what it is to an owner; a DAC by the name it gives.
+static const char *aud_card_name(const struct aud_card *c) {
+	return !strcmp(c->kind, "builtin") ? "Speaker and headphones" : c->name;
+}
+
+static void aud_now_show(int v) {
+	char t[16] = "";
+	if (v == 0) snprintf(t, sizeof t, "OFF");
+	else if (v > 0) snprintf(t, sizeof t, "NOW %d%%", v);
+	set_text(aud_now, t);
+}
+
+static void aud_choose(lv_event_t *e);
+
+static void aud_show(void) {
+	if (!aud_list) return;
+	lv_obj_clean(aud_list);
+	for (int i = 0; i < aud_n; i++) {
+		struct aud_card *c = &aud_cards[i];
+		lv_obj_t *r = lv_obj_create(aud_list); // a list row: pressable, the chosen one ticked
+		lv_obj_remove_style_all(r);
+		lv_obj_set_size(r, PANEL_TEXT_W + 2 * LIST_ROW_PAD, ROW_H);
+		lv_obj_set_style_translate_x(r, -LIST_ROW_PAD, 0);
+		lv_obj_set_style_pad_hor(r, LIST_ROW_PAD, 0);
+		lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
+		lv_obj_set_flex_align(r, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+		lv_obj_set_style_pad_column(r, 20, 0);
+		lv_obj_remove_flag(r, LV_OBJ_FLAG_SCROLLABLE);
+		lv_obj_set_style_bg_color(r, lv_color_white(), LV_STATE_PRESSED);
+		lv_obj_set_style_bg_opa(r, LV_OPA_20, LV_STATE_PRESSED);
+		rounded(r);
+		if (aud_managed) {
+			lv_obj_add_flag(r, LV_OBJ_FLAG_CLICKABLE);
+			lv_obj_add_event_cb(r, aud_choose, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+		}
+		lv_obj_t *n = lv_label_create(r);
+		lv_label_set_text(n, aud_card_name(c));
+		lv_label_set_long_mode(n, LV_LABEL_LONG_DOT);
+		lv_obj_set_flex_grow(n, 1);
+		lv_obj_set_style_text_color(n, lv_color_hex(C_TEXT), 0);
+		lv_obj_t *k = lv_label_create(r);
+		bool on = !strcmp(c->id, aud_out);
+		lv_label_set_text(k, on ? LV_SYMBOL_OK : (!strcmp(c->kind, "usb") ? "USB" : ""));
+		lv_obj_set_style_text_color(k, lv_color_hex(on ? C_ACCENT : C_DIM), 0);
+		if (!on) lv_obj_set_style_text_font(k, &lv_font_montserrat_16, 0);
+	}
+	if (!aud_n) {
+		lv_obj_t *n = lv_label_create(aud_list);
+		lv_label_set_text(n, aud_known ? "No sound cards" : "");
+		lv_obj_set_style_text_color(n, lv_color_hex(C_DIM), 0);
+	}
+	bool usb = !strcmp(aud_kind, "usb"), vol = aud_managed && aud_n && !aud_direct && aud_mixer[0];
+	show_if(aud_vol_head, vol);
+	show_if(aud_slider_row, vol);
+	if (vol && !lv_obj_has_state(aud_slider, LV_STATE_PRESSED)) {
+		int v = audio_volume(aud_out, aud_mixer);
+		if (v >= 0) lv_slider_set_value(aud_slider, v, LV_ANIM_OFF);
+		aud_now_show(v);
+	}
+	show_if(aud_direct_row, aud_managed && usb);
+	lv_obj_t *sw = lv_obj_get_child(aud_direct_row, 1);
+	if (aud_direct) lv_obj_remove_state(sw, LV_STATE_CHECKED);
+	else lv_obj_add_state(sw, LV_STATE_CHECKED);
+	const char *note = !aud_managed ? "Sound is set up by hand on this OpenFrame (an asound.conf of its own), so it's "
+					  "left as it is."
+			   : usb && aud_direct ? "The DAC gets the audio as it is: nothing mixed in, nothing resampled. Set the "
+						 "volume on your amplifier. One app can play at a time."
+			   : usb ? "Turn this off to send the DAC the audio untouched, and set the volume on your amplifier."
+			   : aud_n ? "Plug in a USB DAC and the sound goes there." : "";
+	set_text(aud_note, note);
+	show_if(aud_note, note[0]);
+}
+
+static void aud_status_done(char *reply, void *data) {
+	if (strcmp(helper_reply_status(reply), "ok")) return;
+	char was[32];
+	snprintf(was, sizeof was, "%s", aud_out);
+	bool knew = aud_known;
+	aud_n = 0;
+	aud_out[0] = aud_kind[0] = aud_mixer[0] = 0;
+	aud_direct = false;
+	char *save = NULL;
+	for (char *l = strtok_r(reply, "\n", &save); l; l = strtok_r(NULL, "\n", &save)) {
+		if (!strncmp(l, "card=", 5) && aud_n < AUD_CARDS_MAX) {
+			struct aud_card *c = &aud_cards[aud_n];
+			int at = 0;
+			if (sscanf(l + 5, "%31s %7s %11s %n", c->id, c->kind, c->usbid, &at) == 3 && at) {
+				snprintf(c->name, sizeof c->name, "%s", l + 5 + at);
+				aud_n++;
+			}
+		} else if (!strncmp(l, "output=", 7)) snprintf(aud_out, sizeof aud_out, "%s", l + 7);
+		else if (!strncmp(l, "kind=", 5)) snprintf(aud_kind, sizeof aud_kind, "%s", l + 5);
+		else if (!strncmp(l, "mixer=", 6)) snprintf(aud_mixer, sizeof aud_mixer, "%s", l + 6);
+		else if (!strncmp(l, "direct=", 7)) aud_direct = !strcmp(l + 7, "yes");
+		else if (!strncmp(l, "managed=", 8)) aud_managed = !strcmp(l + 8, "yes");
+	}
+	aud_known = true;
+	// a DAC just plugged in and made the output (of-audio): say so, wherever we are
+	if (knew && strcmp(was, aud_out) && !strcmp(aud_kind, "usb"))
+		for (int i = 0; i < aud_n; i++)
+			if (!strcmp(aud_cards[i].id, aud_out)) {
+				char t[120];
+				snprintf(t, sizeof t, "Playing through %s", aud_card_name(&aud_cards[i]));
+				show_toast(t, 3500);
+			}
+	aud_show();
+}
+
+static void aud_refresh(void) { helper_request("audio-status\n", aud_status_done, NULL); }
+
+static void aud_set_done(char *reply, void *data) {
+	const char *st = helper_reply_status(reply);
+	if (strcmp(st, "ok")) {
+		lv_obj_t *card = dialog_open(NULL, "The sound output wasn't changed", reason_text(st), true);
+		dialog_button(card, "OK", BUTTON_MAIN, dialog_cancel, NULL);
+	}
+	aud_refresh();
+}
+
+static void aud_choose(lv_event_t *e) {
+	int i = (int)(intptr_t)lv_event_get_user_data(e);
+	if (i < 0 || i >= aud_n || !strcmp(aud_cards[i].id, aud_out)) return;
+	char req[64];
+	snprintf(req, sizeof req, "audio-set\noutput=%s\n", !strcmp(aud_cards[i].kind, "usb") ? aud_cards[i].usbid : "builtin");
+	helper_request(req, aud_set_done, NULL);
+}
+
+static void aud_direct_changed(lv_event_t *e) {
+	bool control = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+	helper_request(control ? "audio-set\ndirect=no\n" : "audio-set\ndirect=yes\n", aud_set_done, NULL);
+}
+
+// The volume, set as the slider moves (in-process: nothing's started for each step), and kept
+// for the next start once it's let go.
+static void aud_slid(lv_event_t *e) {
+	int v = (int)lv_slider_get_value(aud_slider);
+	if (audio_set_volume(aud_out, aud_mixer, v)) aud_now_show(v);
+}
+
+static void aud_store_done(char *reply, void *data) {}
+static void aud_released(lv_event_t *e) { helper_request("audio-store\n", aud_store_done, NULL); }
+
+// A card coming or going (a DAC plugged in or out): of-audio's hotplug has a moment's work to
+// do, then the tab, and the notice if the sound has moved to a DAC.
+static void aud_later(lv_timer_t *t) { aud_refresh(); }
+static void aud_watch(lv_timer_t *t) {
+	static char seen[1024];
+	static bool first = true;
+	char now[1024] = "";
+	FILE *f = fopen("/proc/asound/cards", "r");
+	if (f) {
+		size_t n = fread(now, 1, sizeof now - 1, f);
+		now[n] = 0;
+		fclose(f);
+	}
+	if (first) {
+		first = false;
+		snprintf(seen, sizeof seen, "%s", now);
+		aud_refresh(); // what there is to begin with (no notice for it)
+		return;
+	}
+	if (strcmp(now, seen)) {
+		snprintf(seen, sizeof seen, "%s", now);
+		lv_timer_t *l = lv_timer_create(aud_later, 2500, NULL);
+		lv_timer_set_repeat_count(l, 1);
+	}
+}
+
 /* ---- the OpenFrame's name: name.txt on OF-BOOT, through sprite-helper's name-set ---- */
 
 static lv_obj_t *name_label, *name_host_label;
@@ -3519,6 +3698,7 @@ static void settings_show_tab(int t) {
 	}
 	lv_obj_scroll_to_y(tab_panel[t], 0, LV_ANIM_OFF);
 	if (t == TAB_UPDATES) upd_refresh();
+	if (t == TAB_AUDIO) aud_refresh();
 	if (t == TAB_DISPLAY) bl_limits_ask();
 }
 
@@ -3593,6 +3773,7 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_margin_bottom(home, HEADING_SPACE, 0);
 	// The tabs for settings, in alphabetical order; then, under a line, About and Power, which
 	// aren't settings so much as the unit itself (alphabetical too).
+	settings_tab_new(rail, TAB_AUDIO, UI_ICON_VOLUME_2, "Audio");
 	settings_tab_new(rail, TAB_DISPLAY, UI_ICON_SUN, "Display");
 	lv_obj_t *nt = settings_tab_new(rail, TAB_NETWORK, UI_ICON_WIFI, "Network");
 	net_tab_dot = lv_obj_create(nt); // there while the network settings have a problem
@@ -3605,7 +3786,6 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_bg_opa(net_tab_dot, LV_OPA_COVER, 0);
 	lv_obj_remove_flag(net_tab_dot, LV_OBJ_FLAG_CLICKABLE);
 	lv_obj_add_flag(net_tab_dot, LV_OBJ_FLAG_HIDDEN);
-	settings_tab_new(rail, TAB_TIME, UI_ICON_CLOCK, "Time");
 	settings_tab_new(rail, TAB_UPDATES, UI_ICON_REFRESH_CW, "Updates");
 	lv_obj_t *rule = lv_obj_create(rail); // a hairline, inset as the tabs' glyphs are
 	lv_obj_remove_style_all(rule);
@@ -3694,6 +3874,56 @@ static void build_settings(lv_obj_t *scr) {
 	ssh_off_button = button(srow, "Turn off", BUTTON_OTHER, ssh_off_clicked, NULL);
 	lv_obj_add_flag(ssh_off_button, LV_OBJ_FLAG_HIDDEN);
 
+	// Audio: where the sound goes, how loud, and for a DAC whether the OpenFrame sets that
+	lv_obj_t *pa_ = settings_panel_new(TAB_AUDIO);
+	section(pa_, "OUTPUT");
+	aud_list = lv_obj_create(pa_);
+	lv_obj_remove_style_all(aud_list);
+	lv_obj_set_size(aud_list, LV_PCT(100), LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(aud_list, LV_FLEX_FLOW_COLUMN);
+	lv_obj_remove_flag(aud_list, LV_OBJ_FLAG_SCROLLABLE);
+	aud_direct_row = switch_row(pa_, "Volume control on this OpenFrame", true, aud_direct_changed);
+	lv_obj_set_style_pad_right(aud_direct_row, BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0); // as Display's switches
+	aud_note = lv_label_create(pa_);
+	lv_label_set_text(aud_note, "");
+	lv_obj_set_width(aud_note, LV_PCT(100));
+	lv_obj_set_style_text_font(aud_note, &lv_font_montserrat_16, 0);
+	lv_obj_set_style_text_color(aud_note, lv_color_hex(C_DIM), 0);
+	aud_vol_head = lv_obj_create(pa_); // the heading, with the level now at its other end
+	lv_obj_remove_style_all(aud_vol_head);
+	lv_obj_set_size(aud_vol_head, LV_PCT(100), LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(aud_vol_head, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(aud_vol_head, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_remove_flag(aud_vol_head, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_set_style_margin_top(aud_vol_head, HEADING_SPACE, 0);
+	lv_obj_set_style_pad_right(aud_vol_head, BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0);
+	lv_obj_set_style_margin_top(section(aud_vol_head, "VOLUME"), 0, 0);
+	aud_now = section(aud_vol_head, "");
+	lv_obj_set_style_margin_top(aud_now, 0, 0);
+	aud_slider_row = lv_obj_create(pa_);
+	lv_obj_remove_style_all(aud_slider_row);
+	lv_obj_set_size(aud_slider_row, LV_PCT(100), ROW_H);
+	lv_obj_set_flex_flow(aud_slider_row, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(aud_slider_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_hor(aud_slider_row, BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0);
+	lv_obj_remove_flag(aud_slider_row, LV_OBJ_FLAG_SCROLLABLE);
+	aud_slider = lv_slider_create(aud_slider_row);
+	lv_obj_set_height(aud_slider, BL_SLIDER_H);
+	lv_obj_set_style_margin_left(aud_slider, SLIDER_KNOB_GROW, 0);
+	lv_obj_set_flex_grow(aud_slider, 1);
+	lv_slider_set_range(aud_slider, 0, 100);
+	lv_obj_set_ext_click_area(aud_slider, 20);
+	lv_obj_add_event_cb(aud_slider, aud_slid, LV_EVENT_VALUE_CHANGED, NULL);
+	lv_obj_add_event_cb(aud_slider, aud_released, LV_EVENT_RELEASED, NULL);
+	lv_obj_add_event_cb(aud_slider, aud_released, LV_EVENT_PRESS_LOST, NULL);
+	lv_obj_move_to_index(aud_direct_row, -1); // the DAC's switch and the note under the volume
+	lv_obj_move_to_index(aud_note, -1);
+	lv_obj_set_style_margin_top(aud_direct_row, HEADING_SPACE / 2, 0);
+	show_if(aud_vol_head, false);
+	show_if(aud_slider_row, false);
+	show_if(aud_direct_row, false);
+	lv_timer_create(aud_watch, 2000, NULL);
+
 	// Display: brightness and touch
 	lv_obj_t *pd = settings_panel_new(TAB_DISPLAY);
 	// The heading, with the level the backlight has now at its other end (bl_now_tick)
@@ -3751,10 +3981,12 @@ static void build_settings(lv_obj_t *scr) {
 	button(trow, LV_SYMBOL_REFRESH "  Reset", BUTTON_OTHER, cal_reset, NULL);
 
 	// Time: the clock's format (and, later, the time zone)
-	lv_obj_t *pt = settings_panel_new(TAB_TIME);
+	// The clock, at the end of Display (Time had a tab of its own, until Audio needed it)
+	lv_obj_t *pt = tab_panel[TAB_DISPLAY];
 	section(pt, "CLOCK");
-	switch_row(pt, "24-hour clock", clock_24, clock24_changed);
-	switch_row(pt, "Show seconds", clock_secs, seconds_changed);
+	// their switches under Auto's, as the screen-off one is
+	lv_obj_set_style_pad_right(switch_row(pt, "24-hour clock", clock_24, clock24_changed), BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0);
+	lv_obj_set_style_pad_right(switch_row(pt, "Show seconds", clock_secs, seconds_changed), BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0);
 
 	// Updates: what of-update's doing, and asking for a look, or for the updates, now
 	lv_obj_t *pu = settings_panel_new(TAB_UPDATES);

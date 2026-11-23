@@ -10,7 +10,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 LUCIDE=0.460.0
-UI_ICONS="wifi sun clock refresh-cw info power" # Settings' tabs
+UI_ICONS="volume-2 sun wifi refresh-cw info power" # Settings' tabs
 # npm's published integrity for that version (npm view lucide-static@0.460.0 dist.integrity)
 LUCIDE_INTEGRITY=sha512-X6pIdg7jVxv7YQ/uR241hwhNiztcAfmj181TbcX7HCxxk/3mGaRtAc6b2ftUvQBufbJE6ehgyzO2uVsa604tWg==
 

@@ -37,7 +37,12 @@ The ground rules for how it looks, feels and performs are in [docs/design.md](do
   and reopens 2 s after it closes or crashes, unless it was closed from the sheet. After three
   exits within a minute it stops reopening and says so. It's `startup=` in the settings
   file (see Settings below).
-- **Settings,** in tabs down the left: Network (Wi-Fi: choosing a network, typing its
+- **Settings,** in tabs down the left, in alphabetical order, then About and Power under a
+  line: Audio (where the sound goes, the OpenFrame's own or a USB DAC, through
+  openframe-scripts' `of-audio` and `settings/audio.txt`: a DAC plugged in for the first
+  time becomes the output at a low volume, and has a switch to take the OpenFrame's volume
+  control out of its way, the audio reaching it as it is; the volume, set in-process through
+  ALSA's mixer, as it sounds), Network (Wi-Fi: choosing a network, typing its
   password on Sprite's own keyboard, and forgetting it; Ethernet: whether a cable's in, its
   speed and address; tapping either opens its details, read-only: its address and whether
   the router or a settings file set it, the gateway, MAC address, the DNS servers and the
@@ -48,7 +53,7 @@ The ground rules for how it looks, feels and performs are in [docs/design.md](do
   the keys, ssh.txt's keys, and anyone logged in), Display (brightness, through `of-backlight`, including automatic
   brightness, whose slider then sets the lowest and highest it goes to, with a switch for the
   screen going off in the dark or staying at its lowest: `backlight.txt`'s `min`, `max` and
-  `off_below`; and touch calibration), Time (the clock's format), Updates (openframe-scripts'
+  `off_below`; touch calibration; and the clock's format), Updates (openframe-scripts'
   automatic updates: what they're doing, with progress, what's waiting, OpenBeak's first, each
   with its "What's new", checking, updating or restarting now, and the time of day they
   install), About (its name, as written and as the hostname made from it, in openframe-scripts' `settings/name.txt`; the system, what the hourly ping sends, and Erase everything, which puts the unit back as it came for its next owner: openframe-scripts' `of-reset`) and

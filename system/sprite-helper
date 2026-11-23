@@ -41,6 +41,11 @@
 ##                            openframe), into settings/name.txt, which openframe-scripts'
 ##                            name-settings then applies (the hostname made from it, and the
 ##                            name kept as written)
+##    audio-status          where the sound goes, as openframe-scripts' of-audio status prints it
+##                            (the cards, the one in use, direct, its volume control), then "ok"
+##    audio-set             the request line, then a line with output=builtin or a DAC's
+##                            vid:pid and/or direct=yes|no: of-audio set
+##    audio-store           the mixers' levels kept for the next start (alsactl store)
 ##    ssh-off               no way in over SSH: "of" loses its password and its keys, root its
 ##                            keys, ssh.txt its key= lines (or they'd come back at the next
 ##                            start), and the SSH server stops, ending every SSH session. A
@@ -433,6 +438,24 @@ case "$CMD" in
 			END { if (!done) print line(ENVIRON["N"]) }' "$NEW" > "$NEW.2" && mv "$NEW.2" "$NEW" || answer "error: preparing name.txt failed"
 		boot_write "$NEW" "$NAMETXT"
 		/usr/lib/openframe/name-settings >/dev/null 2>&1 || answer "error: the name couldn't be applied"
+		answer ok
+		;;
+	audio-status|audio-set|audio-store)
+		[ -x /usr/local/sbin/of-audio ] || answer "error: this system can't choose its sound output until it's updated"
+		case "$CMD" in
+			audio-status) /usr/local/sbin/of-audio status 2>/dev/null ;;
+			audio-store) /usr/local/sbin/of-audio store ;;
+			audio-set)
+				IFS= read -r -t 5 LINE || answer "error: nothing to set"
+				ARGS=()
+				for kv in $LINE; do
+					[[ $kv =~ ^(output=(builtin|[0-9a-f]{4}:[0-9a-f]{4})|direct=(yes|no))$ ]] || answer "error: $kv isn't an output or direct"
+					ARGS+=("$kv")
+				done
+				(( ${#ARGS[@]} )) || answer "error: nothing to set"
+				/usr/local/sbin/of-audio set "${ARGS[@]}" >/dev/null 2>&1 || answer "error: the sound output couldn't be changed"
+				;;
+		esac
 		answer ok
 		;;
 	ssh-off)
