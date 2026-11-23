@@ -2840,28 +2840,16 @@ static void upd_show_list(char items[][96], int n, bool firmware_pending) {
 	if (fw_shown)
 		upd_small("At the next restart, the OpenFrame updates its firmware. The screen shows the progress for "
 			  "a minute or two, then it restarts once more by itself. Don't switch it off while that happens.");
-	// the OpenFrame's own
-	char parts[400] = "", partnames[6][16];
-	int n_of = 0, of_done = 0, n_names = 0;
-	for (int i = 0; i < m; i++) {
+	// the OpenFrame's own: a row a part (Sprite, System, Kernel...), its version at the right
+	// and its notes behind the chevron
+	static char part_pkgs[8][64]; // what their rows open (the list is redrawn, these stay)
+	int n_parts = 0;
+	for (int i = 0; i < m && n_parts < 8; i++) {
 		if (strcmp(it[i].tier, "openframe")) continue;
 		if (!strncmp(it[i].pkg, "linux-image-openframe-", 22)) continue; // the kernel's metapackage
-		n_of++;
-		of_done += it[i].done;
-		size_t at = strlen(parts);
-		snprintf(parts + at, sizeof parts - at, "%s%.63s %.47s", at ? ", " : "", upd_part(it[i].pkg), no_epoch(it[i].ver));
-		if (n_names < 6) snprintf(partnames[n_names++], sizeof partnames[0], "%.15s", upd_part(it[i].pkg));
-	}
-	if (n_of) {
-		// the row says what's in it ("Sprite, System and Kernel"), the heading that it's the OpenFrame's
-		char what[120] = "";
-		for (int i = 0; i < n_names; i++) {
-			size_t at = strlen(what);
-			snprintf(what + at, sizeof what - at, "%s%s", i == 0 ? "" : i == n_names - 1 ? " and " : ", ", partnames[i]);
-		}
-		section(upd_list, "OPENFRAME");
-		row_pressable(upd_row(what, "", of_done == n_of), news_open, "openframe");
-		upd_small(parts);
+		if (!n_parts) section(upd_list, "OPENFRAME");
+		snprintf(part_pkgs[n_parts], sizeof part_pkgs[0], "%.63s", it[i].pkg);
+		row_pressable(upd_row(upd_part(it[i].pkg), no_epoch(it[i].ver), it[i].done), news_open, part_pkgs[n_parts++]);
 	}
 	// apps
 	bool apps = false;
@@ -2870,10 +2858,9 @@ static void upd_show_list(char items[][96], int n, bool firmware_pending) {
 	for (int i = 0; i < m; i++) {
 		if (strcmp(it[i].tier, "apps")) continue;
 		if (!apps) { section(upd_list, "APPS"); apps = true; }
-		snprintf(t, sizeof t, "version %s", no_epoch(it[i].ver));
 		if (n_app_pkgs >= 32) continue;
 		snprintf(app_pkgs[n_app_pkgs], sizeof app_pkgs[0], "%.63s", it[i].pkg);
-		row_pressable(upd_row(strncmp(it[i].pkg, "ofapp-", 6) ? it[i].pkg : it[i].pkg + 6, t, it[i].done),
+		row_pressable(upd_row(strncmp(it[i].pkg, "ofapp-", 6) ? it[i].pkg : it[i].pkg + 6, no_epoch(it[i].ver), it[i].done),
 			      news_open, app_pkgs[n_app_pkgs++]);
 	}
 	// Debian's
