@@ -21,7 +21,7 @@
 #include "icons_table.h"
 #include "ui_icons.h"
 
-#define BAR_H 40
+#define BAR_H SPRITE_BAR_H
 // Corner radii follow one rule for every box (icons, buttons, cards, banners, highlights): in
 // proportion to the box's shorter side, as an app icon's 18 px is to its 88, up to 18 px. A
 // fixed radius would make small boxes look round. Only circles and pills (dots, the home pill,
@@ -281,19 +281,45 @@ static void invalidated(lv_event_t *e) {
 	if (visible) sprite_request_frame();
 }
 
+static void update_dots(void);
+
+// Whatever was open over the shell goes: it's going out of sight (or under an app).
+static void shell_tidy(void) {
+	ptr_pressed = false;
+	lv_obj_add_flag(toast, LV_OBJ_FLAG_HIDDEN);
+	if (toast_timer) { lv_timer_delete(toast_timer); toast_timer = NULL; }
+	if (hold_timer) { lv_timer_delete(hold_timer); hold_timer = NULL; }
+	opening = NULL;
+	tile_drop(false);
+	sheet_dismiss();
+	dialog_close();
+}
+
+// An app in front that keeps the bar (bar=yes): only the bar shows, with the app's name in
+// it, and the bar's buttons bring the shell back to the front (see bar_leave_app).
+static struct sprite_app *bar_app;
+static char page_title[64]; // the title the page in front has, for when the app goes
+
+void shell_set_bar_app(struct sprite_app *app) {
+	if (app == bar_app) return;
+	bar_app = app;
+	if (app) {
+		shell_tidy();
+		lv_label_set_text(bar_title, app->name);
+	} else {
+		lv_label_set_text(bar_title, page_title);
+	}
+	update_dots();
+	sprite_lvgl_kick();
+}
+
+// A button in the bar, pressed with an app in front below it: the shell first.
+static void bar_leave_app(void) { if (bar_app) sprite_go_home(); }
+
 void shell_set_visible(bool v) {
 	visible = v;
 	if (v) sprite_request_frame();
-	if (!v) {
-		ptr_pressed = false;
-		lv_obj_add_flag(toast, LV_OBJ_FLAG_HIDDEN);
-		if (toast_timer) { lv_timer_delete(toast_timer); toast_timer = NULL; }
-		if (hold_timer) { lv_timer_delete(hold_timer); hold_timer = NULL; }
-		opening = NULL;
-		tile_drop(false);
-		sheet_dismiss();
-		dialog_close();
-	}
+	if (!v) shell_tidy();
 }
 
 /* ---- icons ---- */
@@ -753,9 +779,10 @@ static void show_page(lv_obj_t *page) {
 	for (size_t i = 0; i < sizeof pages / sizeof pages[0]; i++)
 		if (pages[i]) lv_obj_add_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
 	lv_obj_remove_flag(page, LV_OBJ_FLAG_HIDDEN);
-	lv_label_set_text(bar_title, page == page_settings ? "Settings" : page == page_netinfo ? (netinfo_kind == NETINFO_WIFI ? "Wi-Fi" : "Ethernet") :
+	snprintf(page_title, sizeof page_title, "%s", page == page_settings ? "Settings" : page == page_netinfo ? (netinfo_kind == NETINFO_WIFI ? "Wi-Fi" : "Ethernet") :
 			  page == page_news ? "What's new" :
 			  page == page_wifi || page == page_entry ? "Wi-Fi" : "");
+	lv_label_set_text(bar_title, page_title);
 	update_dots();
 }
 
@@ -830,6 +857,12 @@ static void tile_clicked(lv_event_t *e) { open_app(lv_event_get_user_data(e)); }
 
 // The gear opens Settings, and from any of its screens goes home again.
 static void gear_clicked(lv_event_t *e) {
+	if (bar_app) { // over an app: Settings, as from home
+		bar_leave_app();
+		show_page(page_settings);
+		refresh_settings(NULL);
+		return;
+	}
 	if (!showing(page_home)) {
 		show_page(page_home);
 		return;
@@ -840,6 +873,7 @@ static void gear_clicked(lv_event_t *e) {
 
 // The network icons (and the warning): Settings, at the Network tab, from wherever we are.
 static void net_clicked(lv_event_t *e) {
+	bar_leave_app();
 	settings_show_tab(TAB_NETWORK);
 	show_page(page_settings);
 	refresh_settings(NULL);
@@ -847,6 +881,7 @@ static void net_clicked(lv_event_t *e) {
 
 // The updating sign: Settings, at Updates.
 static void upd_box_clicked(lv_event_t *e) {
+	bar_leave_app();
 	settings_show_tab(TAB_UPDATES);
 	show_page(page_settings);
 	refresh_settings(NULL);
@@ -1249,7 +1284,7 @@ static void drag_input(int x, int y, bool pressed, bool was_pressed) {
 static void update_dots(void) {
 	if (!dots) return;
 	lv_obj_clean(dots);
-	bool show = n_pages > 1 && !lv_obj_has_flag(page_home, LV_OBJ_FLAG_HIDDEN);
+	bool show = n_pages > 1 && !lv_obj_has_flag(page_home, LV_OBJ_FLAG_HIDDEN) && !bar_app;
 	if (!show) { lv_obj_add_flag(dots, LV_OBJ_FLAG_HIDDEN); return; }
 	lv_obj_remove_flag(dots, LV_OBJ_FLAG_HIDDEN);
 	for (int i = 0; i < n_pages; i++) {

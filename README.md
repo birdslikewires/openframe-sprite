@@ -74,6 +74,11 @@ allow=network
 - `color=`: the tile's colour
 - `display=x11`: for X11 and SDL apps; leave it out for native Wayland apps
 - `handle=`: the home pill while the app shows, `normal` (the default), `faint` or `hidden`
+- `bar=yes`: the status bar stays above the app, with its name in it, and the app's window is
+  the rest of the screen (800×440), for small apps that feel part of Sprite, like a
+  calculator. Without it, an app has the whole screen. The bar's buttons work as usual,
+  taking Sprite to the front; the pill does too. Only for apps that fit the window they're
+  given: one that always draws 800×480 loses its bottom 40 pixels
 - `allow=`: what the app may have beyond the display, `network` and `sound`, separated by
   spaces; without it, an app has neither
 
@@ -243,8 +248,6 @@ can still be joined.
 - Letting apps change the home pill while they run (a small Wayland protocol), and screen
   blanking
 - Sound and time zone in Settings
-- Apps choosing full screen (the pill as the app asks) or the bar kept above them, so a
-  small app like a calculator feels part of Sprite rather than replacing it
 - The app store: an index repository of app manifests, added to by pull request, with apps
   as i386 `.deb` packages
 - A CPU cap on apps in the background (`CPUQuota=`, which the kernel can do now)

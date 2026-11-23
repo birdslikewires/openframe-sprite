@@ -12,6 +12,7 @@
 #endif
 #define SPRITE_W 800
 #define SPRITE_H 480
+#define SPRITE_BAR_H 40 // the status bar, which an app can keep above it (manifest: bar=yes)
 
 // Going home. While an app shows, a pill-shaped handle sits at the middle of the home edge
 // (bottom by default; SPRITE_HOME_EDGE=top|bottom), and a touch that starts under it goes
@@ -59,6 +60,7 @@ struct sprite_app {
 	bool x11;           // needs Xwayland (manifest: display=x11)
 	bool pending;       // waiting for Xwayland, or the helper, before it runs
 	float handle;       // home handle opacity while this app shows (manifest: handle=normal|faint|hidden)
+	bool bar;           // the status bar stays above its window (manifest: bar=yes); else full screen
 	pid_t pid;          // launched process, 0 when not running
 	int pidfd;          // a sandboxed app's main process, watched for its exit (-1 if not)
 	struct wl_event_source *exit_src;
@@ -102,6 +104,7 @@ void shell_init(void *pixels);                // pixels: SPRITE_W x SPRITE_H XRG
 void shell_pointer(int x, int y, bool pressed);
 void shell_apps_changed(void);                // running state or list changed
 void shell_set_visible(bool visible);
+void shell_set_bar_app(struct sprite_app *app); // an app is in front below the bar (NULL: none)
 void shell_frame(void);                       // the display wants a frame: draw what has changed
 void shell_notice(const char *text);          // a banner on the home screen
 

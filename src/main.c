@@ -25,6 +25,9 @@
 #include <wlr/interfaces/wlr_buffer.h>
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
+#include <wlr/render/wlr_texture.h>
+#include <wlr/util/box.h>
+#include <wlr/types/wlr_buffer.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_data_device.h>
@@ -252,11 +255,23 @@ static void apply_foreground(void) {
 		if (v->tree) wlr_scene_node_set_enabled(&v->tree->node, v->mapped && v->app == S.fg && S.fg);
 		if (!S.fg || v != S.fg->view) set_view_active(v, false);
 	}
-	wlr_scene_node_set_enabled(&S.shell_node->node, S.fg == NULL && S.hold == NULL);
+	// An app that keeps the bar (bar=yes) has the shell's top strip above it: only that strip is
+	// shown, so nothing is composited under the app.
+	bool bar = S.fg && S.fg->bar;
+	if (bar) {
+		wlr_scene_buffer_set_source_box(S.shell_node, &(struct wlr_fbox){ 0, 0, SPRITE_W, SPRITE_BAR_H });
+		wlr_scene_buffer_set_dest_size(S.shell_node, SPRITE_W, SPRITE_BAR_H);
+	} else {
+		wlr_scene_buffer_set_source_box(S.shell_node, NULL);
+		wlr_scene_buffer_set_dest_size(S.shell_node, 0, 0);
+	}
+	bool shell = (S.fg == NULL && S.hold == NULL) || bar;
+	wlr_scene_node_set_enabled(&S.shell_node->node, shell);
 	wlr_scene_node_set_enabled(&S.handle->node, S.fg != NULL);
 	wlr_scene_node_raise_to_top(&S.handle->node);
 	handle_show(S.fg);
-	shell_set_visible(S.fg == NULL && S.hold == NULL);
+	shell_set_visible(shell);
+	shell_set_bar_app(bar ? S.fg : NULL);
 	if (S.fg && S.fg->view) {
 		wlr_scene_node_raise_to_top(&S.fg->view->tree->node);
 		wl_list_for_each(v, &S.views, link) // X menus and tooltips stay above the main window
@@ -360,9 +375,14 @@ static void view_unmapped(struct sprite_view *v) {
 
 /* ---- xdg-shell ---- */
 
+// Where an app's windows start: below the bar if it keeps it (bar=yes), else at the top.
+static int app_top(struct sprite_app *a) { return a && a->bar ? SPRITE_BAR_H : 0; }
+
 static void xdg_map(struct wl_listener *l, void *data) {
 	struct sprite_view *v = wl_container_of(l, v, map);
 	v->primary = v->xdg->parent == NULL; // a parent can be set after creation
+	if (!v->app) v->app = apps_for_pid(view_pid(v));
+	wlr_scene_node_set_position(&v->tree->node, 0, app_top(v->app));
 	view_mapped(v);
 }
 static void xdg_unmap(struct wl_listener *l, void *data) {
@@ -373,8 +393,12 @@ static void xdg_unmap(struct wl_listener *l, void *data) {
 static void xdg_commit(struct wl_listener *l, void *data) {
 	struct sprite_view *v = wl_container_of(l, v, commit);
 	if (v->xdg->base->initial_commit) {
-		wlr_xdg_toplevel_set_size(v->xdg, SPRITE_W, SPRITE_H);
-		wlr_xdg_toplevel_set_fullscreen(v->xdg, true);
+		if (!v->app) v->app = apps_for_pid(view_pid(v));
+		int top = app_top(v->app);
+		wlr_xdg_toplevel_set_size(v->xdg, SPRITE_W, SPRITE_H - top);
+		// below the bar it's the whole space it has, not the whole screen
+		if (top) wlr_xdg_toplevel_set_maximized(v->xdg, true);
+		else wlr_xdg_toplevel_set_fullscreen(v->xdg, true);
 	}
 }
 
@@ -451,8 +475,12 @@ static void xw_map(struct wl_listener *l, void *data) {
 	if (v->xw->override_redirect) {
 		wlr_scene_node_set_position(&v->tree->node, v->xw->x, v->xw->y);
 	} else {
-		wlr_xwayland_surface_configure(v->xw, 0, 0, SPRITE_W, SPRITE_H);
-		wlr_xwayland_surface_set_fullscreen(v->xw, true);
+		if (!v->app) v->app = apps_for_pid(view_pid(v));
+		int top = app_top(v->app);
+		wlr_xwayland_surface_configure(v->xw, 0, top, SPRITE_W, SPRITE_H - top);
+		wlr_scene_node_set_position(&v->tree->node, 0, top);
+		if (top) wlr_xwayland_surface_set_maximized(v->xw, true);
+		else wlr_xwayland_surface_set_fullscreen(v->xw, true);
 	}
 	view_mapped(v);
 }
@@ -485,7 +513,8 @@ static void xw_request_configure(struct wl_listener *l, void *data) {
 		wlr_xwayland_surface_configure(v->xw, e->x, e->y, e->width, e->height);
 		if (v->tree) wlr_scene_node_set_position(&v->tree->node, e->x, e->y);
 	} else {
-		wlr_xwayland_surface_configure(v->xw, 0, 0, SPRITE_W, SPRITE_H); // always fullscreen
+		int top = app_top(v->app); // always the whole of its space
+		wlr_xwayland_surface_configure(v->xw, 0, top, SPRITE_W, SPRITE_H - top);
 	}
 }
 
@@ -617,6 +646,11 @@ static void input_press(double x, double y, uint32_t t, uint32_t button) {
 			wlr_log(WLR_INFO, "home from the %s edge (y=%.0f)", S.home_bottom ? "bottom" : "top", y);
 			S.gesture = G_DONE;
 			sprite_go_home();
+			return;
+		}
+		if (S.fg->bar && y < SPRITE_BAR_H) { // the bar above it is the shell's
+			S.gesture = G_SHELL;
+			shell_pointer((int)x, (int)y, true);
 			return;
 		}
 		S.gesture = G_APP;
@@ -889,7 +923,8 @@ static void new_output(struct wl_listener *l, void *data) {
 /* ---- children ---- */
 
 // SIGUSR1: save the shell as it's drawn (not apps) to $XDG_RUNTIME_DIR/sprite-shot.ppm, for
-// looking at the UI without a camera. 'pkill -USR1 -x sprite' as the of user.
+// looking at the UI without a camera. 'pkill -USR1 -x sprite' as the of user. (SIGUSR2, below,
+// saves the whole screen, apps and all.)
 static int on_screenshot(int sig, void *data) {
 	char path[256];
 	snprintf(path, sizeof path, "%s/sprite-shot.ppm", getenv("XDG_RUNTIME_DIR") ? getenv("XDG_RUNTIME_DIR") : "/tmp");
@@ -903,6 +938,81 @@ static int on_screenshot(int sig, void *data) {
 	}
 	fclose(f);
 	wlr_log(WLR_INFO, "screenshot: %s", path);
+	return 0;
+}
+
+// SIGUSR2: the whole screen as it shows, apps and all, to $XDG_RUNTIME_DIR/sprite-screen.ppm:
+// every buffer in the scene that's shown, bottom to top, blended by its opacity.
+struct screen_shot { uint32_t *px; uint32_t *tmp; };
+static void screen_blend(struct wlr_scene_buffer *sb, int sx, int sy, void *data) {
+	struct screen_shot *ss = data;
+	int w, h;
+	const uint32_t *src;
+	int stride;
+	struct wlr_fbox box = sb->src_box;
+	if (sb == S.shell_node || sb == S.handle) {
+		struct shell_buffer *b = sb == S.shell_node ? &S.shellbuf : &S.handlebuf;
+		w = b->base.width;
+		h = b->base.height;
+		src = b->pixels;
+		stride = w;
+		if (!wlr_fbox_empty(&box)) { // (the bar strip)
+			src += (int)box.y * stride + (int)box.x;
+			w = (int)box.width;
+			h = (int)box.height;
+		}
+	} else {
+		// an app's buffer has its texture in its client buffer; others, in the scene's
+		struct wlr_client_buffer *cb = sb->buffer ? wlr_client_buffer_get(sb->buffer) : NULL;
+		struct wlr_texture *tex = cb ? cb->texture : sb->texture;
+		if (!tex) return; // not drawn yet
+		w = tex->width;
+		h = tex->height;
+		if (w > SPRITE_W || h > SPRITE_H) return;
+		if (!wlr_texture_read_pixels(tex, &(struct wlr_texture_read_pixels_options){
+			    .data = ss->tmp, .format = DRM_FORMAT_ARGB8888, .stride = w * 4 })) return;
+		src = ss->tmp;
+		stride = w;
+	}
+	bool opaque = sb == S.shell_node; // (XRGB: its alpha byte means nothing)
+	float op = sb->opacity;
+	for (int y = 0; y < h; y++) {
+		int ty = sy + y;
+		if (ty < 0 || ty >= SPRITE_H) continue;
+		for (int x = 0; x < w; x++) {
+			int tx = sx + x;
+			if (tx < 0 || tx >= SPRITE_W) continue;
+			uint32_t s = src[y * stride + x], *d = &ss->px[ty * SPRITE_W + tx];
+			float a = (opaque ? 1.0f : ((s >> 24) & 0xff) / 255.0f) * op;
+			uint32_t o = 0;
+			for (int c = 0; c < 24; c += 8) { // premultiplied: src * opacity + dst * (1 - a)
+				float v = ((s >> c) & 0xff) * op + ((*d >> c) & 0xff) * (1 - a);
+				o |= (uint32_t)(v > 255 ? 255 : v + 0.5f) << c;
+			}
+			*d = o;
+		}
+	}
+}
+
+static int on_screen_shot(int sig, void *data) {
+	struct screen_shot ss = { calloc(SPRITE_W * SPRITE_H, 4), calloc(SPRITE_W * SPRITE_H, 4) };
+	if (!ss.px || !ss.tmp) { free(ss.px); free(ss.tmp); return 0; }
+	wlr_scene_node_for_each_buffer(&S.scene->tree.node, screen_blend, &ss);
+	char path[256];
+	snprintf(path, sizeof path, "%s/sprite-screen.ppm", getenv("XDG_RUNTIME_DIR") ? getenv("XDG_RUNTIME_DIR") : "/tmp");
+	FILE *f = fopen(path, "wb");
+	if (f) {
+		fprintf(f, "P6\n%d %d\n255\n", SPRITE_W, SPRITE_H);
+		for (int i = 0; i < SPRITE_W * SPRITE_H; i++) {
+			uint32_t p = ss.px[i];
+			unsigned char rgb[3] = { (p >> 16) & 0xff, (p >> 8) & 0xff, p & 0xff };
+			fwrite(rgb, 1, 3, f);
+		}
+		fclose(f);
+		wlr_log(WLR_INFO, "screenshot: %s", path);
+	}
+	free(ss.px);
+	free(ss.tmp);
 	return 0;
 }
 
@@ -965,6 +1075,7 @@ int main(int argc, char **argv) {
 	sigaddset(&chld, SIGTERM);
 	sigaddset(&chld, SIGINT);
 	sigaddset(&chld, SIGUSR1);
+	sigaddset(&chld, SIGUSR2);
 	pthread_sigmask(SIG_BLOCK, &chld, NULL);
 	wlr_log_init(getenv("SPRITE_DEBUG") ? WLR_DEBUG : WLR_INFO, NULL);
 	const char *apps_dir = getenv("SPRITE_APPS");
@@ -1087,6 +1198,7 @@ int main(int argc, char **argv) {
 	wl_event_loop_add_signal(S.loop, SIGTERM, on_terminate, NULL);
 	wl_event_loop_add_signal(S.loop, SIGINT, on_terminate, NULL);
 	wl_event_loop_add_signal(S.loop, SIGUSR1, on_screenshot, NULL);
+	wl_event_loop_add_signal(S.loop, SIGUSR2, on_screen_shot, NULL);
 	S.release_timer = wl_event_loop_add_timer(S.loop, release_timer_cb, NULL);
 	S.handle_timer = wl_event_loop_add_timer(S.loop, handle_timer_cb, NULL);
 

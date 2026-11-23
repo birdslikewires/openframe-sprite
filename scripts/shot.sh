@@ -1,12 +1,14 @@
 #!/bin/sh
-# Take a screenshot of sprite's shell on an OpenFrame, as out/shot.png.
-#   OFH=of@192.168.11.131 scripts/shot.sh [name]
+# Take a screenshot of sprite's shell on an OpenFrame, as out/shot.png; with SCREEN=1, the
+# whole screen, apps and all (SIGUSR2), rather than the shell alone (SIGUSR1).
+#   OFH=of@192.168.11.131 [SCREEN=1] scripts/shot.sh [name]
 set -e
 cd "$(dirname "$0")/.."
 : "${OFH:?set OFH to user@address of the OpenFrame}"
 name=${1:-shot}
 # sprite runs as its own user, so it takes sudo to signal it and read what it saves.
-ssh $SSH_OPTS "$OFH" 'sudo pkill -USR1 -x sprite; sleep 0.5; sudo cat /run/user/$(id -u sprite)/sprite-shot.ppm' </dev/null > "out/$name.ppm"
+if [ -n "${SCREEN:-}" ]; then sig=USR2 file=sprite-screen.ppm; else sig=USR1 file=sprite-shot.ppm; fi
+ssh $SSH_OPTS "$OFH" "sudo pkill -$sig -x sprite; sleep 1; sudo cat /run/user/\$(id -u sprite)/$file" </dev/null > "out/$name.ppm"
 python3 - "out/$name.ppm" "out/$name.png" <<'PY'
 import sys, zlib, struct
 data = open(sys.argv[1], 'rb').read()

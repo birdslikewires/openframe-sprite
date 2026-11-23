@@ -275,7 +275,9 @@ the long-press sheet, the Restart and Switch off questions, and the calibration 
 ## 11. Apps
 
 - **Full screen at 800×480,** drawn in software (no GL). Wayland apps connect directly; X11
-  and SDL apps go through Xwayland.
+  and SDL apps go through Xwayland. Or **below the bar** (`bar=yes`, 800×440): small apps
+  that are part of the OpenFrame's everyday use (a calculator) keep the bar, with their name
+  as its title, so they feel part of Sprite; whole-screen ones (a clock, HamClock) take it all.
 - **A manifest** gives the name (keep it short; two lines of 16 px fit about 28 characters),
   a `color=` for the icon, and an icon glyph keyword.
 - **`handle=faint` or `handle=hidden`** for apps whose content needs the bottom edge clear.

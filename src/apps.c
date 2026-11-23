@@ -14,6 +14,7 @@
 //   builtin=settings     (handled by sprite itself, no exec)
 //   display=x11          (an X11 or SDL app, run through Xwayland; default wayland)
 //   handle=faint         (home handle: normal, faint or hidden while the app shows)
+//   bar=yes              (the status bar stays above it, its window below; default full screen)
 //   allow=network sound  (what a sandboxed app may have beyond the display; read by the helper)
 // Comments go on lines of their own.
 #define _GNU_SOURCE
@@ -107,6 +108,7 @@ static void load_dir(const char *dir) {
 			else if (!strcmp(k, "color")) a->color = strtoul(v, NULL, 16);
 			else if (!strcmp(k, "builtin")) { a->builtin = true; snprintf(a->exec, sizeof a->exec, "%s", v); }
 			else if (!strcmp(k, "display")) a->x11 = !strcmp(v, "x11");
+			else if (!strcmp(k, "bar")) a->bar = !strcmp(v, "yes");
 			else if (!strcmp(k, "handle"))
 				a->handle = !strcmp(v, "hidden") ? 0.0f : !strcmp(v, "faint") ? SPRITE_HANDLE_FAINT : SPRITE_HANDLE_NORMAL;
 		}
