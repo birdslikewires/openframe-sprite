@@ -12,6 +12,7 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -117,7 +118,8 @@ bool audio_set_volume(const char *card, const char *ctl, int pct) {
 // as it goes, into ALSA's default (wherever of-audio sends the sound, at its volume, or
 // straight to a DAC), on a thread of its own so the shell carries on drawing.
 #define TS_RATE 44100
-#define TS_SECS 3.2
+#define TS_SECS 5.0  // the chord rings on for three seconds
+#define TS_FADE 0.4  // and the last of it fades to nothing, so the end can't click
 static atomic_int ts_state;      // 0 idle, 1 playing, -1 couldn't (since the last ask)
 static double ts_started;
 
@@ -125,16 +127,30 @@ struct ts_note { double at, freq, decay; int side; }; // side: -1 left, 1 right,
 static const struct ts_note ts_notes[] = {
 	{ 0.00, 523.25, 0.35, -1 }, { 0.13, 659.25, 0.35, -1 }, { 0.26, 783.99, 0.45, -1 },   // C5 E5 G5
 	{ 0.95, 783.99, 0.35, 1 },  { 1.08, 1046.50, 0.35, 1 }, { 1.21, 1318.51, 0.45, 1 },  // G5 C6 E6
-	{ 1.95, 523.25, 0.70, 0 },  { 1.95, 659.25, 0.70, 0 },  { 1.95, 783.99, 0.70, 0 },   // C major,
-	{ 1.98, 1046.50, 0.60, 0 },                                                          // both
+	{ 1.95, 523.25, 0.90, 0 },  { 1.95, 659.25, 0.90, 0 },  { 1.95, 783.99, 0.90, 0 },   // C major,
+	{ 1.98, 1046.50, 0.75, 0 },                                                          // both
 };
 
-// A bell-ish tone: the note and two softer overtones, a 4 ms rise (no click) and a decay.
-static double ts_tone(const struct ts_note *n, double t) {
-	if (t < 0) return 0;
-	double env = (t < 0.004 ? t / 0.004 : 1) * exp(-t / n->decay);
-	double w = 2 * M_PI * n->freq * t;
-	return env * (sin(w) + 0.25 * sin(2 * w) + 0.08 * sin(3 * w));
+// A bell-ish tone: the note and two softer overtones (from it: sin 2w = 2 sin w cos w,
+// sin 3w = 3 sin w - 4 sin^3 w), a 4 ms rise (no click) and a decay. Each note's oscillator
+// turns by a fixed step and its level falls by a fixed factor per sample, so making the
+// whole sound takes a few tens of milliseconds on the Atom rather than most of a second.
+struct ts_osc { double s, c, ds, dc, env, fall; long start, rise; };
+static void ts_osc_init(struct ts_osc *o, const struct ts_note *n) {
+	double w = 2 * M_PI * n->freq / TS_RATE;
+	o->s = 0; o->c = 1; o->ds = sin(w); o->dc = cos(w);
+	o->env = 1; o->fall = exp(-1.0 / (n->decay * TS_RATE));
+	o->start = lrint(n->at * TS_RATE); o->rise = lrint(0.004 * TS_RATE);
+}
+static double ts_osc_next(struct ts_osc *o, long f) {
+	if (f < o->start) return 0;
+	double s = o->s, c = o->c, v = (s + 0.25 * 2 * s * c + 0.08 * (3 * s - 4 * s * s * s)) * o->env;
+	long a = f - o->start;
+	if (a < o->rise) v *= (double)a / o->rise;
+	o->s = s * o->dc + c * o->ds; // turn on by one step
+	o->c = c * o->dc - s * o->ds;
+	o->env *= o->fall;
+	return v;
 }
 
 static double now_s(void) {
@@ -143,40 +159,46 @@ static double now_s(void) {
 	return ts.tv_sec + ts.tv_nsec / 1e9;
 }
 
+// All of it made first, then played: made as it played, the thread could fall behind for a
+// moment just as it started (the shell busy drawing the tap), and the gap clicked.
 static void *ts_play(void *arg) {
+	long total = (long)(TS_SECS * TS_RATE), fade = (long)(TS_FADE * TS_RATE);
+	int16_t *buf = malloc(total * 2 * sizeof *buf);
+	if (!buf) { ts_state = -1; return NULL; }
+	enum { N = sizeof ts_notes / sizeof ts_notes[0] };
+	struct ts_osc osc[N];
+	for (int k = 0; k < N; k++) ts_osc_init(&osc[k], &ts_notes[k]);
+	for (long f = 0; f < total; f++) {
+		double l = 0, r = 0;
+		for (int k = 0; k < N; k++) {
+			double v = ts_osc_next(&osc[k], f);
+			if (ts_notes[k].side <= 0) l += v;
+			if (ts_notes[k].side >= 0) r += v;
+		}
+		// about 6 dB below full scale at the loudest (the chord), whatever the volume
+		double g = 0.14 * 32767;
+		if (f > total - fade) g *= 0.5 + 0.5 * cos(M_PI * (f - (total - fade)) / fade);
+		buf[2 * f] = (int16_t)lrint(l * g);
+		buf[2 * f + 1] = (int16_t)lrint(r * g);
+	}
 	snd_pcm_t *pcm;
-	if (snd_pcm_open(&pcm, "default", SND_PCM_STREAM_PLAYBACK, 0) < 0) { ts_state = -1; return NULL; }
-	if (snd_pcm_set_params(pcm, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED, 2, TS_RATE, 1, 150000) < 0) {
+	if (snd_pcm_open(&pcm, "default", SND_PCM_STREAM_PLAYBACK, 0) < 0) { free(buf); ts_state = -1; return NULL; }
+	if (snd_pcm_set_params(pcm, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED, 2, TS_RATE, 1, 400000) < 0) {
 		snd_pcm_close(pcm);
+		free(buf);
 		ts_state = -1;
 		return NULL;
 	}
 	ts_started = now_s();
-	enum { CHUNK = 1024 };
-	int16_t buf[CHUNK * 2];
-	long total = (long)(TS_SECS * TS_RATE);
-	for (long f0 = 0; f0 < total; f0 += CHUNK) {
-		int n = total - f0 < CHUNK ? (int)(total - f0) : CHUNK;
-		for (int i = 0; i < n; i++) {
-			double t = (double)(f0 + i) / TS_RATE, l = 0, r = 0;
-			for (size_t k = 0; k < sizeof ts_notes / sizeof ts_notes[0]; k++) {
-				double v = ts_tone(&ts_notes[k], t - ts_notes[k].at);
-				if (ts_notes[k].side <= 0) l += v;
-				if (ts_notes[k].side >= 0) r += v;
-			}
-			// about 6 dB below full scale at the loudest (the chord), whatever the volume
-			buf[2 * i] = (int16_t)lrint(l * 0.14 * 32767);
-			buf[2 * i + 1] = (int16_t)lrint(r * 0.14 * 32767);
-		}
-		for (int done = 0; done < n;) {
-			snd_pcm_sframes_t w = snd_pcm_writei(pcm, buf + 2 * done, n - done);
-			if (w < 0) w = snd_pcm_recover(pcm, (int)w, 1);
-			if (w < 0) { snd_pcm_close(pcm); ts_state = -1; return NULL; }
-			done += (int)w;
-		}
+	for (long done = 0; done < total;) {
+		snd_pcm_sframes_t w = snd_pcm_writei(pcm, buf + 2 * done, total - done);
+		if (w < 0) w = snd_pcm_recover(pcm, (int)w, 1);
+		if (w < 0) { snd_pcm_close(pcm); free(buf); ts_state = -1; return NULL; }
+		done += w;
 	}
 	snd_pcm_drain(pcm);
 	snd_pcm_close(pcm);
+	free(buf);
 	ts_state = 0;
 	return NULL;
 }
@@ -203,6 +225,6 @@ int audio_test_state(void) {
 	int s = ts_state;
 	if (s <= 0) return s;
 	double t = now_s() - ts_started;
-	return t < 0.9 ? 1 : t < 1.9 ? 2 : 3;
+	return t < 0.9 ? 1 : t < 1.9 ? 2 : 3; // (the label for "both" stays on to the end)
 }
 void audio_test_seen(void) { int f = -1; atomic_compare_exchange_strong(&ts_state, &f, 0); }
