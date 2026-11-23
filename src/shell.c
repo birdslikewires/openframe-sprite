@@ -2477,7 +2477,9 @@ static void net_row_pressable(lv_obj_t *r, int kind) { row_pressable(r, netinfo_
 // A row that opens more about itself: pressable across its width, its highlight reaching past
 // the text as a list row's does, with a chevron at its end in the accent colour.
 static void row_pressable(lv_obj_t *r, lv_event_cb_t cb, void *data) {
-	lv_obj_set_width(r, PANEL_TEXT_W + 2 * LIST_ROW_PAD);
+	// a whole touch target tall, whatever's in it, so its highlight has room and its corners
+	// are rounded by its size (rounded() needs one)
+	lv_obj_set_size(r, PANEL_TEXT_W + 2 * LIST_ROW_PAD, ROW_H);
 	lv_obj_set_style_translate_x(r, -LIST_ROW_PAD, 0);
 	lv_obj_set_style_pad_hor(r, LIST_ROW_PAD, 0);
 	lv_obj_set_style_bg_color(r, lv_color_white(), LV_STATE_PRESSED);
@@ -3305,11 +3307,18 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_add_flag(upd_restart_btn, LV_OBJ_FLAG_HIDDEN);
 	upd_list = lv_obj_create(pu); // what's waiting (upd_show_list)
 	lv_obj_remove_style_all(upd_list);
-	lv_obj_set_size(upd_list, LV_PCT(100), LV_SIZE_CONTENT);
+	lv_obj_set_height(upd_list, LV_SIZE_CONTENT);
 	lv_obj_set_flex_flow(upd_list, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_style_pad_row(upd_list, 8, 0);
 	lv_obj_set_style_margin_top(upd_list, HEADING_SPACE, 0);
 	lv_obj_remove_flag(upd_list, LV_OBJ_FLAG_SCROLLABLE);
+	// Its rows' highlights reach LIST_ROW_PAD past the text (row_pressable), so the list
+	// reaches that far too, its padding keeping everything else where it was: it would clip
+	// them otherwise.
+	lv_obj_set_width(upd_list, PANEL_TEXT_W + 2 * LIST_ROW_PAD);
+	lv_obj_set_style_margin_left(upd_list, -LIST_ROW_PAD, 0);
+	lv_obj_set_style_margin_right(upd_list, -LIST_ROW_PAD, 0);
+	lv_obj_set_style_pad_hor(upd_list, LIST_ROW_PAD, 0);
 	lv_obj_add_flag(upd_list, LV_OBJ_FLAG_HIDDEN);
 	lv_obj_t *uh = lv_label_create(pu);
 	lv_label_set_text(uh, "The OpenFrame updates itself at night, or soon after it starts if it was off. "
