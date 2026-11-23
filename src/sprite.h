@@ -163,6 +163,7 @@ int wifi_signal(const char *ifname);          // dBm of the network joined (nl80
 int sysinfo_backlight(void);                  // 0-100, -1 if unknown
 bool sysinfo_backlight_auto(void);
 void sysinfo_set_backlight(const char *arg);  // "0".."100" or "auto", runs of-backlight
+void sysinfo_backlight_request(const char *req); // "show N" or "resume", straight to its service
 void sysinfo_summary(char *buf, size_t len);  // multi-line system text
 void sysinfo_run(const char *cmd);            // fire and forget
 #define HELPER_SOCKET "/run/sprite-helper.sock"

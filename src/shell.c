@@ -27,6 +27,8 @@
 // fixed radius would make small boxes look round. Only circles and pills (dots, the home pill,
 // switches, slider ends) are rounder. See rounded().
 #define UI_RADIUS 18                                        // the most any box gets
+#define SLIDER_KNOB_PAD 4 // how far a slider's knob reaches past the bar, all round
+#define BL_SLIDER_H 24    // the brightness slider's bar
 #define RADIUS_RATIO (18.0 / 88.0)
 // Where content starts on every screen, below the status bar: the home grid's first icon and
 // Settings' first control sit at the same point, (CONTENT_X, BAR_H + CONTENT_TOP), and the
@@ -1660,6 +1662,7 @@ static void bl_limits_saved(char *reply, void *data) {
 	if (strcmp(st, "ok")) {
 		lv_obj_t *card = dialog_open(NULL, "Brightness not changed", reason_text(st), true);
 		dialog_button(card, "OK", BUTTON_MAIN, dialog_cancel, NULL);
+		sysinfo_backlight_request("resume"); // (saved, of-backlight set has done this)
 	}
 	bl_limits_ask(); // what's in the file now
 }
@@ -1670,7 +1673,42 @@ static void bl_limits_save(void) {
 	helper_request(req, bl_limits_saved, NULL);
 }
 
+// While the slider's held, the backlight shows the level under the finger: at once as a knob
+// is grabbed, following it as it's dragged (of-backlight show, no fade), and fading back to
+// what it should be as it's let go (the limits saved, or the level set).
+static int bl_shown = -1;
+
+static void bl_show(int v) {
+	if (v == bl_shown) return;
+	bl_shown = v;
+	char req[16];
+	snprintf(req, sizeof req, "show %d", v);
+	sysinfo_backlight_request(req);
+}
+
+// The knob a press has: LVGL only picks one once the finger moves, so its rule is used here
+// (beyond either knob, that one; between them, the nearer).
+static void bl_pressed(lv_event_t *e) {
+	lv_slider_t *s = (lv_slider_t *)bl_slider;
+	bl_shown = -1;
+	if (lv_slider_get_mode(bl_slider) != LV_SLIDER_MODE_RANGE) { bl_show(lv_slider_get_value(bl_slider)); return; }
+	lv_point_t p;
+	lv_indev_get_point(lv_indev_active(), &p);
+	lv_obj_transform_point(bl_slider, &p, LV_OBJ_POINT_TRANSFORM_FLAG_INVERSE_RECURSIVE);
+	int32_t lc = (s->left_knob_area.x1 + s->left_knob_area.x2) / 2, rc = (s->right_knob_area.x1 + s->right_knob_area.x2) / 2;
+	bool right = p.x > s->right_knob_area.x2 || (p.x >= s->left_knob_area.x1 && LV_ABS(rc - p.x) < LV_ABS(lc - p.x));
+	bl_show(right ? lv_slider_get_value(bl_slider) : lv_slider_get_left_value(bl_slider));
+}
+
+static void bl_dragged(lv_event_t *e) {
+	if (!lv_obj_has_state(bl_slider, LV_STATE_PRESSED)) return; // set from here, not by a finger
+	lv_slider_t *s = (lv_slider_t *)bl_slider;
+	bool left = lv_slider_get_mode(bl_slider) == LV_SLIDER_MODE_RANGE && s->value_to_set == &s->bar.start_value;
+	bl_show(left ? lv_slider_get_left_value(bl_slider) : lv_slider_get_value(bl_slider));
+}
+
 static void bl_released(lv_event_t *e) {
+	bl_shown = -1;
 	if (lv_slider_get_mode(bl_slider) == LV_SLIDER_MODE_RANGE) {
 		bl_min = (int)lv_slider_get_left_value(bl_slider);
 		bl_max = (int)lv_slider_get_value(bl_slider);
@@ -3544,13 +3582,17 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_style_pad_column(row, 24, 0);
-	lv_obj_set_style_pad_hor(row, 12, 0); // room for the slider's knob at either end
+	// room for the slider's knob at either end: half the bar's height, and what it reaches past
+	lv_obj_set_style_pad_hor(row, BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0);
 	bl_slider = lv_slider_create(row);
-	lv_obj_set_height(bl_slider, 24);
+	lv_obj_set_height(bl_slider, BL_SLIDER_H);
 	lv_obj_set_flex_grow(bl_slider, 1);
 	lv_slider_set_range(bl_slider, 5, 100);
 	lv_obj_set_ext_click_area(bl_slider, 20); // easier to grab with a finger
 	lv_obj_add_event_cb(bl_slider, bl_released, LV_EVENT_RELEASED, NULL);
+	lv_obj_add_event_cb(bl_slider, bl_released, LV_EVENT_PRESS_LOST, NULL);
+	lv_obj_add_event_cb(bl_slider, bl_pressed, LV_EVENT_PRESSED, NULL);
+	lv_obj_add_event_cb(bl_slider, bl_dragged, LV_EVENT_VALUE_CHANGED, NULL);
 	lv_obj_t *al = lv_label_create(row);
 	lv_label_set_text(al, "Auto");
 	lv_obj_set_style_text_font(al, &lv_font_montserrat_20, 0);
@@ -3566,7 +3608,7 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_text_color(bl_hint, lv_color_hex(C_DIM), 0);
 	lv_obj_add_flag(bl_hint, LV_OBJ_FLAG_HIDDEN);
 	bl_off_row = switch_row(pd, "Screen off in the dark", true, bl_off_changed);
-	lv_obj_set_style_pad_right(bl_off_row, 12, 0); // its switch under Auto's (that row's inset for the knob)
+	lv_obj_set_style_pad_right(bl_off_row, BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0); // its switch under Auto's (that row's inset for the knob)
 	lv_obj_add_flag(bl_off_row, LV_OBJ_FLAG_HIDDEN);
 	section(pd, "TOUCH");
 	lv_obj_t *trow = button_row(pd);
@@ -3708,6 +3750,18 @@ static lv_theme_t theme;
 static void theme_apply(lv_theme_t *th, lv_obj_t *obj) {
 	if (lv_obj_check_type(obj, &lv_button_class) || lv_obj_check_type(obj, &lv_msgbox_class))
 		lv_obj_add_event_cb(obj, radius_on_size, LV_EVENT_SIZE_CHANGED, NULL);
+	// A slider's knobs white, as a switch's is, so they stand out from the bar, and a known
+	// size past it (SLIDER_KNOB_PAD), so what holds a slider can leave room for them.
+	if (lv_obj_check_type(obj, &lv_slider_class)) {
+		static lv_style_t knob;
+		if (!knob.prop_cnt) {
+			lv_style_init(&knob);
+			lv_style_set_bg_color(&knob, lv_color_white());
+			lv_style_set_bg_opa(&knob, LV_OPA_COVER);
+			lv_style_set_pad_all(&knob, SLIDER_KNOB_PAD);
+		}
+		lv_obj_add_style(obj, &knob, LV_PART_KNOB);
+	}
 }
 
 /* ---- the welcome: once, at the first start of a new system (or one that's been erased) ---- */

@@ -5,6 +5,7 @@
 #define _GNU_SOURCE
 #include <arpa/inet.h>
 #include <dirent.h>
+#include <fcntl.h>
 #include <ifaddrs.h>
 #include <linux/genetlink.h>
 #include <linux/if_addr.h>
@@ -384,6 +385,18 @@ void sysinfo_helper(const char *line) {
 		_exit(0);
 	}
 	if (pid > 0) waitpid(pid, NULL, 0);
+}
+
+// A request straight into of-backlight's service (its control pipe, which anyone may write
+// and it holds open): many a second while a slider's dragged, with no process started for
+// each. Without the service there's no pipe, and nothing happens.
+void sysinfo_backlight_request(const char *req) {
+	int fd = open("/run/of-backlight/control", O_WRONLY | O_NONBLOCK | O_CLOEXEC);
+	if (fd < 0) return;
+	char line[32];
+	int n = snprintf(line, sizeof line, "%s\n", req);
+	if (n > 0 && n < (int)sizeof line && write(fd, line, n) < 0) { /* full: the next one will do */ }
+	close(fd);
 }
 
 void sysinfo_set_backlight(const char *arg) {
