@@ -118,8 +118,8 @@ bool audio_set_volume(const char *card, const char *ctl, int pct) {
 // as it goes, into ALSA's default (wherever of-audio sends the sound, at its volume, or
 // straight to a DAC), on a thread of its own so the shell carries on drawing.
 #define TS_RATE 44100
-#define TS_SECS 5.0  // the chord rings on for three seconds
-#define TS_FADE 0.4  // and the last of it fades to nothing, so the end can't click
+#define TS_SECS 3.6  // the chord rings on for a second and a half
+#define TS_FADE 0.3  // and the last of it fades to nothing, so the end can't click
 static atomic_int ts_state;      // 0 idle, 1 playing, -1 couldn't (since the last ask)
 static double ts_started;
 
@@ -127,8 +127,8 @@ struct ts_note { double at, freq, decay; int side; }; // side: -1 left, 1 right,
 static const struct ts_note ts_notes[] = {
 	{ 0.00, 523.25, 0.35, -1 }, { 0.13, 659.25, 0.35, -1 }, { 0.26, 783.99, 0.45, -1 },   // C5 E5 G5
 	{ 0.95, 783.99, 0.35, 1 },  { 1.08, 1046.50, 0.35, 1 }, { 1.21, 1318.51, 0.45, 1 },  // G5 C6 E6
-	{ 1.95, 523.25, 0.90, 0 },  { 1.95, 659.25, 0.90, 0 },  { 1.95, 783.99, 0.90, 0 },   // C major,
-	{ 1.98, 1046.50, 0.75, 0 },                                                          // both
+	{ 1.95, 523.25, 0.55, 0 },  { 1.95, 659.25, 0.55, 0 },  { 1.95, 783.99, 0.55, 0 },   // C major,
+	{ 1.98, 1046.50, 0.45, 0 },                                                          // both
 };
 
 // A bell-ish tone: the note and two softer overtones (from it: sin 2w = 2 sin w cos w,
