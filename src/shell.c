@@ -2933,11 +2933,11 @@ static lv_obj_t *name_label, *name_host_label;
 
 static void name_refresh(void) {
 	if (!name_label) return;
-	char name[96], host[72], t[96];
+	char name[96], host[72];
 	sysinfo_name(name, sizeof name, host, sizeof host);
 	set_text(name_label, name);
-	snprintf(t, sizeof t, "%s.local", host);
-	set_text(name_host_label, t);
+	// its name on the network (what the router lists), when that isn't just the name
+	set_text(name_host_label, strcasecmp(name, host) ? host : "");
 }
 
 static void name_set_done(char *reply, void *data) {
@@ -3836,7 +3836,7 @@ static void build_settings(lv_obj_t *scr) {
 
 	// About
 	lv_obj_t *pa = settings_panel_new(TAB_ABOUT);
-	// Its name (name.txt), and what other computers on the network can reach it as
+	// Its name (name.txt), and the hostname made from it
 	section(pa, "NAME");
 	lv_obj_t *nr = lv_obj_create(pa);
 	lv_obj_remove_style_all(nr);

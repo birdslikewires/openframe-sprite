@@ -51,7 +51,7 @@ The ground rules for how it looks, feels and performs are in [docs/design.md](do
   `off_below`; and touch calibration), Time (the clock's format), Updates (openframe-scripts'
   automatic updates: what they're doing, with progress, what's waiting, OpenBeak's first, each
   with its "What's new", checking, updating or restarting now, and the time of day they
-  install), About (its name, as written and as `<name>.local` on the network, in openframe-scripts' `settings/name.txt`; the system, what the hourly ping sends, and Erase everything, which puts the unit back as it came for its next owner: openframe-scripts' `of-reset`) and
+  install), About (its name, as written and as the hostname made from it, in openframe-scripts' `settings/name.txt`; the system, what the hourly ping sends, and Erase everything, which puts the unit back as it came for its next owner: openframe-scripts' `of-reset`) and
   Power (Restart and Switch off).
 
 ## Apps
