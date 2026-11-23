@@ -1731,6 +1731,13 @@ static void bl_send_cancel(void) {
 	bl_send_timer = NULL;
 }
 
+static lv_timer_t *bl_settle_timer, *bl_save_timer; // (see BL_SETTLE_MS, below)
+static void bl_settle_cancel(void) {
+	if (bl_settle_timer) lv_timer_delete(bl_settle_timer);
+	if (bl_save_timer) lv_timer_delete(bl_save_timer);
+	bl_settle_timer = bl_save_timer = NULL;
+}
+
 static void bl_show(int v) {
 	bl_want = v;
 	uint32_t since = lv_tick_elaps(bl_sent_at);
@@ -1747,6 +1754,7 @@ static void bl_show(int v) {
 // (beyond either knob, that one; between them, the nearer).
 static void bl_pressed(lv_event_t *e) {
 	lv_slider_t *s = (lv_slider_t *)bl_slider;
+	bl_settle_cancel(); // touched again before it settled: still being worked
 	bl_send_cancel();
 	bl_shown = -1;
 	if (lv_slider_get_mode(bl_slider) != LV_SLIDER_MODE_RANGE) { bl_show(lv_slider_get_value(bl_slider)); return; }
@@ -1765,24 +1773,57 @@ static void bl_dragged(lv_event_t *e) {
 	bl_show(left ? lv_slider_get_left_value(bl_slider) : lv_slider_get_value(bl_slider));
 }
 
-static void bl_released(lv_event_t *e) {
+// Letting go settles BL_SETTLE_MS later (the fade back, or the level set), and automatic
+// brightness's limits are written to OF-BOOT once the slider's been left BL_SAVE_MS; a touch
+// again before then cancels both. The touchscreen loses contact now and then as a finger
+// slides, and a finger working a slider lifts between strokes: each of those is a release
+// here. Settled and saved at every one, the screen dipped between strokes, and the saves (a
+// root process and a FAT write each) piled up faster than they finished, slowing everything
+// for as long as the slider was worked.
+#define BL_SETTLE_MS 600
+#define BL_SAVE_MS 2000
+
+static void timer_cancel(lv_timer_t **t) {
+	if (*t) lv_timer_delete(*t);
+	*t = NULL;
+}
+
+static lv_timer_t *timer_once(lv_timer_cb_t cb, uint32_t ms) {
+	lv_timer_t *t = lv_timer_create(cb, ms, NULL);
+	lv_timer_set_repeat_count(t, 1); // (LVGL deletes it once it's run)
+	return t;
+}
+
+static void bl_save_now(lv_timer_t *t) {
+	bl_save_timer = NULL;
+	bl_limits_save();
+}
+
+static void bl_settle(lv_timer_t *t) {
+	bl_settle_timer = NULL;
 	bl_send_cancel(); // nothing shown after what follows
 	bl_shown = -1;
 	if (lv_slider_get_mode(bl_slider) == LV_SLIDER_MODE_RANGE) {
 		bl_min = (int)lv_slider_get_left_value(bl_slider);
 		bl_max = (int)lv_slider_get_value(bl_slider);
-		// the fade back, by the new limits, at once: writing them to OF-BOOT takes a moment,
-		// and the slider may be grabbed again before it's done
+		// the fade back, by the new limits, now; OF-BOOT once it's been left a while longer
 		char req[24];
 		snprintf(req, sizeof req, "resume %d %d", bl_min, bl_max);
 		sysinfo_backlight_request(req);
-		bl_limits_save();
+		timer_cancel(&bl_save_timer);
+		bl_save_timer = timer_once(bl_save_now, BL_SAVE_MS - BL_SETTLE_MS);
 		return;
 	}
 	char v[8];
 	snprintf(v, sizeof v, "%d", (int)lv_slider_get_value(bl_slider));
 	sysinfo_set_backlight(v);
 	lv_obj_remove_state(bl_auto, LV_STATE_CHECKED);
+}
+
+static void bl_released(lv_event_t *e) {
+	if (!e) { bl_settle(NULL); return; } // (from the Auto switch: at once)
+	timer_cancel(&bl_settle_timer);
+	bl_settle_timer = timer_once(bl_settle, BL_SETTLE_MS);
 }
 
 static void bl_auto_changed(lv_event_t *e) {
@@ -3077,8 +3118,20 @@ static void aud_slid(lv_event_t *e) {
 	if (audio_set_volume(aud_out, aud_mixer, v)) aud_now_show(v);
 }
 
+// Kept for the next start once the slider's been left AUD_STORE_MS (a root process each time:
+// not at every lift of a finger working it, see BL_SETTLE_MS)
+#define AUD_STORE_MS 2000
+static lv_timer_t *aud_store_timer;
 static void aud_store_done(char *reply, void *data) {}
-static void aud_released(lv_event_t *e) { helper_request("audio-store\n", aud_store_done, NULL); }
+static void aud_store(lv_timer_t *t) {
+	aud_store_timer = NULL;
+	helper_request("audio-store\n", aud_store_done, NULL);
+}
+static void aud_released(lv_event_t *e) {
+	timer_cancel(&aud_store_timer);
+	aud_store_timer = timer_once(aud_store, AUD_STORE_MS);
+}
+static void aud_pressed(lv_event_t *e) { timer_cancel(&aud_store_timer); }
 
 // A card coming or going (a DAC plugged in or out): of-audio's hotplug has a moment's work to
 // do, then the tab, and the notice if the sound has moved to a DAC.
@@ -3915,6 +3968,7 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_ext_click_area(aud_slider, 20);
 	lv_obj_add_event_cb(aud_slider, aud_slid, LV_EVENT_VALUE_CHANGED, NULL);
 	lv_obj_add_event_cb(aud_slider, aud_released, LV_EVENT_RELEASED, NULL);
+	lv_obj_add_event_cb(aud_slider, aud_pressed, LV_EVENT_PRESSED, NULL);
 	lv_obj_add_event_cb(aud_slider, aud_released, LV_EVENT_PRESS_LOST, NULL);
 	lv_obj_move_to_index(aud_direct_row, -1); // the DAC's switch and the note under the volume
 	lv_obj_move_to_index(aud_note, -1);
