@@ -170,6 +170,9 @@ int wifi_signal(const char *ifname);          // dBm of the network joined (nl80
 int sysinfo_backlight(void);                  // 0-100, -1 if unknown
 int audio_volume(const char *card, const char *ctl);               // 0-100 (as it sounds), -1 if unknown
 bool audio_set_volume(const char *card, const char *ctl, int pct); // audio.c: ALSA's mixer, in-process
+bool audio_test_sound(void);   // left, then right, then both (false if it's already playing)
+int audio_test_state(void);    // 0 idle, 1 left, 2 right, 3 both, -1 it couldn't play
+void audio_test_seen(void);    // a "couldn't" has been said
 int sysinfo_backlight_max(void);              // the hardware's highest level, -1 if unknown
 bool sysinfo_backlight_auto(void);
 void sysinfo_set_backlight(const char *arg);  // "0".."100" or "auto", runs of-backlight

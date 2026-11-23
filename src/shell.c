@@ -3139,6 +3139,28 @@ static void aud_released(lv_event_t *e) {
 }
 static void aud_pressed(lv_event_t *e) { timer_cancel(&aud_store_timer); }
 
+// The test sound (audio.c): its button says what's playing while it plays.
+static lv_obj_t *aud_test_btn;
+static lv_timer_t *aud_test_timer;
+static void aud_test_tick(lv_timer_t *t) {
+	int s = audio_test_state();
+	static const char *says[] = { LV_SYMBOL_AUDIO "  Test sound", LV_SYMBOL_AUDIO "  Left...", LV_SYMBOL_AUDIO "  Right...",
+				      LV_SYMBOL_AUDIO "  Both..." };
+	set_text(lv_obj_get_child(aud_test_btn, 0), says[s > 0 ? s : 0]);
+	if (s > 0) return;
+	lv_timer_delete(aud_test_timer);
+	aud_test_timer = NULL;
+	if (s < 0) {
+		audio_test_seen();
+		show_toast(aud_direct ? "The DAC is busy: something else is playing to it" : "The test sound couldn't play", 3500);
+	}
+}
+static void aud_test_clicked(lv_event_t *e) {
+	if (!audio_test_sound() || aud_test_timer) return;
+	aud_test_timer = lv_timer_create(aud_test_tick, 100, NULL);
+	aud_test_tick(NULL);
+}
+
 // A card coming or going (a DAC plugged in or out): of-audio's hotplug has a moment's work to
 // do, then the tab, and the notice if the sound has moved to a DAC.
 static void aud_later(lv_timer_t *t) { aud_refresh(); }
@@ -3976,6 +3998,13 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_add_event_cb(aud_slider, aud_released, LV_EVENT_RELEASED, NULL);
 	lv_obj_add_event_cb(aud_slider, aud_pressed, LV_EVENT_PRESSED, NULL);
 	lv_obj_add_event_cb(aud_slider, aud_released, LV_EVENT_PRESS_LOST, NULL);
+	lv_obj_t *test_row = button_row(pa_);
+	lv_obj_set_flex_align(test_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	aud_test_btn = button(test_row, LV_SYMBOL_AUDIO "  Test sound", BUTTON_OTHER, aud_test_clicked, NULL);
+	lv_obj_t *th = lv_label_create(test_row);
+	lv_label_set_text(th, "Left, then right, then both");
+	lv_obj_set_style_text_font(th, &lv_font_montserrat_16, 0);
+	lv_obj_set_style_text_color(th, lv_color_hex(C_DIM), 0);
 	lv_obj_move_to_index(aud_direct_row, -1); // the DAC's switch and the note under the volume
 	lv_obj_move_to_index(aud_note, -1);
 	lv_obj_set_style_margin_top(aud_direct_row, HEADING_SPACE / 2, 0);
