@@ -44,7 +44,7 @@
 ##    audio-status          where the sound goes, as openframe-scripts' of-audio status prints it
 ##                            (the cards, the one in use, direct, its volume control), then "ok"
 ##    audio-set             the request line, then a line with output=builtin or a DAC's
-##                            vid:pid and/or direct=yes|no: of-audio set
+##                            vid:pid, direct=yes|no and/or mixer_rate=44100|48000: of-audio set
 ##    audio-store           the mixers' levels kept for the next start (alsactl store)
 ##    ssh-off               no way in over SSH: "of" loses its password and its keys, root its
 ##                            keys, ssh.txt its key= lines (or they'd come back at the next
@@ -461,7 +461,7 @@ case "$CMD" in
 				ARGS=()
 				read -r -a WORDS <<< "$LINE" # (split, never globbed: a * isn't a file list)
 				for kv in "${WORDS[@]}"; do
-					[[ $kv =~ ^(output=(builtin|[0-9a-f]{4}:[0-9a-f]{4})|direct=(yes|no))$ ]] || answer "error: $kv isn't an output or direct"
+					[[ $kv =~ ^(output=(builtin|[0-9a-f]{4}:[0-9a-f]{4})|direct=(yes|no)|mixer_rate=(44100|48000))$ ]] || answer "error: $kv isn't an output, direct or mixer_rate"
 					ARGS+=("$kv")
 				done
 				(( ${#ARGS[@]} )) || answer "error: nothing to set"

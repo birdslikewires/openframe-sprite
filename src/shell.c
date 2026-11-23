@@ -2985,7 +2985,9 @@ static struct aud_card { char id[32], kind[8], usbid[12], name[80]; } aud_cards[
 static int aud_n;
 static char aud_out[32], aud_kind[8], aud_mixer[64];
 static bool aud_direct, aud_managed = true, aud_known;
+static bool aud_rate48, aud_rate_known; // the mixer at 48 kHz (of-audio's mixer_rate), and whether it says
 static lv_obj_t *aud_list, *aud_vol_head, *aud_now, *aud_slider_row, *aud_slider, *aud_direct_row, *aud_note;
+static lv_obj_t *aud_rate_row, *aud_rate_note;
 static lv_obj_t *aud_dac_head, *aud_dac_label; // a USB DAC's section: its name; how it's connected,
                                                // what it takes, what it's playing
 
@@ -3115,18 +3117,26 @@ static void aud_show(void) {
 			   : aud_n && !any_dac ? "Plug in a USB DAC and the sound goes there." : "";
 	set_text(aud_note, note);
 	show_if(aud_note, note[0]);
+	// The mixer's rate: only while the audio's mixed (Direct to DAC sends it at its own), and
+	// only if of-audio has the setting
+	bool rate = aud_managed && aud_n && !aud_direct && aud_rate_known;
+	show_if(aud_rate_row, rate);
+	show_if(aud_rate_note, rate);
+	lv_obj_t *rs = lv_obj_get_child(aud_rate_row, 1);
+	if (aud_rate48) lv_obj_add_state(rs, LV_STATE_CHECKED);
+	else lv_obj_remove_state(rs, LV_STATE_CHECKED);
 }
 
 static void aud_status_done(char *reply, void *data) {
 	if (strcmp(helper_reply_status(reply), "ok")) return;
 	char was[32];
 	snprintf(was, sizeof was, "%s", aud_out);
-	bool knew = aud_known, was_direct = aud_direct;
+	bool knew = aud_known, was_direct = aud_direct, was_rate48 = aud_rate48;
 	char playing[8][80]; // what's playing (of-audio's holder= lines): its units
 	int n_playing = 0;
 	aud_n = 0;
 	aud_out[0] = aud_kind[0] = aud_mixer[0] = 0;
-	aud_direct = false;
+	aud_direct = aud_rate48 = aud_rate_known = false;
 	char *save = NULL;
 	for (char *l = strtok_r(reply, "\n", &save); l; l = strtok_r(NULL, "\n", &save)) {
 		if (!strncmp(l, "card=", 5) && aud_n < AUD_CARDS_MAX) {
@@ -3141,12 +3151,13 @@ static void aud_status_done(char *reply, void *data) {
 		else if (!strncmp(l, "mixer=", 6)) snprintf(aud_mixer, sizeof aud_mixer, "%s", l + 6);
 		else if (!strncmp(l, "direct=", 7)) aud_direct = !strcmp(l + 7, "yes");
 		else if (!strncmp(l, "managed=", 8)) aud_managed = !strcmp(l + 8, "yes");
+		else if (!strncmp(l, "mixer_rate=", 11)) { aud_rate_known = true; aud_rate48 = !strcmp(l + 11, "48000"); }
 		else if (!strncmp(l, "holder=", 7) && n_playing < 8) snprintf(playing[n_playing++], sizeof playing[0], "%s", l + 7);
 	}
-	// The sound going elsewhere, or another way (direct): an app of ours already playing goes
+	// The sound going elsewhere, or another way (direct, the mixer's rate): an app of ours already playing goes
 	// on the old way until it opens its sound again, so it's restarted (of-audio restarts the
 	// system's services). Where it was: behind Settings, say, it comes back behind.
-	if (knew && (strcmp(was, aud_out) || was_direct != aud_direct))
+	if (knew && (strcmp(was, aud_out) || was_direct != aud_direct || was_rate48 != aud_rate48))
 		for (int i = 0; i < n_playing; i++) {
 			char id[64];
 			if (sscanf(playing[i], "sprite-app-%63[^.].service", id) != 1) continue;
@@ -3190,6 +3201,11 @@ static void aud_choose(lv_event_t *e) {
 static void aud_direct_changed(lv_event_t *e) {
 	bool direct = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
 	helper_request(direct ? "audio-set\ndirect=yes\n" : "audio-set\ndirect=no\n", aud_set_done, NULL);
+}
+
+static void aud_rate_changed(lv_event_t *e) {
+	bool on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+	helper_request(on ? "audio-set\nmixer_rate=48000\n" : "audio-set\nmixer_rate=44100\n", aud_set_done, NULL);
 }
 
 // The volume, set as the slider moves (in-process: nothing's started for each step), and kept
@@ -4104,6 +4120,15 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_width(aud_note, LV_PCT(100));
 	lv_obj_set_style_text_font(aud_note, &lv_font_montserrat_16, 0);
 	lv_obj_set_style_text_color(aud_note, lv_color_hex(C_DIM), 0);
+	// The mixer's rate (of-audio's mixer_rate), while the audio's mixed
+	aud_rate_row = switch_row(pa_, "Mix at 48 kHz", false, aud_rate_changed);
+	lv_obj_set_style_pad_right(aud_rate_row, BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0);
+	aud_rate_note = lv_label_create(pa_);
+	lv_label_set_text(aud_rate_note, "Most music is made at 44.1 kHz, so that's what OpenFrame mixes at. Turn this on if you "
+					 "mostly watch video, which is usually 48 kHz.");
+	lv_obj_set_width(aud_rate_note, LV_PCT(100));
+	lv_obj_set_style_text_font(aud_rate_note, &lv_font_montserrat_16, 0);
+	lv_obj_set_style_text_color(aud_rate_note, lv_color_hex(C_DIM), 0);
 	aud_vol_head = lv_obj_create(pa_); // the heading, with the level now at its other end
 	lv_obj_remove_style_all(aud_vol_head);
 	lv_obj_set_size(aud_vol_head, LV_PCT(100), LV_SIZE_CONTENT);
@@ -4144,9 +4169,14 @@ static void build_settings(lv_obj_t *scr) {
 	// after the outputs, where it's seen without scrolling
 	lv_obj_move_to_index(aud_direct_row, -1);
 	lv_obj_move_to_index(aud_note, -1);
+	lv_obj_move_to_index(aud_rate_row, -1);
+	lv_obj_move_to_index(aud_rate_note, -1);
 	lv_obj_move_to_index(aud_dac_head, -1);
 	lv_obj_move_to_index(aud_dac_label, -1);
 	lv_obj_set_style_margin_top(aud_direct_row, HEADING_SPACE / 2, 0);
+	lv_obj_set_style_margin_top(aud_rate_row, HEADING_SPACE / 2, 0);
+	show_if(aud_rate_row, false);
+	show_if(aud_rate_note, false);
 	show_if(aud_vol_head, false);
 	show_if(aud_slider_row, false);
 	show_if(aud_direct_row, false);
