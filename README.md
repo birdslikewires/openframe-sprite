@@ -45,9 +45,12 @@ The ground rules for how it looks, feels and performs are in [docs/design.md](do
   the tab; and remote access: the password for
   logging in as `of` over SSH, which images leave unset, with a warning while a unit still
   has the old shared one), Display (brightness, through `of-backlight`, including automatic
-  brightness; and touch calibration), Time (the clock's format), Updates (openframe-scripts'
+  brightness, whose slider then sets the lowest and highest it goes to, with a switch for the
+  screen going off in the dark or staying at its lowest: `backlight.txt`'s `min`, `max` and
+  `off_below`; and touch calibration), Time (the clock's format), Updates (openframe-scripts'
   automatic updates: what they're doing, with progress, what's waiting, OpenBeak's first, each
-  with its "What's new", and checking, updating or restarting now), About (the system, what the hourly ping sends, and Erase everything, which puts the unit back as it came for its next owner: openframe-scripts' `of-reset`) and
+  with its "What's new", checking, updating or restarting now, and the time of day they
+  install), About (the system, what the hourly ping sends, and Erase everything, which puts the unit back as it came for its next owner: openframe-scripts' `of-reset`) and
   Power (Restart and Switch off).
 
 ## Apps
@@ -240,9 +243,6 @@ can still be joined.
 - Letting apps change the home pill while they run (a small Wayland protocol), and screen
   blanking
 - Sound and time zone in Settings
-- Automatic brightness as a range: a two-ended slider for its lowest and highest, and a
-  switch for whether the screen goes off in the dark or stays at its dimmest (what
-  `backlight.txt` holds, in Settings)
 - Apps choosing full screen (the pill as the app asks) or the bar kept above them, so a
   small app like a calculator feels part of Sprite rather than replacing it
 - The app store: an index repository of app manifests, added to by pull request, with apps

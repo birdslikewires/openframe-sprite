@@ -45,6 +45,10 @@
 ##    update-now            install what's waiting now, as the night would
 ##    update-time <HH:00>   when the updates install (and restart, if one needs it), once a
 ##                            day: of-update set-time, into OF-BOOT/settings/updates.txt
+##    backlight-settings    automatic brightness's limits (of-backlight settings: min=, max=,
+##                            off_below=), then "ok"
+##    backlight-set <min> <max> <off_below>
+##                            change them in OF-BOOT/settings/backlight.txt (of-backlight set)
 ##    update-news           what's new in OpenBeak's waiting updates, as of-update news prints
 ##                            it (part= and news= lines), then "ok"
 ##    after-update <what>   reboot or poweroff once the update being installed has finished
@@ -415,6 +419,18 @@ case "$CMD" in
 		grep -q "set-time" /usr/local/sbin/of-update 2>/dev/null ||
 			answer "error: this system's updates can't be moved yet (its openframe-scripts is too old)"
 		/usr/local/sbin/of-update set-time "$ARG" >/dev/null 2>&1 || answer "error: the time couldn't be saved"
+		answer ok
+		;;
+	backlight-settings)
+		/usr/local/bin/of-backlight settings 2>/dev/null || answer "error: no brightness settings here"
+		answer ok
+		;;
+	backlight-set)
+		[[ "$ARG" =~ ^([0-9]{1,3})\ ([0-9]{1,3})\ ([0-9]{1,4})$ ]] || answer "error: backlight-set <min> <max> <off_below>"
+		grep -q "of-backlight set" /usr/local/bin/of-backlight 2>/dev/null ||
+			answer "error: this system's brightness limits can't be changed yet (its openframe-scripts is too old)"
+		/usr/local/bin/of-backlight set "min=${BASH_REMATCH[1]}" "max=${BASH_REMATCH[2]}" "off_below=${BASH_REMATCH[3]}" >/dev/null 2>&1 ||
+			answer "error: the brightness settings couldn't be saved"
 		answer ok
 		;;
 	update-news)

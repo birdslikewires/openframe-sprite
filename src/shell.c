@@ -113,6 +113,11 @@ static void drag_input(int x, int y, bool pressed, bool was_pressed);
 static void tile_drop(bool place);
 static void tile_follow(int x, int y);
 static lv_obj_t *bl_slider, *bl_auto, *about_label;
+static lv_obj_t *bl_hint, *bl_off_row; // automatic brightness: what the range means; off in the dark
+static void bl_mode_show(bool autobl);
+static void bl_limits_ask(void);
+static const char *reason_text(const char *st);
+static void dialog_cancel(lv_event_t *e);
 static bool visible = true, rebuild_pending;
 static struct sprite_app *opening;
 static lv_timer_t *toast_timer;
@@ -798,10 +803,12 @@ static void refresh_settings(lv_timer_t *t) {
 	bool autobl = sysinfo_backlight_auto();
 	if (autobl) lv_obj_add_state(bl_auto, LV_STATE_CHECKED);
 	else lv_obj_remove_state(bl_auto, LV_STATE_CHECKED);
-	if (!lv_obj_has_state(bl_slider, LV_STATE_PRESSED)) {
+	bl_mode_show(autobl);
+	if (!autobl && !lv_obj_has_state(bl_slider, LV_STATE_PRESSED)) {
 		int b = sysinfo_backlight();
 		if (b >= 0) lv_slider_set_value(bl_slider, b, LV_ANIM_OFF);
 	}
+	if (!t && settings_tab == TAB_DISPLAY) bl_limits_ask(); // as Settings opens at Display
 }
 
 static void open_app(struct sprite_app *a) {
@@ -1570,7 +1577,71 @@ static void build_home(lv_obj_t *scr) {
 
 static void back_clicked(lv_event_t *e) { show_page(page_home); }
 
+/* Brightness: one slider. Fixed, it's the level; automatic, it's a range with a knob at each
+   end, the lowest and highest automatic brightness goes to (of-backlight's min and max, in
+   backlight.txt), with a switch for whether the screen goes off in the dark (off_below) or
+   stays at its lowest. */
+
+static int bl_min = 0, bl_max = 100, bl_off_below = 1; // of-backlight settings; its defaults till it says
+
+static void bl_mode_show(bool autobl) {
+	bool range = lv_slider_get_mode(bl_slider) == LV_SLIDER_MODE_RANGE;
+	if (autobl && !range) {
+		lv_slider_set_mode(bl_slider, LV_SLIDER_MODE_RANGE);
+		lv_slider_set_range(bl_slider, 0, 100);
+		lv_slider_set_value(bl_slider, bl_max, LV_ANIM_OFF); // the right first: the left can't pass it
+		lv_slider_set_start_value(bl_slider, bl_min, LV_ANIM_OFF);
+	} else if (!autobl && range) {
+		lv_slider_set_range(bl_slider, 5, 100);
+		lv_slider_set_mode(bl_slider, LV_SLIDER_MODE_NORMAL);
+		int b = sysinfo_backlight();
+		lv_slider_set_value(bl_slider, b >= 5 ? b : 5, LV_ANIM_OFF);
+	}
+	show_if(bl_hint, autobl);
+	show_if(bl_off_row, autobl);
+}
+
+static void bl_limits_done(char *reply, void *data) {
+	if (strcmp(helper_reply_status(reply), "ok")) return; // (an older system: its defaults)
+	char *save = NULL;
+	for (char *l = strtok_r(reply, "\n", &save); l; l = strtok_r(NULL, "\n", &save)) {
+		if (!strncmp(l, "min=", 4)) bl_min = atoi(l + 4);
+		else if (!strncmp(l, "max=", 4)) bl_max = atoi(l + 4);
+		else if (!strncmp(l, "off_below=", 10)) bl_off_below = atoi(l + 10);
+	}
+	if (lv_slider_get_mode(bl_slider) == LV_SLIDER_MODE_RANGE && !lv_obj_has_state(bl_slider, LV_STATE_PRESSED)) {
+		lv_slider_set_value(bl_slider, bl_max, LV_ANIM_OFF);
+		lv_slider_set_start_value(bl_slider, bl_min, LV_ANIM_OFF);
+	}
+	lv_obj_t *sw = lv_obj_get_child(bl_off_row, 1);
+	if (bl_off_below > 0) lv_obj_add_state(sw, LV_STATE_CHECKED);
+	else lv_obj_remove_state(sw, LV_STATE_CHECKED);
+}
+
+static void bl_limits_ask(void) { helper_request("backlight-settings\n", bl_limits_done, NULL); }
+
+static void bl_limits_saved(char *reply, void *data) {
+	const char *st = helper_reply_status(reply);
+	if (strcmp(st, "ok")) {
+		lv_obj_t *card = dialog_open(NULL, "Brightness not changed", reason_text(st), true);
+		dialog_button(card, "OK", BUTTON_MAIN, dialog_cancel, NULL);
+	}
+	bl_limits_ask(); // what's in the file now
+}
+
+static void bl_limits_save(void) {
+	char req[48];
+	snprintf(req, sizeof req, "backlight-set %d %d %d\n", bl_min, bl_max, bl_off_below);
+	helper_request(req, bl_limits_saved, NULL);
+}
+
 static void bl_released(lv_event_t *e) {
+	if (lv_slider_get_mode(bl_slider) == LV_SLIDER_MODE_RANGE) {
+		bl_min = (int)lv_slider_get_left_value(bl_slider);
+		bl_max = (int)lv_slider_get_value(bl_slider);
+		bl_limits_save();
+		return;
+	}
 	char v[8];
 	snprintf(v, sizeof v, "%d", (int)lv_slider_get_value(bl_slider));
 	sysinfo_set_backlight(v);
@@ -1578,8 +1649,21 @@ static void bl_released(lv_event_t *e) {
 }
 
 static void bl_auto_changed(lv_event_t *e) {
-	if (lv_obj_has_state(bl_auto, LV_STATE_CHECKED)) sysinfo_set_backlight("auto");
-	else bl_released(NULL);
+	bool on = lv_obj_has_state(bl_auto, LV_STATE_CHECKED);
+	if (on) {
+		sysinfo_set_backlight("auto");
+		bl_limits_ask();
+	}
+	bl_mode_show(on);
+	if (!on) bl_released(NULL);
+}
+
+static void bl_off_changed(lv_event_t *e) {
+	// on: off below 1 (or whatever backlight.txt had above 0); off: never off, at its lowest
+	static int had = 1;
+	if (bl_off_below > 0) had = bl_off_below;
+	bl_off_below = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED) ? had : 0;
+	bl_limits_save();
 }
 
 static void confirm_cb(lv_event_t *e) {
@@ -1847,7 +1931,7 @@ static void seconds_changed(lv_event_t *e) {
 }
 
 // A row of Settings: text on the left, a switch on the right.
-static void switch_row(lv_obj_t *parent, const char *text, bool on, lv_event_cb_t cb) {
+static lv_obj_t *switch_row(lv_obj_t *parent, const char *text, bool on, lv_event_cb_t cb) {
 	lv_obj_t *row = lv_obj_create(parent);
 	lv_obj_remove_style_all(row);
 	lv_obj_set_size(row, LV_PCT(100), ROW_H);
@@ -1861,6 +1945,7 @@ static void switch_row(lv_obj_t *parent, const char *text, bool on, lv_event_cb_
 	lv_obj_set_size(sw, 72, 38);
 	if (on) lv_obj_add_state(sw, LV_STATE_CHECKED);
 	lv_obj_add_event_cb(sw, cb, LV_EVENT_VALUE_CHANGED, NULL);
+	return row;
 }
 
 // A list screen (Settings, Wi-Fi): below the bar, the content inset like every screen, a
@@ -3224,6 +3309,7 @@ static void settings_show_tab(int t) {
 	}
 	lv_obj_scroll_to_y(tab_panel[t], 0, LV_ANIM_OFF);
 	if (t == TAB_UPDATES) upd_refresh();
+	if (t == TAB_DISPLAY) bl_limits_ask();
 }
 
 static void tab_clicked(lv_event_t *e) { settings_show_tab((int)(intptr_t)lv_event_get_user_data(e)); }
@@ -3409,6 +3495,16 @@ static void build_settings(lv_obj_t *scr) {
 	bl_auto = lv_switch_create(row);
 	lv_obj_set_size(bl_auto, 72, 38);
 	lv_obj_add_event_cb(bl_auto, bl_auto_changed, LV_EVENT_VALUE_CHANGED, NULL);
+	bl_hint = lv_label_create(pd);
+	lv_label_set_text(bl_hint, "Automatic brightness follows the room, between the two ends of the slider.");
+	lv_obj_set_width(bl_hint, LV_PCT(100));
+	lv_obj_set_style_margin_top(bl_hint, -HINT_GAP, 0);
+	lv_obj_set_style_text_font(bl_hint, &lv_font_montserrat_16, 0);
+	lv_obj_set_style_text_color(bl_hint, lv_color_hex(C_DIM), 0);
+	lv_obj_add_flag(bl_hint, LV_OBJ_FLAG_HIDDEN);
+	bl_off_row = switch_row(pd, "Screen off in the dark", true, bl_off_changed);
+	lv_obj_set_style_pad_right(bl_off_row, 12, 0); // its switch under Auto's (that row's inset for the knob)
+	lv_obj_add_flag(bl_off_row, LV_OBJ_FLAG_HIDDEN);
 	section(pd, "TOUCH");
 	lv_obj_t *trow = button_row(pd);
 	button(trow, LV_SYMBOL_EDIT "  Calibrate touch", BUTTON_MAIN, cal_start, NULL);

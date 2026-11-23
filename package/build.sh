@@ -57,10 +57,11 @@ deps=$(cd "$work/deb" && dpkg-shlibdeps -O --ignore-missing-info -l"$pkg$P/lib/$
 # Not linked, but needed: Xwayland runs xkbcomp on the keymap; SDL loads its X11 and ALSA
 # libraries when an app starts it; and the helper and settings use the OpenFrame scripts
 # (bootrw, of-backlight).
-# openframe-scripts from the version with of-update set-time (the update time, on the Updates
-# tab and the welcome): so apt holds this Sprite back on a unit until that's released too, whatever
-# order they're promoted in. Raise it when Sprite starts to need something newer from it.
-deps="$deps, x11-xkb-utils, xkb-data, libx11-6, libxext6, libxcursor1, libxfixes3, libxi6, libxrandr2, libxss1, libasound2t64, openframe-scripts (>= 1:26.11.130), curl, iproute2"
+# openframe-scripts from the version with of-backlight set (the brightness limits, on the
+# Display tab) and of-update set-time (the update time, on the Updates tab and the welcome):
+# so apt holds this Sprite back on a unit until that's released too, whatever order they're
+# promoted in. Raise it when Sprite starts to need something newer from it.
+deps="$deps, x11-xkb-utils, xkb-data, libx11-6, libxext6, libxcursor1, libxfixes3, libxi6, libxrandr2, libxss1, libasound2t64, openframe-scripts (>= 1:26.11.131), curl, iproute2"
 
 size=$(du -sk "$pkg/opt" "$pkg/usr" | awk '{ s += $1 } END { print s }')
 cat > "$pkg/DEBIAN/control" <<CONTROL
