@@ -81,8 +81,9 @@
 ##  no capabilities, a read-only system, no /home or /boot (where wifi.txt is), its own
 ##  /tmp, no other processes to see, and one directory of its own to keep things in
 ##  (/var/lib/sprite-apps/<id>, kept between runs). The manifest's
-##  allow= line names what more it may have: network (otherwise it has none) and sound
-##  (/dev/snd). It has less of the CPU than sprite, and is held to 192 MB of memory, 64 MB of
+##  allow= line names what more it may have: network (otherwise it has none), sound (/dev/snd
+##  to play: the capture devices there as it starts are hidden) and microphone (those too).
+##  It has less of the CPU than sprite, and is held to 192 MB of memory, 64 MB of
 ##  swap and 64 processes (with MEMCG and CGROUP_PIDS in the kernel), past which the kernel
 ##  ends it, not something else. It's bound to sprite.service, so it stops when sprite does.
 
@@ -264,8 +265,14 @@ app_start() {
 	else
 		P+=(-p PrivateNetwork=yes -p RestrictAddressFamilies=AF_UNIX)
 	fi
-	if [[ " $M_ALLOW " == *" sound "* ]]; then
+	if [[ " $M_ALLOW " == *" sound "* || " $M_ALLOW " == *" microphone "* ]]; then
 		P+=(-p DevicePolicy=closed -p "DeviceAllow=char-alsa rw" -p SupplementaryGroups=audio)
+		# Playing only, without microphone: each card's capture devices hidden. ALSA numbers
+		# its devices as cards come, so these are the ones there as it starts (a microphone
+		# plugged in later is hidden from the app's next start).
+		if [[ " $M_ALLOW " != *" microphone "* ]]; then
+			for F in /dev/snd/pcmC*D*c; do [ -e "$F" ] && P+=(-p "InaccessiblePaths=-$F"); done
+		fi
 	else
 		P+=(-p PrivateDevices=yes)
 	fi

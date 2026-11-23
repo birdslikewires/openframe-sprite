@@ -86,8 +86,8 @@ allow=network
   calculator. Without it, an app has the whole screen. The bar's buttons work as usual,
   taking Sprite to the front; the pill does too. Only for apps that fit the window they're
   given: one that always draws 800×480 loses its bottom 40 pixels
-- `allow=`: what the app may have beyond the display, `network` and `sound`, separated by
-  spaces; without it, an app has neither
+- `allow=`: what the app may have beyond the display, separated by spaces: `network`,
+  `sound` (to play) and `microphone` (to record as well); without it, an app has none of them
 
 Comments go on lines of their own, starting with `#`. The package brings only Settings:
 every other app comes in its own package, as HamClock does. Sprite tells apps to draw
@@ -107,10 +107,16 @@ it runs comes from its manifest, never from sprite. It has:
 - a read-only system, no `/home`, no `/boot` (where `wifi.txt` is, readable by anyone, as
   FAT has no permissions), its own `/tmp`, and no other processes to see
 - one directory of its own, `/var/lib/sprite-apps/<id>` (its `$HOME`, kept between runs)
-- no network unless `allow=network`, and no sound devices unless `allow=sound`
+- no network unless `allow=network`, and no sound devices unless `allow=sound` (playing
+  only: the capture devices there as it starts are hidden) or `allow=microphone` (those too)
 - a lower share of the CPU than Sprite, and limits of 192 MB of memory, 64 MB of swap
   (zram, which is RAM too) and 64 processes; past the memory limit the kernel ends the app,
   not something else. The limits need a kernel with `MEMCG` and `CGROUP_PIDS`
+
+What the sandbox doesn't do, by choice: X11 apps share one Xwayland, so they can see each
+other's windows and input (Wayland apps can't); and the `sprite` user, which Sprite runs as,
+can do root's work through `sprite-helper` (set the SSH password, say). The helper is the
+boundary: apps never reach it, only Sprite does. Isolating apps further isn't planned.
 
 It's bound to `sprite.service`, so it stops when Sprite does. Sprite knows an app's windows
 by its unit's cgroup, and its exit by a pidfd. Starting one takes about 0.8 s on the OF1,
@@ -171,7 +177,7 @@ the versions of Sprite, openframe-scripts, the firmware package, the kernel and 
 whether it starts from internal memory or USB, its memory, free and total storage, and swap
 in use, and how long it's been up. Nothing else. The server keeps it without the address it
 came from. About in Settings says so too. It's part of Sprite: removing the package removes
-it, and `systemctl disable --now sprite-ping.timer` stops it (enabled once per system, so
+it, and `sudo systemctl disable --now sprite-ping.timer` stops it (enabled once per system, so
 that sticks). It runs as a throwaway user that can only read the system
 and reach the network, and writes nothing to storage.
 

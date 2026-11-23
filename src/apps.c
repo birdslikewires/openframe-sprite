@@ -15,7 +15,8 @@
 //   display=x11          (an X11 or SDL app, run through Xwayland; default wayland)
 //   handle=faint         (home handle: normal, faint or hidden while the app shows)
 //   bar=yes              (the status bar stays above it, its window below; default full screen)
-//   allow=network sound  (what a sandboxed app may have beyond the display; read by the helper)
+//   allow=network sound  (what a sandboxed app may have beyond the display: network, sound
+//                         to play, microphone to record too; read by the helper)
 // Comments go on lines of their own.
 #define _GNU_SOURCE
 #include <dirent.h>
