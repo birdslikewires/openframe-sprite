@@ -3089,13 +3089,13 @@ static void aud_show(void) {
 	show_if(aud_direct_row, aud_managed && usb);
 	aud_dac_show();
 	lv_obj_t *sw = lv_obj_get_child(aud_direct_row, 1);
-	if (aud_direct) lv_obj_remove_state(sw, LV_STATE_CHECKED);
-	else lv_obj_add_state(sw, LV_STATE_CHECKED);
+	if (aud_direct) lv_obj_add_state(sw, LV_STATE_CHECKED);
+	else lv_obj_remove_state(sw, LV_STATE_CHECKED);
 	const char *note = !aud_managed ? "Sound is set up by hand on this OpenFrame (an asound.conf of its own), so it's "
 					  "left as it is."
 			   : usb && aud_direct ? "The DAC gets the audio as it is: nothing mixed in, nothing resampled. Set the "
 						 "volume on your amplifier. One app can play at a time."
-			   : usb ? "Turn this off to send the DAC the audio untouched, and set the volume on your amplifier."
+			   : usb ? "Turn this on to send the DAC the audio untouched, and set the volume on your amplifier."
 			   : aud_n ? "Plug in a USB DAC and the sound goes there." : "";
 	set_text(aud_note, note);
 	show_if(aud_note, note[0]);
@@ -3172,8 +3172,8 @@ static void aud_choose(lv_event_t *e) {
 }
 
 static void aud_direct_changed(lv_event_t *e) {
-	bool control = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
-	helper_request(control ? "audio-set\ndirect=no\n" : "audio-set\ndirect=yes\n", aud_set_done, NULL);
+	bool direct = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+	helper_request(direct ? "audio-set\ndirect=yes\n" : "audio-set\ndirect=no\n", aud_set_done, NULL);
 }
 
 // The volume, set as the slider moves (in-process: nothing's started for each step), and kept
@@ -4038,7 +4038,9 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_text_line_space(aud_dac_label, 2, 0);
 	lv_obj_add_flag(aud_dac_label, LV_OBJ_FLAG_HIDDEN);
 	lv_timer_create(aud_dac_tick, 1000, NULL);
-	aud_direct_row = switch_row(pa_, "Volume control on this OpenFrame", true, aud_direct_changed);
+	// on: the audio straight to the DAC as it is (of-audio direct=yes), the OpenFrame's volume
+	// control out of its way
+	aud_direct_row = switch_row(pa_, "Direct to DAC", false, aud_direct_changed);
 	lv_obj_set_style_pad_right(aud_direct_row, BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0); // as Display's switches
 	aud_note = lv_label_create(pa_);
 	lv_label_set_text(aud_note, "");
@@ -4061,11 +4063,11 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_size(aud_slider_row, LV_PCT(100), ROW_H);
 	lv_obj_set_flex_flow(aud_slider_row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(aud_slider_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-	lv_obj_set_style_pad_hor(aud_slider_row, BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0);
+	// room for the knob, held (grown) too, at both ends: nothing beside it, as brightness has
+	lv_obj_set_style_pad_hor(aud_slider_row, BL_SLIDER_H / 2 + SLIDER_KNOB_PAD + SLIDER_KNOB_GROW, 0);
 	lv_obj_remove_flag(aud_slider_row, LV_OBJ_FLAG_SCROLLABLE);
 	aud_slider = lv_slider_create(aud_slider_row);
 	lv_obj_set_height(aud_slider, BL_SLIDER_H);
-	lv_obj_set_style_margin_left(aud_slider, SLIDER_KNOB_GROW, 0);
 	lv_obj_set_flex_grow(aud_slider, 1);
 	lv_slider_set_range(aud_slider, 0, 100);
 	lv_obj_set_ext_click_area(aud_slider, 20);

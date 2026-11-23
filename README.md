@@ -40,8 +40,9 @@ The ground rules for how it looks, feels and performs are in [docs/design.md](do
 - **Settings,** in tabs down the left, in alphabetical order, then About and Power under a
   line: Audio (where the sound goes, the OpenFrame's own or a USB DAC, through
   openframe-scripts' `of-audio` and `settings/audio.txt`: a DAC plugged in for the first
-  time becomes the output at a low volume, and has a switch to take the OpenFrame's volume
-  control out of its way, the audio reaching it as it is; the volume, set in-process through
+  time becomes the output at a low volume, and has a Direct to DAC switch that takes the
+  OpenFrame's volume control out of its way, the audio reaching it as it is, with what it's
+  connected at and playing at shown; the volume, set in-process through
   ALSA's mixer, as it sounds), Network (Wi-Fi: choosing a network, typing its
   password on Sprite's own keyboard, and forgetting it; Ethernet: whether a cable's in, its
   speed and address; tapping either opens its details, read-only: its address and whether
