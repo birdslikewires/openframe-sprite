@@ -309,6 +309,8 @@ void sprite_go_home(void) {
 	apply_foreground();
 }
 
+struct sprite_app *sprite_foreground(void) { return S.fg; }
+
 void sprite_open_app(struct sprite_app *app) {
 	if (app->pid == 0) {
 		apps_launch(app);
@@ -345,7 +347,8 @@ static void view_mapped(struct sprite_view *v) {
 	if (v->primary && !v->app->view) {
 		v->app->view = v;
 		wlr_log(WLR_INFO, "%s window mapped", v->app->name);
-		S.fg = v->app;   // a new main window comes to the front
+		if (v->app->reopen_behind) v->app->reopen_behind = false; // reopened behind (apps_restart)
+		else S.fg = v->app;   // a new main window comes to the front
 		if (S.hold == v->app) {
 			S.hold = NULL;
 			wl_event_source_timer_update(S.hold_timer, 0);

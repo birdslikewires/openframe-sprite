@@ -3062,7 +3062,9 @@ static void aud_status_done(char *reply, void *data) {
 	if (strcmp(helper_reply_status(reply), "ok")) return;
 	char was[32];
 	snprintf(was, sizeof was, "%s", aud_out);
-	bool knew = aud_known;
+	bool knew = aud_known, was_direct = aud_direct;
+	char playing[8][80]; // what's playing (of-audio's holder= lines): its units
+	int n_playing = 0;
 	aud_n = 0;
 	aud_out[0] = aud_kind[0] = aud_mixer[0] = 0;
 	aud_direct = false;
@@ -3080,7 +3082,21 @@ static void aud_status_done(char *reply, void *data) {
 		else if (!strncmp(l, "mixer=", 6)) snprintf(aud_mixer, sizeof aud_mixer, "%s", l + 6);
 		else if (!strncmp(l, "direct=", 7)) aud_direct = !strcmp(l + 7, "yes");
 		else if (!strncmp(l, "managed=", 8)) aud_managed = !strcmp(l + 8, "yes");
+		else if (!strncmp(l, "holder=", 7) && n_playing < 8) snprintf(playing[n_playing++], sizeof playing[0], "%s", l + 7);
 	}
+	// The sound going elsewhere, or another way (direct): an app of ours already playing goes
+	// on the old way until it opens its sound again, so it's restarted (of-audio restarts the
+	// system's services). Where it was: behind Settings, say, it comes back behind.
+	if (knew && (strcmp(was, aud_out) || was_direct != aud_direct))
+		for (int i = 0; i < n_playing; i++) {
+			char id[64];
+			if (sscanf(playing[i], "sprite-app-%63[^.].service", id) != 1) continue;
+			for (int k = 0; k < apps_count(); k++) {
+				struct sprite_app *a = apps_get(k);
+				if (strcmp(a->id, id)) continue;
+				apps_restart(a, sprite_foreground() != a);
+			}
+		}
 	aud_known = true;
 	// a DAC just plugged in and made the output (of-audio): say so, wherever we are
 	if (knew && strcmp(was, aud_out) && !strcmp(aud_kind, "usb"))

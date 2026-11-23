@@ -406,6 +406,12 @@ void apps_close(struct sprite_app *a) {
 // failing (three exits within a minute).
 static void exited(struct sprite_app *a) {
 	if (a->close_timer) wl_event_source_timer_update(a->close_timer, 0);
+	if (a->reopening) { // apps_restart: opened again straight away
+		a->reopening = a->closing = false;
+		if (!a->restart_timer) a->restart_timer = wl_event_loop_add_timer(sprite_event_loop(), restart_cb, a);
+		wl_event_source_timer_update(a->restart_timer, 300);
+		return;
+	}
 	if (a->closing) { a->closing = false; return; }
 	if (a != apps_autostart()) return;
 	uint32_t now = mono_ms();
@@ -422,6 +428,18 @@ static void exited(struct sprite_app *a) {
 	sprite_hold_for(a);
 	if (!a->restart_timer) a->restart_timer = wl_event_loop_add_timer(sprite_event_loop(), restart_cb, a);
 	wl_event_source_timer_update(a->restart_timer, 2000);
+}
+
+// Closes app a and opens it again as soon as it's gone: for one playing when the sound output
+// changes, which goes on the old way until it opens its sound again. Behind: its window comes
+// back behind what's showing (Settings, where the output was changed), not in front.
+void apps_restart(struct sprite_app *a, bool behind) {
+	if (a->builtin || a->pid <= 0 || a->reopening) return;
+	wlr_log(WLR_INFO, "restarting %s (the sound output changed)", a->name);
+	a->reopening = true;
+	a->reopen_behind = behind;
+	apps_close(a);
+	wl_event_source_timer_update(a->close_timer, 1); // stopped now: nothing to wait for
 }
 
 // Apps lead their own process groups and, under a PAM session, live outside sprite's

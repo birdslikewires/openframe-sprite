@@ -73,6 +73,8 @@ struct sprite_app {
 	struct sprite_view *view; // the app's main mapped window, if any
 	// closing and restarting
 	bool closing;       // closed from the shell: don't restart it
+	bool reopening;     // closed to be opened again at once (apps_restart)
+	bool reopen_behind; // and its window to come back behind what's showing, not in front
 	int close_stage;
 	struct wl_event_source *close_timer, *restart_timer;
 	int quick_exits;    // exits within a minute of the first, for the startup app
@@ -92,6 +94,8 @@ void apps_x11_ready(bool ready);              // the X keeper has (or no longer 
 void apps_close(struct sprite_app *app);      // SIGTERM, then SIGKILL, unless it goes by itself
 void apps_end_all(void);                      // at exit: end every app sprite launched
 struct sprite_app *apps_autostart(void);      // the app opened at startup, or NULL
+void apps_restart(struct sprite_app *a, bool behind); // close it and open it again
+struct sprite_app *sprite_foreground(void);   // the app on screen, NULL for the shell
 void apps_set_autostart(struct sprite_app *app, bool on);
 
 // main.c, for the shell
