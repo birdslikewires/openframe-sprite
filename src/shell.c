@@ -3627,7 +3627,7 @@ static void upd_status_done(char *reply, void *data) {
 		show_if(upd_check_btn, false);
 		return;
 	}
-	char state[16] = "idle", result[16] = "", message[160] = "", restart[8] = "", firmware[12] = "";
+	char state[16] = "idle", result[16] = "", message[160] = "", restart[8] = "", firmware[12] = "", notice[200] = "";
 	long last = 0, checked = 0, got = 0, size = 0;
 	int pending = 0, n_items = 0, n_done = 0, n_partial = 0;
 	char now_pkg[64] = "";
@@ -3649,6 +3649,7 @@ static void upd_status_done(char *reply, void *data) {
 		else if (!strncmp(l, "state=", 6)) snprintf(state, sizeof state, "%s", l + 6);
 		else if (!strncmp(l, "result=", 7)) snprintf(result, sizeof result, "%s", l + 7);
 		else if (!strncmp(l, "message=", 8)) snprintf(message, sizeof message, "%s", l + 8);
+		else if (!strncmp(l, "notice=", 7)) snprintf(notice, sizeof notice, "%s", l + 7);
 		else if (!strncmp(l, "restart=", 8)) snprintf(restart, sizeof restart, "%s", l + 8);
 		else if (!strncmp(l, "firmware=", 9)) snprintf(firmware, sizeof firmware, "%s", l + 9);
 		else if (!strncmp(l, "last=", 5)) last = atol(l + 5);
@@ -3714,12 +3715,15 @@ static void upd_status_done(char *reply, void *data) {
 	set_text(upd_status_label, t);
 	lv_obj_set_style_text_color(upd_status_label, lv_color_hex(colour), 0);
 	set_text(upd_detail_label, d);
-	// what went wrong, as of-update put it, with a capital
-	if (idle && failed && message[0]) {
-		message[0] = (char)toupper((unsigned char)message[0]);
-		char m[176];
-		snprintf(m, sizeof m, "%s.", message);
+	// what went wrong, as of-update put it, with a capital; or, all being well, apps it had to
+	// remove to finish an update (for a fortnight), so a tile gone isn't a mystery
+	const char *why = idle && failed && message[0] ? message : idle && notice[0] ? notice : NULL;
+	if (why) {
+		char m[208];
+		snprintf(m, sizeof m, "%s.", why);
+		m[0] = (char)toupper((unsigned char)m[0]);
 		set_text(upd_note_label, m);
+		lv_obj_set_style_text_color(upd_note_label, lv_color_hex(why == message ? C_WARN : C_DIM), 0);
 		show_if(upd_note_label, true);
 	} else show_if(upd_note_label, false);
 	upd_bar_show(progress);
