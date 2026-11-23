@@ -2984,11 +2984,15 @@ static int aud_n;
 static char aud_out[32], aud_kind[8], aud_mixer[64];
 static bool aud_direct, aud_managed = true, aud_known;
 static lv_obj_t *aud_list, *aud_vol_head, *aud_now, *aud_slider_row, *aud_slider, *aud_direct_row, *aud_note;
-static lv_obj_t *aud_dac_label; // a USB DAC's connection: what it is, what it takes, what it's playing
+static lv_obj_t *aud_dac_head, *aud_dac_label; // a USB DAC's section: its name; how it's connected,
+                                               // what it takes, what it's playing
 
-// The OpenFrame's own card by what it is to an owner; a DAC by the name it gives.
+// The OpenFrame's own card by what it is to an owner; a DAC by the full name it gives (its
+// maker's too: "Audient iD4", where ALSA's short name is "iD4").
 static const char *aud_card_name(const struct aud_card *c) {
-	return !strcmp(c->kind, "builtin") ? "Speaker and headphones" : c->name;
+	if (!strcmp(c->kind, "builtin")) return "Speaker and headphones";
+	static struct audio_dac d;
+	return audio_dac_info(c->id, &d) && d.name[0] ? d.name : c->name;
 }
 
 static void aud_now_show(int v) {
@@ -3012,7 +3016,14 @@ static void rate_text(int r, char *o, size_t n) {
 static void aud_dac_show(void) {
 	if (!aud_dac_label) return;
 	struct audio_dac d;
-	if (strcmp(aud_kind, "usb") || !audio_dac_info(aud_out, &d)) { show_if(aud_dac_label, false); return; }
+	bool shown = !strcmp(aud_kind, "usb") && audio_dac_info(aud_out, &d);
+	show_if(aud_dac_head, shown);
+	show_if(aud_dac_label, shown);
+	if (!shown) return;
+	char head[96];
+	snprintf(head, sizeof head, "%s", d.name);
+	for (char *c = head; *c; c++) *c = (char)toupper((unsigned char)*c); // as the other headings
+	set_text(aud_dac_head, head);
 	const char *sp = !strcmp(d.speed, "high speed") ? "USB 2.0 high speed (480 Mbit/s)"
 		       : !strcmp(d.speed, "full speed") ? "USB full speed (12 Mbit/s)"
 		       : !strcmp(d.speed, "super speed") ? "USB 3 (5 Gbit/s)" : d.speed;
@@ -3030,11 +3041,10 @@ static void aud_dac_show(void) {
 	// "44.1 to 96 kHz": the unit once
 	char *k = strstr(lo, " kHz");
 	if (k && d.rate_max != d.rate_min) *k = 0;
-	snprintf(t, sizeof t, "%s, %s%s\nTakes %s, %s%s%s\nNow: %s", d.name, sp,
+	snprintf(t, sizeof t, "%s%s\nTakes %s, %s%s%s\nNow: %s", sp,
 		 d.async ? "\nAsynchronous: the DAC sets the clock" : "", bits, lo,
 		 d.rate_max != d.rate_min ? " to " : "", d.rate_max != d.rate_min ? hi : "", now);
 	set_text(aud_dac_label, t);
-	show_if(aud_dac_label, true);
 }
 
 static void aud_dac_tick(lv_timer_t *t) {
@@ -3048,8 +3058,7 @@ static void aud_show(void) {
 		struct aud_card *c = &aud_cards[i];
 		lv_obj_t *r = lv_obj_create(aud_list); // a list row: pressable, the chosen one ticked
 		lv_obj_remove_style_all(r);
-		lv_obj_set_size(r, PANEL_TEXT_W + 2 * LIST_ROW_PAD, ROW_H);
-		lv_obj_set_style_translate_x(r, -LIST_ROW_PAD, 0);
+		lv_obj_set_size(r, LV_PCT(100), ROW_H); // the list's width: see aud_list
 		lv_obj_set_style_pad_hor(r, LIST_ROW_PAD, 0);
 		lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
 		lv_obj_set_flex_align(r, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -3078,7 +3087,8 @@ static void aud_show(void) {
 		lv_label_set_text(n, aud_known ? "No sound cards" : "");
 		lv_obj_set_style_text_color(n, lv_color_hex(C_DIM), 0);
 	}
-	bool usb = !strcmp(aud_kind, "usb"), vol = aud_managed && aud_n && !aud_direct && aud_mixer[0];
+	bool usb = !strcmp(aud_kind, "usb"), vol = aud_managed && aud_n && !aud_direct && aud_mixer[0], any_dac = false;
+	for (int i = 0; i < aud_n; i++) any_dac |= !strcmp(aud_cards[i].kind, "usb");
 	show_if(aud_vol_head, vol);
 	show_if(aud_slider_row, vol);
 	if (vol && !lv_obj_has_state(aud_slider, LV_STATE_PRESSED)) {
@@ -3096,7 +3106,7 @@ static void aud_show(void) {
 			   : usb && aud_direct ? "The DAC gets the audio as it is: nothing mixed in, nothing resampled. Set the "
 						 "volume on your amplifier. One app can play at a time."
 			   : usb ? "Turn this on to send the DAC the audio untouched, and set the volume on your amplifier."
-			   : aud_n ? "Plug in a USB DAC and the sound goes there." : "";
+			   : aud_n && !any_dac ? "Plug in a USB DAC and the sound goes there." : "";
 	set_text(aud_note, note);
 	show_if(aud_note, note[0]);
 }
@@ -4027,9 +4037,15 @@ static void build_settings(lv_obj_t *scr) {
 	section(pa_, "OUTPUT");
 	aud_list = lv_obj_create(pa_);
 	lv_obj_remove_style_all(aud_list);
-	lv_obj_set_size(aud_list, LV_PCT(100), LV_SIZE_CONTENT);
+	// Its rows' press highlight reaches past the text either side, as a list row's does: the
+	// list is as wide as the highlights and moved out to match, so nothing reaches past it (a
+	// row reaching past it was clipped by it, square at the ends)
+	lv_obj_set_size(aud_list, PANEL_TEXT_W + 2 * LIST_ROW_PAD, LV_SIZE_CONTENT);
+	lv_obj_set_style_translate_x(aud_list, -LIST_ROW_PAD, 0);
 	lv_obj_set_flex_flow(aud_list, LV_FLEX_FLOW_COLUMN);
 	lv_obj_remove_flag(aud_list, LV_OBJ_FLAG_SCROLLABLE);
+	aud_dac_head = section(pa_, "");
+	lv_obj_add_flag(aud_dac_head, LV_OBJ_FLAG_HIDDEN);
 	aud_dac_label = lv_label_create(pa_);
 	lv_label_set_text(aud_dac_label, "");
 	lv_obj_set_width(aud_dac_label, LV_PCT(100));
@@ -4082,8 +4098,12 @@ static void build_settings(lv_obj_t *scr) {
 	lv_label_set_text(th, "Left, then right, then both");
 	lv_obj_set_style_text_font(th, &lv_font_montserrat_16, 0);
 	lv_obj_set_style_text_color(th, lv_color_hex(C_DIM), 0);
-	lv_obj_move_to_index(aud_direct_row, -1); // the DAC's switch and the note under the volume
+	// Then the DAC's switch and the note, and last the DAC's own section: the volume straight
+	// after the outputs, where it's seen without scrolling
+	lv_obj_move_to_index(aud_direct_row, -1);
 	lv_obj_move_to_index(aud_note, -1);
+	lv_obj_move_to_index(aud_dac_head, -1);
+	lv_obj_move_to_index(aud_dac_label, -1);
 	lv_obj_set_style_margin_top(aud_direct_row, HEADING_SPACE / 2, 0);
 	show_if(aud_vol_head, false);
 	show_if(aud_slider_row, false);
