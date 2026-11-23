@@ -117,6 +117,7 @@ static void tile_drop(bool place);
 static void tile_follow(int x, int y);
 static lv_obj_t *bl_slider, *bl_auto, *about_label;
 static lv_obj_t *bl_hint, *bl_off_row; // automatic brightness: what the range means; off in the dark
+static lv_obj_t *bl_now;                // the level now, by the heading
 static void bl_mode_show(bool autobl);
 static void bl_limits_ask(void);
 static const char *reason_text(const char *st);
@@ -837,8 +838,10 @@ static void refresh_settings(lv_timer_t *t) {
 	else lv_obj_remove_state(bl_auto, LV_STATE_CHECKED);
 	bl_mode_show(autobl);
 	if (!autobl && !lv_obj_has_state(bl_slider, LV_STATE_PRESSED)) {
+		// moved only if it's really elsewhere: the hardware has 33 steps, so what's read back
+		// can be a point or two from what the slider set, and the knob would hop
 		int b = sysinfo_backlight();
-		if (b >= 0) lv_slider_set_value(bl_slider, b, LV_ANIM_OFF);
+		if (b >= 0 && abs(b - (int)lv_slider_get_value(bl_slider)) > 2) lv_slider_set_value(bl_slider, b, LV_ANIM_OFF);
 	}
 	if (!t && settings_tab == TAB_DISPLAY) bl_limits_ask(); // as Settings opens at Display
 }
@@ -1667,7 +1670,7 @@ static void bl_limits_saved(char *reply, void *data) {
 	if (strcmp(st, "ok")) {
 		lv_obj_t *card = dialog_open(NULL, "Brightness not changed", reason_text(st), true);
 		dialog_button(card, "OK", BUTTON_MAIN, dialog_cancel, NULL);
-		sysinfo_backlight_request("resume"); // (saved, of-backlight set has done this)
+		sysinfo_backlight_request("reload"); // the limits in the file, not the ones it was sent
 	}
 	bl_limits_ask(); // what's in the file now
 }
@@ -1676,6 +1679,17 @@ static void bl_limits_save(void) {
 	char req[48];
 	snprintf(req, sizeof req, "backlight-set %d %d %d\n", bl_min, bl_max, bl_off_below);
 	helper_request(req, bl_limits_saved, NULL);
+}
+
+// The level the backlight has now, by the heading, read four times a second while the
+// Display tab's in view: it follows the slider as it's dragged, and automatic brightness.
+static void bl_now_tick(lv_timer_t *t) {
+	if (!bl_now || !visible || !showing(page_settings) || settings_tab != TAB_DISPLAY) return;
+	int b = sysinfo_backlight();
+	char s[16] = "";
+	if (b == 0) snprintf(s, sizeof s, "OFF");
+	else if (b > 0) snprintf(s, sizeof s, "NOW %d%%", b);
+	set_text(bl_now, s);
 }
 
 // While the slider's held, the backlight shows the level under the finger: at once as a knob
@@ -1717,6 +1731,11 @@ static void bl_released(lv_event_t *e) {
 	if (lv_slider_get_mode(bl_slider) == LV_SLIDER_MODE_RANGE) {
 		bl_min = (int)lv_slider_get_left_value(bl_slider);
 		bl_max = (int)lv_slider_get_value(bl_slider);
+		// the fade back, by the new limits, at once: writing them to OF-BOOT takes a moment,
+		// and the slider may be grabbed again before it's done
+		char req[24];
+		snprintf(req, sizeof req, "resume %d %d", bl_min, bl_max);
+		sysinfo_backlight_request(req);
 		bl_limits_save();
 		return;
 	}
@@ -3638,7 +3657,20 @@ static void build_settings(lv_obj_t *scr) {
 
 	// Display: brightness and touch
 	lv_obj_t *pd = settings_panel_new(TAB_DISPLAY);
-	section(pd, "BRIGHTNESS");
+	// The heading, with the level the backlight has now at its other end (bl_now_tick)
+	lv_obj_t *bh = lv_obj_create(pd);
+	lv_obj_remove_style_all(bh);
+	lv_obj_set_size(bh, LV_PCT(100), LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(bh, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(bh, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_remove_flag(bh, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_t *bt = section(bh, "BRIGHTNESS");
+	lv_obj_set_style_margin_top(bt, 0, 0);
+	lv_obj_set_style_margin_top(bh, HEADING_SPACE, 0);
+	bl_now = section(bh, "");
+	lv_obj_set_style_margin_top(bl_now, 0, 0);
+	lv_obj_set_style_pad_right(bh, BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0); // its end over the switches'
+	lv_timer_create(bl_now_tick, 250, NULL);
 	lv_obj_t *row = lv_obj_create(pd);
 	lv_obj_remove_style_all(row);
 	lv_obj_set_size(row, LV_PCT(100), ROW_H);

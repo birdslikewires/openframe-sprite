@@ -332,6 +332,8 @@ int sysinfo_backlight(void) {
 	snprintf(path, sizeof path, "%s/max_brightness", dir);
 	int max = read_int(path, -1);
 	if (cur < 0 || max <= 0) return -1;
+	snprintf(path, sizeof path, "%s/bl_power", dir);
+	if (read_int(path, 0) != 0) return 0; // its power off: the screen's off, whatever the level
 	return (cur * 100 + max / 2) / max;
 }
 
@@ -417,16 +419,20 @@ void sysinfo_name(char *name, size_t n, char *host, size_t hn) {
 // A request straight into of-backlight's service (its control pipe, which anyone may write
 // and it holds open): many a second while a slider's dragged, with no process started for
 // each. Without the service there's no pipe, and nothing happens.
-void sysinfo_backlight_request(const char *req) {
+bool sysinfo_backlight_request(const char *req) {
 	int fd = open("/run/of-backlight/control", O_WRONLY | O_NONBLOCK | O_CLOEXEC);
-	if (fd < 0) return;
+	if (fd < 0) return false;
 	char line[32];
 	int n = snprintf(line, sizeof line, "%s\n", req);
-	if (n > 0 && n < (int)sizeof line && write(fd, line, n) < 0) { /* full: the next one will do */ }
+	bool ok = n > 0 && n < (int)sizeof line && write(fd, line, n) == n;
 	close(fd);
+	return ok;
 }
 
+// The same pipe if the service is there, so it's at once and in order with what the slider
+// sent; of-backlight itself if not (a fixed level, set without the service).
 void sysinfo_set_backlight(const char *arg) {
+	if (sysinfo_backlight_request(arg)) return;
 	char cmd[64];
 	snprintf(cmd, sizeof cmd, "of-backlight %s >/dev/null 2>&1", arg);
 	sysinfo_run(cmd);
