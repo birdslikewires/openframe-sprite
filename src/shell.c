@@ -826,7 +826,9 @@ static void refresh_settings(lv_timer_t *t) {
 	if (showing(page_wifi)) { wifi_refresh(); return; }
 	if (showing(page_netinfo)) { netinfo_show(); return; }
 	if (!showing(page_settings)) return;
-	if (wifi_status_label) wifi_refresh();
+	// Wi-Fi's state from the helper (a root process chain each time): every 3 s only while
+	// Network shows it, and once as Settings opens
+	if (wifi_status_label && (!t || settings_tab == TAB_NETWORK)) wifi_refresh();
 	if (!t) ssh_refresh(); // as Settings opens: it changes only when it's set
 	if (!t) name_refresh();
 	if (settings_tab == TAB_UPDATES) upd_refresh();
@@ -834,7 +836,7 @@ static void refresh_settings(lv_timer_t *t) {
 	net_notes_show();
 	static char text[768];
 	sysinfo_summary(text, sizeof text);
-	lv_label_set_text(about_label, text);
+	set_text(about_label, text); // (only if it changed)
 	bool autobl = sysinfo_backlight_auto();
 	if (autobl) lv_obj_add_state(bl_auto, LV_STATE_CHECKED);
 	else lv_obj_remove_state(bl_auto, LV_STATE_CHECKED);
@@ -2421,7 +2423,7 @@ static void wifi_row(int index, const lv_image_dsc_t *icon, const char *symbol, 
 
 // The list again, if what it shows has changed: the networks, and which is joined or saved.
 static void wifi_build_list(void) {
-	char now[3][WIFI_SSID_MAX * 4 + 2];
+	char now[3][WIFI_SSID_MAX * 4 + 2] = { { 0 } }; // (compared whole with memcmp: no stray bytes)
 	snprintf(now[0], sizeof now[0], "%u", (unsigned)wifi_scanned_at);
 	snprintf(now[1], sizeof now[1], "%d%s", wifi_now.connected, wifi_now.ssid);
 	snprintf(now[2], sizeof now[2], "%s", wifi_now.saved);
@@ -3448,14 +3450,41 @@ static void build_news(lv_obj_t *scr) {
 }
 
 
+// The updates waiting as the list shows them: a row for each firmware, each part of the
+// OpenFrame's own (not the kernel's metapackage, which goes in with the kernel) and each app,
+// and one for all of Debian's. So "3 updates waiting" over three rows, where of-update's
+// pending= counts packages (a new kernel is two). *done: the rows that are in.
+static int upd_rows(char items[][96], int n, int *done) {
+	int rows = 0, in_rows = 0, deb = 0, deb_in = 0;
+	for (int i = 0; i < n; i++) {
+		char p[64], v[48], tier[12];
+		int in = 0;
+		if (sscanf(items[i], "%63s %47s %11s %d", p, v, tier, &in) < 4) continue;
+		if (!strcmp(tier, "debian")) { deb++; deb_in += in == 1; continue; }
+		if (!strcmp(tier, "openframe") && !strncmp(p, "linux-image-openframe-", 22)) continue;
+		if (strcmp(tier, "firmware") && strcmp(tier, "openframe") && strcmp(tier, "apps")) continue;
+		rows++;
+		in_rows += in == 1 && strcmp(tier, "firmware"); // (firmware: flashed at the restart)
+	}
+	if (deb) { rows++; in_rows += deb_in == deb; }
+	if (done) *done = in_rows;
+	return rows;
+}
+
 // The updates waiting (of-update's item= lines: package, version, tier, done, old version), by
 // tier: the firmware first, with what its restart will look like; then the OpenFrame's own as
 // one row, its parts (the kernel too) in small print; then each app; then Debian's, together.
 // firmware_pending: firmware already installed, to be flashed at the next restart.
 static void upd_show_list(char items[][96], int n, bool firmware_pending) {
+	// what's listed, to redraw only when it changes (bounded: strncat's room worked out as
+	// size - length - 2 wrapped round once the buffer was nearly full, with ~35 waiting)
 	char sig[sizeof upd_listed] = "";
-	for (int i = 0; i < n; i++) { strncat(sig, items[i], sizeof sig - strlen(sig) - 2); strcat(sig, ";"); }
-	if (firmware_pending) strncat(sig, "fw", sizeof sig - strlen(sig) - 1);
+	size_t at = 0;
+	for (int i = 0; i < n && at < sizeof sig - 1; i++) {
+		int w = snprintf(sig + at, sizeof sig - at, "%s;", items[i]);
+		at = w < 0 ? at : at + (size_t)w < sizeof sig ? at + (size_t)w : sizeof sig - 1;
+	}
+	if (firmware_pending && at < sizeof sig - 1) snprintf(sig + at, sizeof sig - at, "fw");
 	if (!strcmp(sig, upd_listed)) return;
 	snprintf(upd_listed, sizeof upd_listed, "%s", sig);
 	lv_obj_clean(upd_list);
@@ -3524,7 +3553,8 @@ static void upd_show_list(char items[][96], int n, bool firmware_pending) {
 		upd_row("Security and bug fixes", t, deb_done == n_deb);
 		upd_small(names);
 	}
-	lv_obj_set_style_margin_top(lv_obj_get_child(upd_list, 0), 0, 0);
+	lv_obj_t *first = lv_obj_get_child(upd_list, 0); // (none if nothing listed has a row)
+	if (first) lv_obj_set_style_margin_top(first, 0, 0);
 }
 
 // Busy (checking, downloading, installing): no buttons, as there's nothing to press; the
@@ -3732,7 +3762,7 @@ static void upd_status_done(char *reply, void *data) {
 		snprintf(t, sizeof t, "Downloading updates...");
 		progress = UPD_SLIDING;
 		if (size > 0 && got > 0) {
-			progress = (int)(got * 100 / size);
+			progress = (int)((long long)got * 100 / size); // (long is 32-bit here: past 21 MB it overflowed)
 			if (size >= 1024 * 1024) snprintf(d, sizeof d, "%.1f of %.1f MB", got / 1048576.0, size / 1048576.0);
 			else snprintf(d, sizeof d, "%ld of %ld KB", got / 1024, size / 1024);
 		}
@@ -3753,12 +3783,17 @@ static void upd_status_done(char *reply, void *data) {
 			// an unpacked one, not yet configured, is half in: so even one update moves
 			int p = (n_done * 2 + n_partial) * 50 / n_items;
 			if (p > 0) progress = p;
-			snprintf(d, sizeof d, "%d of %d", n_done, n_items);
+			int rows_in, rows = upd_rows(items, n_items, &rows_in);
+			if (rows > 0) snprintf(d, sizeof d, "%d of %d", rows_in, rows); // as the list shows them
 		}
 	}
 	else if (needs_restart) { snprintf(t, sizeof t, "Restart to finish updating"); colour = C_WARN; }
 	else if (failed) { snprintf(t, sizeof t, "The last update didn't work"); colour = C_WARN; }
-	else if (pending > 0) snprintf(t, sizeof t, pending == 1 ? "1 update waiting" : "%d updates waiting", pending);
+	else if (pending > 0) {
+		int rows = n_items ? upd_rows(items, n_items, NULL) : pending; // (an older of-update: no items)
+		if (rows < 1) rows = pending;
+		snprintf(t, sizeof t, rows == 1 ? "1 update waiting" : "%d updates waiting", rows);
+	}
 	else if (last || checked) snprintf(t, sizeof t, "Up to date");
 	else snprintf(t, sizeof t, "Not checked yet");
 	if (idle) {
@@ -3858,6 +3893,7 @@ static void settings_show_tab(int t) {
 	if (t == TAB_UPDATES) upd_refresh();
 	if (t == TAB_AUDIO) aud_refresh();
 	if (t == TAB_DISPLAY) bl_limits_ask();
+	if (t == TAB_NETWORK && wifi_status_label) wifi_refresh(); // (polled only while it shows)
 }
 
 static void tab_clicked(lv_event_t *e) { settings_show_tab((int)(intptr_t)lv_event_get_user_data(e)); }
@@ -4091,6 +4127,7 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_add_event_cb(aud_slider, aud_released, LV_EVENT_RELEASED, NULL);
 	lv_obj_add_event_cb(aud_slider, aud_pressed, LV_EVENT_PRESSED, NULL);
 	lv_obj_add_event_cb(aud_slider, aud_released, LV_EVENT_PRESS_LOST, NULL);
+	lv_obj_add_event_cb(aud_slider, aud_released, LV_EVENT_INDEV_RESET, NULL);
 	lv_obj_t *test_row = button_row(pa_);
 	lv_obj_set_flex_align(test_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	aud_test_btn = button(test_row, LV_SYMBOL_AUDIO "  Test sound", BUTTON_OTHER, aud_test_clicked, NULL);
@@ -4142,6 +4179,7 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_ext_click_area(bl_slider, 20); // easier to grab with a finger
 	lv_obj_add_event_cb(bl_slider, bl_released, LV_EVENT_RELEASED, NULL);
 	lv_obj_add_event_cb(bl_slider, bl_released, LV_EVENT_PRESS_LOST, NULL);
+	lv_obj_add_event_cb(bl_slider, bl_released, LV_EVENT_INDEV_RESET, NULL);
 	lv_obj_add_event_cb(bl_slider, bl_pressed, LV_EVENT_PRESSED, NULL);
 	lv_obj_add_event_cb(bl_slider, bl_dragged, LV_EVENT_VALUE_CHANGED, NULL);
 	lv_obj_t *al = lv_label_create(row);
@@ -4335,6 +4373,9 @@ static void theme_apply(lv_theme_t *th, lv_obj_t *obj) {
 		lv_obj_add_event_cb(obj, slider_held_cb, LV_EVENT_PRESSED, (void *)1);
 		lv_obj_add_event_cb(obj, slider_held_cb, LV_EVENT_RELEASED, NULL);
 		lv_obj_add_event_cb(obj, slider_held_cb, LV_EVENT_PRESS_LOST, NULL);
+		// and when a drag that starts on it is taken as a scroll (drag_input's lv_indev_reset:
+		// LVGL sends only this then, no release), or it stayed held: taps 0.4 s late after
+		lv_obj_add_event_cb(obj, slider_held_cb, LV_EVENT_INDEV_RESET, NULL);
 		static lv_style_t knob;
 		if (!knob.prop_cnt) {
 			lv_style_init(&knob);

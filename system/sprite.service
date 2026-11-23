@@ -8,6 +8,9 @@ Description=Sprite, the OpenFrame touch shell
 # would break it, as with X (see xinit.service.d/openframe.conf).
 After=systemd-user-sessions.service of-flash.service of-mac-gate.service of-provision.service
 After=plymouth-quit.service plymouth-quit-wait.service getty@tty1.service
+# OpenFrame Flash stopped and left its message on tty1 (what went wrong, what to do): it holds
+# the login prompt off with this, and Sprite too, or it would cover the message
+ConditionPathExists=!/run/of-flash/hold
 Conflicts=getty@tty1.service
 # If sprite can't run, the login prompt comes back rather than a blank screen.
 OnFailure=getty@tty1.service

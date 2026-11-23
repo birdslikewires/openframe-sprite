@@ -144,8 +144,12 @@ wifi_txt_get() {
 # which of-netplan takes off, so spaces and quotes at either end are kept as they are.
 wifi_write() {
 	local NEW
+	# (the copy holds the password: nobody else's to read, even for a moment, and gone after;
+	# an EXIT trap ran after this function returned, with NEW out of scope, and left it in /tmp)
+	umask 077
 	NEW=$(mktemp) || answer "error: no temporary file"
-	trap 'rm -f "$NEW"' EXIT
+	WIFI_TMP=$NEW
+	trap 'rm -f "$WIFI_TMP" "$WIFI_TMP.2"' EXIT
 	if [ -f "$WIFITXT" ]; then
 		cp "$WIFITXT" "$NEW"
 	elif [ -f "$WIFITEMPLATE" ]; then
@@ -448,7 +452,8 @@ case "$CMD" in
 			audio-set)
 				IFS= read -r -t 5 LINE || answer "error: nothing to set"
 				ARGS=()
-				for kv in $LINE; do
+				read -r -a WORDS <<< "$LINE" # (split, never globbed: a * isn't a file list)
+				for kv in "${WORDS[@]}"; do
 					[[ $kv =~ ^(output=(builtin|[0-9a-f]{4}:[0-9a-f]{4})|direct=(yes|no))$ ]] || answer "error: $kv isn't an output or direct"
 					ARGS+=("$kv")
 				done
