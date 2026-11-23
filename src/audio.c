@@ -300,5 +300,27 @@ bool audio_dac_info(const char *card, struct audio_dac *d) {
 	fclose(f);
 	if (d->rate_min == 1 << 30) d->rate_min = 0;
 	if (d->running && run_alt >= 0 && run_alt < 16) d->run_bits = alt_bits[run_alt];
+	// What it was opened at, exactly (hw_params: "closed" while nothing plays; the kernel has it
+	// from 6.18.65, with SND_VERBOSE_PROCFS). The bits from the format, but S32_LE carries as
+	// many as the altset in use says (24 in 32 on most DACs). Its status file isn't used: through
+	// the mixer (dmix) it says nothing about what's being played.
+	for (int dev = 0; dev < 4 && !d->hw_rate; dev++) {
+		snprintf(path, sizeof path, "/proc/asound/card%d/pcm%dp/sub0/hw_params", n, dev);
+		if (!(f = fopen(path, "r"))) continue;
+		d->hw_known = true;
+		char fmt[24] = "";
+		int rate = 0;
+		while (fgets(line, sizeof line, f)) {
+			if (!strncmp(line, "format: ", 8)) sscanf(line + 8, "%23s", fmt);
+			else if (!strncmp(line, "rate: ", 6)) rate = atoi(line + 6);
+		}
+		fclose(f);
+		if (!rate || !fmt[0]) continue;
+		d->hw_rate = rate;
+		d->hw_bits = !strncmp(fmt, "S16", 3) || !strncmp(fmt, "U16", 3) ? 16
+			   : !strncmp(fmt, "S24", 3) || !strncmp(fmt, "U24", 3) ? 24
+			   : !strncmp(fmt, "S32", 3) || !strncmp(fmt, "U32", 3) ? (d->run_bits ? d->run_bits : 32)
+			   : 0;
+	}
 	return true;
 }

@@ -183,6 +183,8 @@ struct audio_dac {
 	bool async;                  // it keeps the time itself (an asynchronous USB endpoint)
 	bool running;                // playing now, with
 	int run_bits, run_rate;      // the format in use and the momentary rate
+	bool hw_known;               // the kernel has hw_params in /proc (6.18.65 on): then, as it plays,
+	int hw_bits, hw_rate;        // the bits and the rate it was opened at (0 while closed)
 };
 bool audio_dac_info(const char *card, struct audio_dac *d); // a USB DAC's connection (/proc)
 int sysinfo_backlight_max(void);              // the hardware's highest level, -1 if unknown

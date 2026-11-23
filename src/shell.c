@@ -3034,11 +3034,15 @@ static void aud_dac_show(void) {
 	rate_text(d.rate_max, hi, sizeof hi);
 	if (d.bits_min == d.bits_max) snprintf(bits, sizeof bits, "%d-bit", d.bits_max);
 	else snprintf(bits, sizeof bits, "%d or %d-bit", d.bits_min, d.bits_max);
-	if (d.running && d.run_rate > 0) {
+	// what it's playing: as it was opened (hw_params), or on an older kernel, as stream0 has it
+	bool playing = d.hw_known ? d.hw_rate > 0 : d.running && d.run_rate > 0;
+	int now_bits = d.hw_known ? d.hw_bits : d.run_bits, now_rate = d.hw_known ? d.hw_rate : d.run_rate;
+	const char *way = aud_direct ? "direct to the DAC, unchanged" : "mixed";
+	if (playing) {
 		char r[16];
-		rate_text(d.run_rate, r, sizeof r);
-		if (d.run_bits) snprintf(now, sizeof now, "%d-bit at %s, %s", d.run_bits, r, aud_direct ? "straight to it" : "mixed");
-		else snprintf(now, sizeof now, "%s, %s", r, aud_direct ? "straight to it" : "mixed");
+		rate_text(now_rate, r, sizeof r);
+		if (now_bits) snprintf(now, sizeof now, "%d-bit at %s, %s", now_bits, r, way);
+		else snprintf(now, sizeof now, "%s, %s", r, way);
 	} else snprintf(now, sizeof now, "not playing");
 	// "44.1 to 96 kHz": the unit once
 	char *k = strstr(lo, " kHz");
@@ -3321,6 +3325,7 @@ static const char *upd_part(const char *pkg) {
 	if (!strcmp(pkg, "openframe-sprite")) return "Sprite";
 	if (!strcmp(pkg, "openframe-scripts")) return "System";
 	if (!strcmp(pkg, "openframe-crystalhd")) return "Crystal HD";
+	if (!strcmp(pkg, "openframe-resampler")) return "Resampler";
 	if (!strncmp(pkg, "linux-image-", 12)) return "Kernel";
 	return pkg;
 }
