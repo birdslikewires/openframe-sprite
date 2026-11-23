@@ -90,6 +90,7 @@ static int cur_page, n_pages;
 enum { TAB_NETWORK, TAB_DISPLAY, TAB_TIME, TAB_UPDATES, TAB_ABOUT, TAB_POWER, N_TABS };
 static lv_obj_t *tab_btn[N_TABS], *tab_icon[N_TABS], *tab_panel[N_TABS];
 static int settings_tab;
+static int settings_tab_first = -1; // the top of the rail: where the gear opens Settings
 static void settings_show_tab(int t);
 
 // Paging: the pages sit side by side on a strip, which follows a sideways drag and then
@@ -859,10 +860,11 @@ static void open_app(struct sprite_app *a) {
 
 static void tile_clicked(lv_event_t *e) { open_app(lv_event_get_user_data(e)); }
 
-// The gear opens Settings, and from any of its screens goes home again.
+// The gear opens Settings at its first tab, and from any of its screens goes home again.
 static void gear_clicked(lv_event_t *e) {
 	if (bar_app) { // over an app: Settings, as from home
 		bar_leave_app();
+		settings_show_tab(settings_tab_first);
 		show_page(page_settings);
 		refresh_settings(NULL);
 		return;
@@ -871,6 +873,7 @@ static void gear_clicked(lv_event_t *e) {
 		show_page(page_home);
 		return;
 	}
+	settings_show_tab(settings_tab_first);
 	show_page(page_settings);
 	refresh_settings(NULL);
 }
@@ -3489,6 +3492,7 @@ static lv_obj_t *settings_tab_new(lv_obj_t *rail, int t, const char *glyph, cons
 	lv_obj_set_style_text_color(l, lv_color_hex(C_TEXT), 0);
 	lv_obj_add_event_cb(b, tab_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)t);
 	tab_btn[t] = b;
+	if (settings_tab_first < 0) settings_tab_first = t; // whichever's put first
 	return b;
 }
 
@@ -3816,7 +3820,7 @@ static void build_settings(lv_obj_t *scr) {
 	// the first heading of each panel sits at its top, not a heading's space below it
 	for (int t = 0; t < N_TABS; t++) lv_obj_set_style_margin_top(lv_obj_get_child(tab_panel[t], 0), 0, 0);
 	lv_obj_set_style_margin_top(lv_obj_get_child(pn, 1), 0, 0); // under the notes, while there are none
-	settings_show_tab(TAB_NETWORK);
+	settings_show_tab(settings_tab_first);
 	update_net(NULL); // the Network tab's dot, now there is one
 	lv_timer_create(refresh_settings, 3000, NULL);
 	lv_obj_add_flag(page_settings, LV_OBJ_FLAG_HIDDEN);
