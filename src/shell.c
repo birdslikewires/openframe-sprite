@@ -1605,9 +1605,7 @@ static void reset_sure(lv_event_t *e) {
 
 static void reset_ask(lv_event_t *e) {
 	lv_obj_t *card = dialog_open(NULL, "Erase this OpenFrame?",
-				     "Its Wi-Fi and network settings, the SSH password and keys, its apps and their data, "
-				     "the home screen and anything else that's been installed all go. It keeps its updates "
-				     "and touch calibration, then restarts as it came.", true);
+				     "Network settings, passwords and keys, all apps, and their data will be removed. ", true);
 	dialog_button(card, "Erase", BUTTON_DANGER, reset_sure, NULL);
 	dialog_button(card, "Cancel", BUTTON_OTHER, dialog_cancel, NULL);
 }
