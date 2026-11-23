@@ -3187,8 +3187,10 @@ static void upd_status_done(char *reply, void *data) {
 	for (char *l = strtok_r(reply, "\n", &save); l; l = strtok_r(NULL, "\n", &save)) {
 		if (!strncmp(l, "item=", 5) && n_items < 64) {
 			snprintf(items[n_items], sizeof items[0], "%s", l + 5);
-			size_t len = strlen(l);
-			n_done += len > 2 && !strcmp(l + len - 2, " 1");
+			// "package version tier in old": in is 1 once it's in
+			char p[64], v[48], tier[12];
+			int in = 0;
+			if (sscanf(l + 5, "%63s %47s %11s %d", p, v, tier, &in) == 4) n_done += in == 1;
 			n_items++;
 		}
 		else if (!strncmp(l, "got=", 4)) got = atol(l + 4);
