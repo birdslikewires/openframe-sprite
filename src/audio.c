@@ -233,3 +233,72 @@ int audio_test_state(void) {
 	return t < 0.9 ? 1 : t < 2.0 ? 2 : 3; // (the label for "both" stays on to the end)
 }
 void audio_test_seen(void) { int f = -1; atomic_compare_exchange_strong(&ts_state, &f, 0); }
+
+/* ---- a USB DAC's connection, from what the kernel says of it in /proc ---- */
+//
+// Its name and how it's connected (/proc/asound/cards: "Audient iD4 at usb-..., high speed"),
+// what it takes (its stream0's playback formats: bits, rates, and whether it's asynchronous,
+// keeping the time itself), and, as it plays, at what (stream0 again: the format in use, by
+// its altset, and the momentary rate). Readable by anyone, so no helper's needed.
+bool audio_dac_info(const char *card, struct audio_dac *d) {
+	memset(d, 0, sizeof *d);
+	char line[256], want[40], path[96];
+	snprintf(want, sizeof want, "[%s", card);
+	FILE *f = fopen("/proc/asound/cards", "r");
+	if (!f) return false;
+	int n = -1;
+	while (fgets(line, sizeof line, f)) {
+		char *b = strchr(line, '[');
+		if (!b || strncmp(b, want, strlen(want)) || (b[strlen(want)] != ' ' && b[strlen(want)] != ']')) continue;
+		n = atoi(line);
+		if (fgets(line, sizeof line, f)) {
+			line[strcspn(line, "\n")] = 0;
+			char *s = line + strspn(line, " ");
+			char *at = strstr(s, " at usb-"), *sp = strrchr(s, ',');
+			if (sp) snprintf(d->speed, sizeof d->speed, "%s", sp + 2);
+			if (at) *at = 0;
+			snprintf(d->name, sizeof d->name, "%s", s);
+		}
+		break;
+	}
+	fclose(f);
+	if (n < 0) return false;
+	snprintf(path, sizeof path, "/proc/asound/card%d/stream0", n);
+	if (!(f = fopen(path, "r"))) return false;
+	// the playback altsets (their format's bits) and the running one
+	int altset = -1, alt_bits[16] = { 0 }, run_alt = -1;
+	bool playback = false;
+	d->rate_min = 1 << 30;
+	while (fgets(line, sizeof line, f)) {
+		if (!strncmp(line, "Playback:", 9)) { playback = true; continue; }
+		if (!strncmp(line, "Capture:", 8)) playback = false;
+		if (!playback) continue;
+		char *v;
+		if (strstr(line, "Status: Running")) d->running = true;
+		else if ((v = strstr(line, "Altset = "))) run_alt = atoi(v + 9);
+		else if ((v = strstr(line, "Momentary freq = "))) d->run_rate = atoi(v + 17);
+		else if ((v = strstr(line, "Altset "))) altset = atoi(v + 7);
+		else if ((v = strstr(line, "Channels: ")) && atoi(v + 10) > d->channels) d->channels = atoi(v + 10);
+		else if (strstr(line, "Endpoint:") && strstr(line, "(ASYNC)")) d->async = true;
+		else if ((v = strstr(line, "Bits: "))) {
+			int b = atoi(v + 6);
+			if (altset >= 0 && altset < 16) alt_bits[altset] = b;
+			if (b > d->bits_max) d->bits_max = b;
+			if (!d->bits_min || b < d->bits_min) d->bits_min = b;
+		} else if ((v = strstr(line, "Rates: "))) {
+			for (char *p = v + 7; *p;) {
+				if (*p >= '0' && *p <= '9') {
+					int r = (int)strtol(p, &p, 10);
+					if (r >= 8000) {
+						if (r < d->rate_min) d->rate_min = r;
+						if (r > d->rate_max) d->rate_max = r;
+					}
+				} else p++;
+			}
+		}
+	}
+	fclose(f);
+	if (d->rate_min == 1 << 30) d->rate_min = 0;
+	if (d->running && run_alt >= 0 && run_alt < 16) d->run_bits = alt_bits[run_alt];
+	return true;
+}

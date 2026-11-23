@@ -177,6 +177,14 @@ bool audio_set_volume(const char *card, const char *ctl, int pct); // audio.c: A
 bool audio_test_sound(void);   // left, then right, then both (false if it's already playing)
 int audio_test_state(void);    // 0 idle, 1 left, 2 right, 3 both, -1 it couldn't play
 void audio_test_seen(void);    // a "couldn't" has been said
+struct audio_dac {
+	char name[80], speed[24];    // "Audient iD4", "high speed"
+	int bits_min, bits_max, rate_min, rate_max, channels;
+	bool async;                  // it keeps the time itself (an asynchronous USB endpoint)
+	bool running;                // playing now, with
+	int run_bits, run_rate;      // the format in use and the momentary rate
+};
+bool audio_dac_info(const char *card, struct audio_dac *d); // a USB DAC's connection (/proc)
 int sysinfo_backlight_max(void);              // the hardware's highest level, -1 if unknown
 bool sysinfo_backlight_auto(void);
 void sysinfo_set_backlight(const char *arg);  // "0".."100" or "auto", runs of-backlight

@@ -2984,6 +2984,7 @@ static int aud_n;
 static char aud_out[32], aud_kind[8], aud_mixer[64];
 static bool aud_direct, aud_managed = true, aud_known;
 static lv_obj_t *aud_list, *aud_vol_head, *aud_now, *aud_slider_row, *aud_slider, *aud_direct_row, *aud_note;
+static lv_obj_t *aud_dac_label; // a USB DAC's connection: what it is, what it takes, what it's playing
 
 // The OpenFrame's own card by what it is to an owner; a DAC by the name it gives.
 static const char *aud_card_name(const struct aud_card *c) {
@@ -2998,6 +2999,47 @@ static void aud_now_show(int v) {
 }
 
 static void aud_choose(lv_event_t *e);
+
+// A rate as people say it: 44.1 kHz, 96 kHz (a USB DAC's momentary rate, near enough).
+static void rate_text(int r, char *o, size_t n) {
+	r = (r + 50) / 100 * 100;
+	if (r % 1000) snprintf(o, n, "%.1f kHz", r / 1000.0);
+	else snprintf(o, n, "%d kHz", r / 1000);
+}
+
+// The DAC in use: how it's connected, what it takes, and what it's playing now, as the kernel
+// has it (audio.c), every second while the tab's in view.
+static void aud_dac_show(void) {
+	if (!aud_dac_label) return;
+	struct audio_dac d;
+	if (strcmp(aud_kind, "usb") || !audio_dac_info(aud_out, &d)) { show_if(aud_dac_label, false); return; }
+	const char *sp = !strcmp(d.speed, "high speed") ? "USB 2.0 high speed (480 Mbit/s)"
+		       : !strcmp(d.speed, "full speed") ? "USB full speed (12 Mbit/s)"
+		       : !strcmp(d.speed, "super speed") ? "USB 3 (5 Gbit/s)" : d.speed;
+	char lo[16], hi[16], bits[24], now[80], t[360];
+	rate_text(d.rate_min, lo, sizeof lo);
+	rate_text(d.rate_max, hi, sizeof hi);
+	if (d.bits_min == d.bits_max) snprintf(bits, sizeof bits, "%d-bit", d.bits_max);
+	else snprintf(bits, sizeof bits, "%d or %d-bit", d.bits_min, d.bits_max);
+	if (d.running && d.run_rate > 0) {
+		char r[16];
+		rate_text(d.run_rate, r, sizeof r);
+		if (d.run_bits) snprintf(now, sizeof now, "%d-bit at %s, %s", d.run_bits, r, aud_direct ? "straight to it" : "mixed");
+		else snprintf(now, sizeof now, "%s, %s", r, aud_direct ? "straight to it" : "mixed");
+	} else snprintf(now, sizeof now, "not playing");
+	// "44.1 to 96 kHz": the unit once
+	char *k = strstr(lo, " kHz");
+	if (k && d.rate_max != d.rate_min) *k = 0;
+	snprintf(t, sizeof t, "%s, %s%s\nTakes %s, %s%s%s\nNow: %s", d.name, sp,
+		 d.async ? "\nAsynchronous: the DAC sets the clock" : "", bits, lo,
+		 d.rate_max != d.rate_min ? " to " : "", d.rate_max != d.rate_min ? hi : "", now);
+	set_text(aud_dac_label, t);
+	show_if(aud_dac_label, true);
+}
+
+static void aud_dac_tick(lv_timer_t *t) {
+	if (visible && showing(page_settings) && settings_tab == TAB_AUDIO) aud_dac_show();
+}
 
 static void aud_show(void) {
 	if (!aud_list) return;
@@ -3045,6 +3087,7 @@ static void aud_show(void) {
 		aud_now_show(v);
 	}
 	show_if(aud_direct_row, aud_managed && usb);
+	aud_dac_show();
 	lv_obj_t *sw = lv_obj_get_child(aud_direct_row, 1);
 	if (aud_direct) lv_obj_remove_state(sw, LV_STATE_CHECKED);
 	else lv_obj_add_state(sw, LV_STATE_CHECKED);
@@ -3987,6 +4030,14 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_size(aud_list, LV_PCT(100), LV_SIZE_CONTENT);
 	lv_obj_set_flex_flow(aud_list, LV_FLEX_FLOW_COLUMN);
 	lv_obj_remove_flag(aud_list, LV_OBJ_FLAG_SCROLLABLE);
+	aud_dac_label = lv_label_create(pa_);
+	lv_label_set_text(aud_dac_label, "");
+	lv_obj_set_width(aud_dac_label, LV_PCT(100));
+	lv_obj_set_style_text_font(aud_dac_label, &lv_font_montserrat_16, 0);
+	lv_obj_set_style_text_color(aud_dac_label, lv_color_hex(C_DIM), 0);
+	lv_obj_set_style_text_line_space(aud_dac_label, 2, 0);
+	lv_obj_add_flag(aud_dac_label, LV_OBJ_FLAG_HIDDEN);
+	lv_timer_create(aud_dac_tick, 1000, NULL);
 	aud_direct_row = switch_row(pa_, "Volume control on this OpenFrame", true, aud_direct_changed);
 	lv_obj_set_style_pad_right(aud_direct_row, BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0); // as Display's switches
 	aud_note = lv_label_create(pa_);
