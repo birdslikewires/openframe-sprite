@@ -38,11 +38,13 @@
 ##                            the SSH server, which images keep off until someone can log in
 ##    update-status         the automatic updates (openframe-scripts' of-update), as its status
 ##                            prints them, key=value lines, then "ok": state (idle, checking,
-##                            downloading, installing), last, result, message, pending,
-##                            checked, restart (yes when an update needs one)
+##                            preparing, downloading, installing), last, result, message,
+##                            pending, checked, restart (yes when an update needs one), time
 ##    update-check          look for updates now, without installing (answers at once; the
 ##                            state says when it's done)
 ##    update-now            install what's waiting now, as the night would
+##    update-time <HH:00>   when the updates install (and restart, if one needs it), once a
+##                            day: of-update set-time, into OF-BOOT/settings/updates.txt
 ##    update-news           what's new in OpenBeak's waiting updates, as of-update news prints
 ##                            it (part= and news= lines), then "ok"
 ##    after-update <what>   reboot or poweroff once the update being installed has finished
@@ -406,6 +408,13 @@ case "$CMD" in
 			systemd-run --no-block --quiet --collect --unit=of-update-check -p Nice=10 -p IOSchedulingClass=idle \
 				/usr/local/sbin/of-update check >/dev/null 2>&1 || answer "error: the check didn't start"
 		fi
+		answer ok
+		;;
+	update-time)
+		[[ "$ARG" =~ ^([01][0-9]|2[0-3]):00$ ]] || answer "error: update-time HH:00"
+		grep -q "set-time" /usr/local/sbin/of-update 2>/dev/null ||
+			answer "error: this system's updates can't be moved yet (its openframe-scripts is too old)"
+		/usr/local/sbin/of-update set-time "$ARG" >/dev/null 2>&1 || answer "error: the time couldn't be saved"
 		answer ok
 		;;
 	update-news)

@@ -318,6 +318,8 @@ static const lv_font_t *icon_text(const struct sprite_app *a, char *buf, size_t 
 // in the bar moves as the time changes. It's updated just after each second begins, and only
 // redrawn when what it shows changes.
 static bool clock_24 = true, clock_secs = false;
+static int upd_hour = 3;          // when the OpenFrame updates (of-update status time=); 03:00 until it says
+static void upd_hour_set(int h);
 static lv_timer_t *clock_timer;
 
 static int text_w(const char *txt, const lv_font_t *f) {
@@ -340,7 +342,10 @@ static void clock_layout(void) {
 	lv_obj_set_width(bar_clock, w);
 }
 
+static void updating_check(void);
+
 static void update_clock(lv_timer_t *t) {
+	updating_check(); // Sprite's own update, about to restart it (once a second, as this is)
 	struct timespec ts;
 	clock_gettime(CLOCK_REALTIME, &ts);
 	struct tm tm;
@@ -1276,13 +1281,14 @@ static lv_timer_t *edge_timer;
 
 // In sprite's state directory (/var/lib/sprite, StateDirectory= in sprite.service), or, run
 // by hand, ~/.local/state/sprite.
-static const char *layout_path(void) {
+static const char *state_path(const char *name) {
 	static char path[256];
 	const char *state = getenv("STATE_DIRECTORY"), *home = getenv("HOME");
-	if (state && state[0]) snprintf(path, sizeof path, "%s/layout", state);
-	else snprintf(path, sizeof path, "%s/.local/state/sprite/layout", home && home[0] ? home : "/tmp");
+	if (state && state[0]) snprintf(path, sizeof path, "%s/%s", state, name);
+	else snprintf(path, sizeof path, "%s/.local/state/sprite/%s", home && home[0] ? home : "/tmp", name);
 	return path;
 }
+static const char *layout_path(void) { return state_path("layout"); }
 
 static void layout_read(void) {
 	n_placed = 0;
@@ -1814,6 +1820,7 @@ static void cal_reset(lv_event_t *e) {
 static void clock24_changed(lv_event_t *e) {
 	clock_24 = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
 	settings_set("clock", clock_24 ? "24h" : "12h");
+	upd_hour_set(upd_hour); // the update time, written the same way
 	clock_settings_changed();
 }
 
@@ -2909,6 +2916,83 @@ static void show_if(lv_obj_t *o, bool show) {
 
 static void upd_started(char *reply, void *data);
 
+/* ---- the update time: when the OpenFrame updates (and restarts, if one needs it), by the hour ---- */
+
+static lv_obj_t *upd_time_label;  // the Updates tab's row
+static int time_pick;             // the hour being picked (a stepper's)
+static lv_obj_t *time_pick_label;
+
+static void hour_text(char *buf, size_t len, int h) {
+	if (clock_24) snprintf(buf, len, "%02d:00", h);
+	else snprintf(buf, len, "%d%s", h % 12 ? h % 12 : 12, h < 12 ? "am" : "pm");
+}
+
+static void upd_hour_set(int h) {
+	if (h < 0 || h > 23) return;
+	upd_hour = h;
+	if (!upd_time_label) return;
+	char t[16];
+	hour_text(t, sizeof t, h);
+	set_text(upd_time_label, t);
+}
+
+static void upd_time_done(char *reply, void *data) {
+	const char *st = helper_reply_status(reply);
+	if (strcmp(st, "ok")) {
+		lv_obj_t *card = dialog_open(NULL, "The time wasn't changed", reason_text(st), true);
+		dialog_button(card, "OK", BUTTON_MAIN, dialog_cancel, NULL);
+	}
+}
+
+static void upd_time_save_hour(int h) {
+	if (h == upd_hour) return;
+	char req[32];
+	snprintf(req, sizeof req, "update-time %02d:00\n", h);
+	upd_hour_set(h);
+	helper_request(req, upd_time_done, NULL);
+}
+
+static void time_step(lv_event_t *e) {
+	time_pick = (time_pick + (int)(intptr_t)lv_event_get_user_data(e) + 24) % 24;
+	char t[16];
+	hour_text(t, sizeof t, time_pick);
+	lv_label_set_text(time_pick_label, t);
+}
+
+// [-] 3am [+], starting at the current time, in parent (a dialog's card, or a row).
+static lv_obj_t *time_stepper(lv_obj_t *parent) {
+	time_pick = upd_hour;
+	lv_obj_t *r = button_row(parent);
+	lv_obj_set_size(r, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+	lv_obj_set_flex_align(r, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_column(r, 8, 0);
+	lv_obj_set_width(button(r, LV_SYMBOL_MINUS, BUTTON_OTHER, time_step, (void *)(intptr_t)-1), BUTTON_H + 8);
+	time_pick_label = lv_label_create(r);
+	lv_obj_set_width(time_pick_label, 96);
+	lv_obj_set_style_text_align(time_pick_label, LV_TEXT_ALIGN_CENTER, 0);
+	lv_obj_set_style_text_color(time_pick_label, lv_color_hex(C_TEXT), 0);
+	char t[16];
+	hour_text(t, sizeof t, time_pick);
+	lv_label_set_text(time_pick_label, t);
+	lv_obj_set_width(button(r, LV_SYMBOL_PLUS, BUTTON_OTHER, time_step, (void *)(intptr_t)1), BUTTON_H + 8);
+	return r;
+}
+
+static void upd_time_save(lv_event_t *e) {
+	dialog_close();
+	upd_time_save_hour(time_pick);
+}
+
+static void upd_time_clicked(lv_event_t *e) {
+	lv_obj_t *card = dialog_open(NULL, "Update time",
+				     "Updates install within half an hour of this time each day. If one needs a "
+				     "restart, the OpenFrame restarts then too, so pick a time nobody's watching.", true);
+	lv_obj_t *st = time_stepper(card);
+	lv_obj_set_width(st, LV_PCT(100));
+	dialog_button(card, "Save", BUTTON_MAIN, upd_time_save, NULL);
+	dialog_button(card, "Cancel", BUTTON_OTHER, dialog_cancel, NULL);
+}
+
 // The progress bar: a percentage, or a segment sliding along it while there's nothing to measure.
 #define UPD_NO_BAR (-2)
 #define UPD_SLIDING (-1)
@@ -2983,6 +3067,7 @@ static void upd_status_done(char *reply, void *data) {
 		else if (!strncmp(l, "last=", 5)) last = atol(l + 5);
 		else if (!strncmp(l, "checked=", 8)) checked = atol(l + 8);
 		else if (!strncmp(l, "pending=", 8)) pending = atoi(l + 8);
+		else if (!strncmp(l, "time=", 5)) upd_hour_set(atoi(l + 5));
 	}
 	bool idle = !strcmp(state, "idle"), needs_restart = !strcmp(restart, "yes"), failed = !strcmp(result, "failed");
 	if (upd_requested) {
@@ -3001,6 +3086,7 @@ static void upd_status_done(char *reply, void *data) {
 	// with nothing to measure yet (looking, planning, a download not begun); UPD_NO_BAR idle.
 	int progress = UPD_NO_BAR;
 	if (!strcmp(state, "checking")) { snprintf(t, sizeof t, "Checking for updates..."); progress = UPD_SLIDING; }
+	else if (!strcmp(state, "preparing")) { snprintf(t, sizeof t, "Getting ready to update..."); progress = UPD_SLIDING; }
 	else if (!strcmp(state, "downloading")) {
 		snprintf(t, sizeof t, "Downloading updates...");
 		progress = UPD_SLIDING;
@@ -3372,11 +3458,27 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_margin_right(upd_list, -LIST_ROW_PAD, 0);
 	lv_obj_set_style_pad_hor(upd_list, LIST_ROW_PAD, 0);
 	lv_obj_add_flag(upd_list, LV_OBJ_FLAG_HIDDEN);
+	section(pu, "SCHEDULE");
+	lv_obj_t *tr = lv_obj_create(pu); // the update time, opening upd_time_clicked's picker
+	lv_obj_remove_style_all(tr);
+	lv_obj_set_flex_flow(tr, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(tr, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_column(tr, 20, 0);
+	lv_obj_remove_flag(tr, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_t *tn = lv_label_create(tr);
+	lv_label_set_text(tn, "Update time");
+	lv_obj_set_style_text_color(tn, lv_color_hex(C_TEXT), 0);
+	lv_obj_set_flex_grow(tn, 1);
+	upd_time_label = lv_label_create(tr);
+	lv_obj_set_style_text_color(upd_time_label, lv_color_hex(C_DIM), 0);
+	lv_obj_set_style_text_font(upd_time_label, &lv_font_montserrat_16, 0);
+	upd_hour_set(upd_hour);
+	row_pressable(tr, upd_time_clicked, NULL);
 	lv_obj_t *uh = lv_label_create(pu);
-	lv_label_set_text(uh, "The OpenFrame updates itself at night, or soon after it starts if it was off. "
-			      "When an update needs a restart, it restarts at about 4am.");
+	lv_label_set_text(uh, "The OpenFrame updates itself once a day at about this time, or soon after it "
+			      "starts if it was off then. If an update needs a restart, that happens then too.");
 	lv_obj_set_width(uh, LV_PCT(100));
-	lv_obj_set_style_margin_top(uh, HEADING_SPACE, 0);
+	lv_obj_set_style_margin_top(uh, HINT_GAP, 0);
 	lv_obj_set_style_text_font(uh, &lv_font_montserrat_16, 0);
 	lv_obj_set_style_text_color(uh, lv_color_hex(C_DIM), 0);
 
@@ -3433,6 +3535,132 @@ static void theme_apply(lv_theme_t *th, lv_obj_t *obj) {
 		lv_obj_add_event_cb(obj, radius_on_size, LV_EVENT_SIZE_CHANGED, NULL);
 }
 
+/* ---- the welcome: once, at the first start of a new system (or one that's been erased) ---- */
+
+// Marked done in sprite's state directory (welcomed), which of-reset empties.
+static void welcome_done(void) {
+	FILE *f = fopen(state_path("welcomed"), "w");
+	if (f) fclose(f);
+	upd_time_save_hour(time_pick); // the time picked on it, if it's not the one there was
+}
+
+static void welcome_start(lv_event_t *e) {
+	welcome_done();
+	dialog_close();
+}
+
+static void welcome_wifi(lv_event_t *e) {
+	welcome_done();
+	dialog_close();
+	settings_show_tab(TAB_NETWORK);
+	show_page(page_settings);
+	refresh_settings(NULL);
+	wifi_choose_clicked(NULL);
+}
+
+static void welcome_password(lv_event_t *e) {
+	welcome_done();
+	dialog_close();
+	settings_show_tab(TAB_NETWORK);
+	show_page(page_settings);
+	refresh_settings(NULL);
+	ssh_set_clicked(NULL);
+}
+
+// A row on the welcome card: a name, a dim value at the right, and a chevron (row_pressable).
+static lv_obj_t *welcome_row(lv_obj_t *card, const char *name, const char *value, lv_event_cb_t cb) {
+	lv_obj_t *r = lv_obj_create(card);
+	lv_obj_remove_style_all(r);
+	lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(r, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_column(r, 20, 0);
+	lv_obj_remove_flag(r, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_t *n = lv_label_create(r);
+	lv_label_set_text(n, name);
+	lv_obj_set_style_text_color(n, lv_color_hex(C_TEXT), 0);
+	lv_obj_set_flex_grow(n, 1);
+	if (value) {
+		lv_obj_t *v = lv_label_create(r);
+		lv_label_set_text(v, value);
+		lv_obj_set_style_text_color(v, lv_color_hex(C_DIM), 0);
+		lv_obj_set_style_text_font(v, &lv_font_montserrat_16, 0);
+	}
+	if (cb) row_pressable(r, cb, NULL);
+	else lv_obj_set_size(r, PANEL_TEXT_W, ROW_H);
+	return r;
+}
+
+static void welcome_show(lv_timer_t *t) {
+	if (dialog_backdrop || !showing(page_home)) return; // something else is in front: next start
+	lv_obj_t *card = dialog_open(NULL, "Welcome to your OpenFrame",
+				     "Tap an app on the home screen to open it, or touch and hold it for more. "
+				     "Settings are behind the gear at the top right.", false);
+	lv_obj_set_width(card, PANEL_TEXT_W + 2 * DIALOG_PAD);
+	lv_obj_set_style_pad_row(card, 10, 0);
+	lv_obj_set_style_text_font(lv_obj_get_child(card, 1), &lv_font_montserrat_16, 0);
+	struct sprite_net n;
+	sysinfo_net(&n);
+	welcome_row(card, "Wi-Fi", n.wifi_up ? "Connected" : n.eth_up ? "Using the cable" : "Not connected", welcome_wifi);
+	welcome_row(card, "Password for remote access", "Optional", welcome_password);
+	lv_obj_t *ur = welcome_row(card, "Daily updates at", NULL, NULL);
+	time_stepper(ur);
+	lv_obj_t *h = lv_label_create(card);
+	lv_label_set_text(h, "It restarts then if an update needs it: pick a time nobody's watching.");
+	lv_label_set_long_mode(h, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(h, LV_PCT(100));
+	lv_obj_set_style_text_font(h, &lv_font_montserrat_16, 0);
+	lv_obj_set_style_text_color(h, lv_color_hex(C_DIM), 0);
+	lv_obj_set_style_margin_bottom(h, 8, 0);
+	dialog_button(card, "Start", BUTTON_MAIN, welcome_start, NULL);
+}
+
+/* ---- updating Sprite itself: its package's postinst says so (/run/sprite-updating, with the
+   new version) a few seconds before it restarts Sprite, so it doesn't just vanish ---- */
+
+#define UPDATING_FILE "/run/sprite-updating"
+
+static void updating_check(void) {
+	static bool shown;
+	if (shown || access(UPDATING_FILE, F_OK)) return;
+	shown = true;
+	char ver[48] = "";
+	FILE *f = fopen(UPDATING_FILE, "r");
+	if (f) { if (fgets(ver, sizeof ver, f)) ver[strcspn(ver, "\n")] = 0; fclose(f); }
+	// where to come back to: the Updates tab, if that's what's in front (state directory: it
+	// outlasts the restart, as /run/user doesn't)
+	f = fopen(state_path("resume"), "w");
+	if (f) {
+		bool at_updates = (showing(page_settings) && settings_tab == TAB_UPDATES) || showing(page_news);
+		fprintf(f, "%s %s\n", at_updates ? "updates" : "home", ver[0] ? ver : "-");
+		fclose(f);
+	}
+	char body[160];
+	// (the version first: LVGL breaks lines at full stops, and would split it)
+	if (ver[0]) snprintf(body, sizeof body, "Version %s. It restarts in a moment, and carries on where it was.", ver);
+	else snprintf(body, sizeof body, "It restarts in a moment, and carries on where it was.");
+	dialog_open(NULL, "Sprite has been updated", body, false);
+	sprite_lvgl_kick();
+}
+
+// After that restart: back where it was, and a word that it worked.
+static void updating_resume(void) {
+	const char *p = state_path("resume");
+	struct stat st;
+	if (stat(p, &st)) return;
+	char where[16] = "", ver[48] = "";
+	FILE *f = fopen(p, "r");
+	if (f) { if (fscanf(f, "%15s %47s", where, ver) < 1) where[0] = 0; fclose(f); }
+	unlink(p);
+	if (time(NULL) - st.st_mtime > 120) return; // not this restart's
+	if (!strcmp(where, "updates")) {
+		settings_show_tab(TAB_UPDATES);
+		show_page(page_settings);
+	}
+	char t[80];
+	snprintf(t, sizeof t, strcmp(ver, "-") && ver[0] ? "Sprite is now %s" : "Sprite has been updated", ver);
+	show_toast(t, 5000);
+}
+
 void shell_init(void *pixels) {
 	lv_init();
 	lv_tick_set_cb(tick_ms);
@@ -3471,4 +3699,9 @@ void shell_init(void *pixels) {
 	build_netinfo(scr);
 	build_news(scr);
 	build_entry(scr);
+	updating_resume();
+	if (access(state_path("welcomed"), F_OK)) {
+		lv_timer_t *w = lv_timer_create(welcome_show, 1500, NULL);
+		lv_timer_set_repeat_count(w, 1);
+	}
 }

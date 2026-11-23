@@ -3,7 +3,8 @@
 # openframe-sprite postinst
 #  Once per system, sprite takes tty1 from the login prompt (getty@tty1), so it starts at
 #  boot; disabling it afterwards sticks. The settings file goes onto OF-BOOT if there isn't
-#  one, for editing from a PC. On an upgrade, a running sprite restarts on the new version.
+#  one, for editing from a PC. On an upgrade, a running Sprite says so, then restarts on the
+#  new version.
 #  sprite gets its user, and sandboxed apps their group (sysusers.d) and socket directory
 #  (tmpfiles.d). "of", the person's account, joins the group, to try apps by hand.
 #  sprite-ping's timers (telling openbeak.net hourly that the unit is running) are enabled
@@ -64,6 +65,11 @@ case "$1" in
 			if [ -n "${FIRST:-}" ]; then
 				systemctl start sprite.service 2>/dev/null || true
 			elif systemctl is-active --quiet sprite.service; then
+				# Sprite first says it's been updated and is about to restart (it looks for this
+				# every second), so it doesn't just vanish in front of someone.
+				dpkg-query -W -f='${Version}\n' openframe-sprite > /run/sprite-updating 2>/dev/null || true
+				sleep 5
+				rm -f /run/sprite-updating
 				systemctl restart sprite.service 2>/dev/null || true
 			fi
 		fi
