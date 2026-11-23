@@ -28,6 +28,7 @@
 // switches, slider ends) are rounder. See rounded().
 #define UI_RADIUS 18                                        // the most any box gets
 #define SLIDER_KNOB_PAD 4 // how far a slider's knob reaches past the bar, all round
+#define SLIDER_KNOB_GROW 3 // and how much more while it's held
 #define BL_SLIDER_H 24    // the brightness slider's bar
 #define RADIUS_RATIO (18.0 / 88.0)
 // Where content starts on every screen, below the status bar: the home grid's first icon and
@@ -1695,20 +1696,55 @@ static void bl_now_tick(lv_timer_t *t) {
 // While the slider's held, the backlight shows the level under the finger: at once as a knob
 // is grabbed, following it as it's dragged (of-backlight show, no fade), and fading back to
 // what it should be as it's let go (the limits saved, or the level set).
-static int bl_shown = -1;
+//
+// Sent only as the hardware's level (one of its few steps) changes, and at most every
+// BL_SEND_MS, always ending with the latest: a finger moves the slider far more often than
+// that, and of-backlight's service, in bash, takes a few milliseconds over each. Sent at every
+// change, they queued faster than it could take them, the light lagging further behind for
+// as long as the slider was held.
+#define BL_SEND_MS 40
+static int bl_shown = -1, bl_want = -1;  // the hardware level last sent; the level last asked for
+static uint32_t bl_sent_at;
+static lv_timer_t *bl_send_timer;        // the latest, when it came too soon after the last
 
-static void bl_show(int v) {
-	if (v == bl_shown) return;
-	bl_shown = v;
+static void bl_send(void) {
+	int v = bl_want < 1 ? 1 : bl_want;   // (of-backlight shows nothing lower)
+	int max = sysinfo_backlight_max(), step = max > 0 ? (v * max + 50) / 100 : v;
+	if (step == bl_shown) return;
+	bl_shown = step;
+	bl_sent_at = lv_tick_get();
 	char req[16];
 	snprintf(req, sizeof req, "show %d", v);
 	sysinfo_backlight_request(req);
+}
+
+static void bl_send_later(lv_timer_t *t) {
+	bl_send_timer = NULL; // (a one-shot: LVGL deletes it)
+	bl_send();
+}
+
+static void bl_send_cancel(void) {
+	if (bl_send_timer) lv_timer_delete(bl_send_timer);
+	bl_send_timer = NULL;
+}
+
+static void bl_show(int v) {
+	bl_want = v;
+	uint32_t since = lv_tick_elaps(bl_sent_at);
+	if (bl_shown < 0 || since >= BL_SEND_MS) {
+		bl_send_cancel();
+		bl_send();
+	} else if (!bl_send_timer) {
+		bl_send_timer = lv_timer_create(bl_send_later, BL_SEND_MS - since, NULL);
+		lv_timer_set_repeat_count(bl_send_timer, 1);
+	}
 }
 
 // The knob a press has: LVGL only picks one once the finger moves, so its rule is used here
 // (beyond either knob, that one; between them, the nearer).
 static void bl_pressed(lv_event_t *e) {
 	lv_slider_t *s = (lv_slider_t *)bl_slider;
+	bl_send_cancel();
 	bl_shown = -1;
 	if (lv_slider_get_mode(bl_slider) != LV_SLIDER_MODE_RANGE) { bl_show(lv_slider_get_value(bl_slider)); return; }
 	lv_point_t p;
@@ -1727,6 +1763,7 @@ static void bl_dragged(lv_event_t *e) {
 }
 
 static void bl_released(lv_event_t *e) {
+	bl_send_cancel(); // nothing shown after what follows
 	bl_shown = -1;
 	if (lv_slider_get_mode(bl_slider) == LV_SLIDER_MODE_RANGE) {
 		bl_min = (int)lv_slider_get_left_value(bl_slider);
@@ -3681,6 +3718,7 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_pad_hor(row, BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0);
 	bl_slider = lv_slider_create(row);
 	lv_obj_set_height(bl_slider, BL_SLIDER_H);
+	lv_obj_set_style_margin_left(bl_slider, SLIDER_KNOB_GROW, 0); // the held knob at the left end, unclipped
 	lv_obj_set_flex_grow(bl_slider, 1);
 	lv_slider_set_range(bl_slider, 5, 100);
 	lv_obj_set_ext_click_area(bl_slider, 20); // easier to grab with a finger
@@ -3875,7 +3913,14 @@ static void theme_apply(lv_theme_t *th, lv_obj_t *obj) {
 			lv_style_set_bg_opa(&knob, LV_OPA_COVER);
 			lv_style_set_pad_all(&knob, SLIDER_KNOB_PAD);
 		}
+		static lv_style_t held; // in place of the theme's grow, so its size is known here
+		if (!held.prop_cnt) {
+			lv_style_init(&held);
+			lv_style_set_transform_width(&held, SLIDER_KNOB_GROW);
+			lv_style_set_transform_height(&held, SLIDER_KNOB_GROW);
+		}
 		lv_obj_add_style(obj, &knob, LV_PART_KNOB);
+		lv_obj_add_style(obj, &held, LV_PART_KNOB | LV_STATE_PRESSED);
 	}
 }
 

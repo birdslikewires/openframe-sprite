@@ -323,6 +323,16 @@ static int backlight_dir(char *out, size_t len) {
 	return r;
 }
 
+int sysinfo_backlight_max(void) {
+	static int max = -1;
+	if (max > 0) return max;
+	char dir[128], path[192];
+	if (backlight_dir(dir, sizeof dir) != 0) return -1;
+	snprintf(path, sizeof path, "%s/max_brightness", dir);
+	max = read_int(path, -1);
+	return max;
+}
+
 int sysinfo_backlight(void) {
 	static char dir[128];
 	if (!dir[0] && backlight_dir(dir, sizeof dir) != 0) return -1;
