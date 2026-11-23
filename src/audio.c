@@ -127,8 +127,8 @@ struct ts_note { double at, freq, decay; int side; }; // side: -1 left, 1 right,
 static const struct ts_note ts_notes[] = {
 	{ 0.00, 523.25, 0.35, -1 }, { 0.13, 659.25, 0.35, -1 }, { 0.26, 783.99, 0.45, -1 },   // C5 E5 G5
 	{ 0.95, 783.99, 0.35, 1 },  { 1.08, 1046.50, 0.35, 1 }, { 1.21, 1318.51, 0.45, 1 },  // G5 C6 E6
-	{ 1.95, 523.25, 0.32, 0 },  { 1.95, 659.25, 0.32, 0 },  { 1.95, 783.99, 0.32, 0 },   // C major,
-	{ 1.98, 1046.50, 0.28, 0 },                                                          // both
+	{ 2.03, 523.25, 0.32, 0 },  { 2.03, 659.25, 0.32, 0 },  { 2.03, 783.99, 0.32, 0 },   // C major,
+	{ 2.06, 1046.50, 0.28, 0 },                                                          // both
 };
 
 // A bell-ish tone: the note and two softer overtones (from it: sin 2w = 2 sin w cos w,
@@ -225,6 +225,6 @@ int audio_test_state(void) {
 	int s = ts_state;
 	if (s <= 0) return s;
 	double t = now_s() - ts_started;
-	return t < 0.9 ? 1 : t < 1.9 ? 2 : 3; // (the label for "both" stays on to the end)
+	return t < 0.9 ? 1 : t < 2.0 ? 2 : 3; // (the label for "both" stays on to the end)
 }
 void audio_test_seen(void) { int f = -1; atomic_compare_exchange_strong(&ts_state, &f, 0); }
