@@ -169,6 +169,10 @@ display.sleep = Screen off after
 display.sleep.never = Never
 display.sleep.min = %d min
 display.sleep.hour = 1 hour
+# A heading over the choice of screensaver (only when one's been installed from the Shop),
+# and the built-in one, first in the list
+display.head.saver = SCREENSAVER
+display.saver.clock = Flip clock
 # Title when brightness couldn't be changed
 display.not_changed = Brightness not changed
 # Heading

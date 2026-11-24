@@ -68,6 +68,7 @@ struct sprite_app {
 	bool pending;       // waiting for Xwayland, or the helper, before it runs
 	float handle;       // home handle opacity while this app shows (manifest: handle=normal|faint|hidden)
 	bool bar;           // the status bar stays above its window (manifest: bar=yes); else full screen
+	bool saver;         // a screensaver (manifest: kind=screensaver): no tile, chosen in Display
 	pid_t pid;          // launched process, 0 when not running
 	int pidfd;          // a sandboxed app's main process, watched for its exit (-1 if not)
 	struct wl_event_source *exit_src;
@@ -133,6 +134,8 @@ uint64_t sprite_idle_ms(void);
 bool sprite_sleep_inhibited(void);
 void sprite_set_asleep(bool asleep);
 void sprite_set_covered(bool covered); // the shell over everything, an app's too (the screensaver)
+void sprite_saver_start(struct sprite_app *app); // a screensaver app over everything, once it shows
+void sprite_saver_end(void);                  // and closed (a touch, or the screen going off)
 
 // main.c: performance trace (SPRITE_TRACE_PERF=1), one line a second while anything moves
 void perf_render(double ms);                  // the shell drew a frame, taking ms

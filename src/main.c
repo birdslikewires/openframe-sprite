@@ -120,6 +120,7 @@ static struct {
 	uint64_t last_input_ms;
 	bool asleep;
 	bool covered; // the shell full screen over everything, an app's too (the screensaver)
+	struct sprite_app *saver; // a screensaver app: over everything once its window maps
 	int inhibitors;
 	struct wlr_idle_inhibit_manager_v1 *idle_inhibit;
 	struct wl_listener new_inhibitor;
@@ -154,6 +155,22 @@ uint64_t sprite_idle_ms(void) { return S.last_input_ms ? mono_ms() - S.last_inpu
 bool sprite_sleep_inhibited(void) { return S.inhibitors > 0; }
 void sprite_set_asleep(bool asleep) { S.asleep = asleep; }
 static void apply_foreground(void);
+// A screensaver app runs over the flip clock, which covers the screen while it starts (and
+// if it fails, or quits); it's never the foreground app, and gets no input: a touch ends it.
+void sprite_saver_start(struct sprite_app *app) {
+	if (S.saver || !app) return;
+	S.saver = app;
+	wlr_log(WLR_INFO, "screensaver %s", app->name);
+	if (app->pid == 0) apps_launch(app);
+	apply_foreground();
+}
+void sprite_saver_end(void) {
+	struct sprite_app *a = S.saver;
+	if (!a) return;
+	S.saver = NULL;
+	sprite_close_app(a);
+	apply_foreground();
+}
 void sprite_set_covered(bool covered) {
 	if (S.covered == covered) return;
 	S.covered = covered;
@@ -309,8 +326,14 @@ static void focus_view(struct sprite_view *v) {
 
 static void apply_foreground(void) {
 	struct sprite_view *v;
+	// Covered (the screensaver), only a screensaver app's windows show, and those over the shell:
+	// the apps' tree is moved above it while one's up
+	bool saver = S.covered && S.saver && S.saver->view;
+	if (saver) wlr_scene_node_place_above(&S.apps_tree->node, &S.shell_node->node);
+	else wlr_scene_node_place_below(&S.apps_tree->node, &S.shell_node->node);
 	wl_list_for_each(v, &S.views, link) {
-		if (v->tree) wlr_scene_node_set_enabled(&v->tree->node, v->mapped && v->app == S.fg && S.fg);
+		bool on = S.covered ? S.saver && v->app == S.saver : S.fg && v->app == S.fg;
+		if (v->tree) wlr_scene_node_set_enabled(&v->tree->node, v->mapped && on);
 		if (!S.fg || v != S.fg->view) set_view_active(v, false);
 	}
 	// An app that keeps the bar (bar=yes) has the shell's top strip above it: only that strip is
@@ -405,7 +428,8 @@ static void view_mapped(struct sprite_view *v) {
 		v->app->view = v;
 		wlr_log(WLR_INFO, "%s window mapped", v->app->name);
 		if (v->app->reopen_behind) v->app->reopen_behind = false; // reopened behind (apps_restart)
-		else S.fg = v->app;   // a new main window comes to the front
+		else if (!v->app->saver) S.fg = v->app; // a new main window comes to the front (a
+							   // screensaver's shows only as one)
 		if (S.hold == v->app) {
 			S.hold = NULL;
 			wl_event_source_timer_update(S.hold_timer, 0);

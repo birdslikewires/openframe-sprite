@@ -15,6 +15,8 @@
 //   display=x11          (an X11 or SDL app, run through Xwayland; default wayland)
 //   handle=faint         (home handle: normal, faint or hidden while the app shows)
 //   bar=yes              (the status bar stays above it, its window below; default full screen)
+//   kind=screensaver     (a screensaver: no tile; chosen in Settings, Display, and shown
+//                         over everything after a while untouched, until a touch)
 //   allow=network sound  (what a sandboxed app may have beyond the display: network, sound
 //                         to play, microphone to record too; read by the helper)
 // Comments go on lines of their own.
@@ -110,6 +112,7 @@ static void load_dir(const char *dir) {
 			else if (!strcmp(k, "builtin")) { a->builtin = true; snprintf(a->exec, sizeof a->exec, "%s", v); }
 			else if (!strcmp(k, "display")) a->x11 = !strcmp(v, "x11");
 			else if (!strcmp(k, "bar")) a->bar = !strcmp(v, "yes");
+			else if (!strcmp(k, "kind")) a->saver = !strcmp(v, "screensaver");
 			else if (!strcmp(k, "handle"))
 				a->handle = !strcmp(v, "hidden") ? 0.0f : !strcmp(v, "faint") ? SPRITE_HANDLE_FAINT : SPRITE_HANDLE_NORMAL;
 		}
@@ -345,7 +348,7 @@ void apps_launch(struct sprite_app *app) {
 struct sprite_app *apps_autostart(void) {
 	if (!autostart_id[0]) return NULL;
 	for (int i = 0; i < n_apps; i++)
-		if (!apps[i].hidden && !apps[i].builtin && !strcmp(apps[i].id, autostart_id)) return &apps[i];
+		if (!apps[i].hidden && !apps[i].builtin && !apps[i].saver && !strcmp(apps[i].id, autostart_id)) return &apps[i];
 	return NULL;
 }
 

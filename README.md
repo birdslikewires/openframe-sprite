@@ -86,6 +86,11 @@ allow=network
   calculator. Without it, an app has the whole screen. The bar's buttons work as usual,
   taking Sprite to the front; the pill does too. Only for apps that fit the window they're
   given: one that always draws 800×480 loses its bottom 40 pixels
+- `kind=screensaver`: a screensaver rather than an app. It has no tile; it's chosen in
+  Settings, Display (where it then appears, alongside the built-in flip clock), and runs
+  over everything once the OpenFrame's been left untouched for "Screensaver after", until a
+  touch, which goes no further. The flip clock covers the screen while it starts, and if it
+  quits. It's stopped when the screen goes off
 - `allow=`: what the app may have beyond the display, separated by spaces: `network`,
   `sound` (to play) and `microphone` (to record as well); without it, an app has none of them
 
@@ -276,8 +281,7 @@ can still be joined.
 - Letting apps change the home pill while they run (a small Wayland protocol), and screen
   blanking
 - Sound and time zone in Settings
-- The app store: an index repository of app manifests, added to by pull request, with apps
-  as i386 `.deb` packages
+- The Shop, for installing apps and screensavers: planned in [docs/shop.md](docs/shop.md)
 - A CPU cap on apps in the background (`CPUQuota=`, which the kernel can do now)
 
 ## Licence

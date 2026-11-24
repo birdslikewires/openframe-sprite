@@ -982,6 +982,8 @@ static void netinfo_show(void);
 static void net_notes_show(void);
 static lv_obj_t *wifi_status_label;
 
+static void saver_show(void); // (Display: which screensaver)
+
 static void refresh_settings(lv_timer_t *t) {
 	if (!visible) return;
 	if (showing(page_wifi)) { wifi_refresh(); return; }
@@ -996,6 +998,7 @@ static void refresh_settings(lv_timer_t *t) {
 	eth_show();
 	net_notes_show();
 	if (settings_tab == TAB_ABOUT) about_show();
+	if (!t && settings_tab == TAB_DISPLAY) saver_show(); // the screensavers installed
 	bool autobl = sysinfo_backlight_auto();
 	if (autobl) lv_obj_add_state(bl_auto, LV_STATE_CHECKED);
 	else lv_obj_remove_state(bl_auto, LV_STATE_CHECKED);
@@ -1571,7 +1574,7 @@ static void layout_write(void) {
 	if (rename(tmp, path) != 0) fprintf(stderr, "sprite: can't replace %s: %s\n", path, strerror(errno));
 }
 
-static bool on_grid(const struct sprite_app *a) { return !a->hidden && !a->builtin; } // Settings is the gear
+static bool on_grid(const struct sprite_app *a) { return !a->hidden && !a->builtin && !a->saver; } // Settings is the gear
 
 // Fills slots[] from the layout, then the rest in name order; returns the number of pages used.
 static int layout_assign(void) {
@@ -4160,7 +4163,7 @@ static void settings_show_tab(int t) {
 	lv_obj_scroll_to_y(tab_panel[t], 0, LV_ANIM_OFF);
 	if (t == TAB_UPDATES) upd_refresh();
 	if (t == TAB_AUDIO) aud_refresh();
-	if (t == TAB_DISPLAY) bl_limits_ask();
+	if (t == TAB_DISPLAY) { bl_limits_ask(); saver_show(); }
 	if (t == TAB_NETWORK && wifi_status_label) wifi_refresh(); // (polled only while it shows)
 	if (t == TAB_ABOUT) about_show(); // (and polled only while it shows)
 }
@@ -4221,6 +4224,16 @@ static lv_obj_t *settings_panel_new(int t) {
 static const int idle_steps[] = { 0, 1, 2, 5, 10, 15, 30, 60 }; // minutes; 0: never
 static int ss_min = 5, sleep_min;
 static bool sleeping;
+static char saver_id[64]; // the screensaver app chosen (sprite.txt's saver=), or "": the flip clock
+static lv_obj_t *saver_head, *saver_list;
+
+static struct sprite_app *saver_app(void) {
+	for (int i = 0; saver_id[0] && i < apps_count(); i++) {
+		struct sprite_app *a = apps_get(i);
+		if (a->saver && !strcmp(a->id, saver_id)) return a;
+	}
+	return NULL;
+}
 
 // A row for one of them: its name, and its time with a stepper, kept as key in sprite.txt
 struct idle_row { const char *key; int *min; lv_obj_t *label; };
@@ -4257,11 +4270,13 @@ static void idle_tick(lv_timer_t *t) {
 	uint64_t idle = sprite_idle_ms();
 	if (ss_min && !sleeping && !screensaver_active() && idle >= (uint64_t)ss_min * 60000) {
 		bar_vol_hide();
-		screensaver_start();
+		screensaver_start(); // the flip clock, and over it the app chosen, once it shows
+		sprite_saver_start(saver_app());
 	}
 	if (sleep_min && !sleeping && idle >= (uint64_t)sleep_min * 60000 && sysinfo_backlight_request("sleep")) {
 		sleeping = true;
 		sprite_set_asleep(true);
+		sprite_saver_end(); // nothing to draw for in the dark (the flip clock costs nothing)
 		bar_vol_hide();
 	}
 }
@@ -4269,11 +4284,15 @@ static void idle_tick(lv_timer_t *t) {
 void shell_wake(void) {
 	sleeping = false;
 	sysinfo_backlight_request("wake");
-	screensaver_stop(); // awake, and at whatever was under it
+	sprite_saver_end(); // awake, and at whatever was under it
+	screensaver_stop();
 	sprite_request_frame();
 }
 
-void shell_screensaver_tap(void) { screensaver_stop(); }
+void shell_screensaver_tap(void) {
+	sprite_saver_end();
+	screensaver_stop();
+}
 
 bool shell_clock_24(void) { return clock_24; }
 
@@ -4311,6 +4330,65 @@ static void idle_build(lv_obj_t *parent) {
 		lv_obj_set_width(button(st, LV_SYMBOL_PLUS, BUTTON_OTHER, idle_step, (void *)(intptr_t)(k * 2 + 1)), BUTTON_H + 8);
 	}
 	lv_timer_create(idle_tick, 1000, NULL);
+}
+
+// Which screensaver: the flip clock or an app that's one (kind=screensaver), a list with the
+// chosen one ticked; only there when such an app's installed
+static void saver_choose(lv_event_t *e) {
+	struct sprite_app *a = lv_event_get_user_data(e);
+	snprintf(saver_id, sizeof saver_id, "%s", a ? a->id : "");
+	settings_set("saver", saver_id);
+	saver_show();
+}
+
+static void saver_row(struct sprite_app *a, bool on) {
+	lv_obj_t *r = lv_obj_create(saver_list); // as Audio's list of outputs
+	lv_obj_remove_style_all(r);
+	lv_obj_set_size(r, LV_PCT(100), ROW_H);
+	lv_obj_set_style_pad_hor(r, LIST_ROW_PAD, 0);
+	lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(r, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_remove_flag(r, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_set_style_bg_color(r, lv_color_white(), LV_STATE_PRESSED);
+	lv_obj_set_style_bg_opa(r, LV_OPA_20, LV_STATE_PRESSED);
+	rounded(r);
+	lv_obj_add_flag(r, LV_OBJ_FLAG_CLICKABLE);
+	lv_obj_add_event_cb(r, saver_choose, LV_EVENT_CLICKED, a);
+	lv_obj_t *n = lv_label_create(r);
+	lv_label_set_text(n, a ? a->name : STR_DISPLAY_SAVER_CLOCK);
+	lv_label_set_long_mode(n, LV_LABEL_LONG_DOT);
+	lv_obj_set_flex_grow(n, 1);
+	lv_obj_set_style_text_color(n, lv_color_hex(C_TEXT), 0);
+	lv_obj_t *k = lv_label_create(r);
+	lv_label_set_text(k, on ? LV_SYMBOL_OK : "");
+	lv_obj_set_style_text_color(k, lv_color_hex(C_ACCENT), 0);
+}
+
+static void saver_show(void) {
+	if (!saver_list) return;
+	lv_obj_clean(saver_list);
+	struct sprite_app *chosen = saver_app();
+	int n = 0;
+	for (int i = 0; i < apps_count(); i++) n += apps_get(i)->saver;
+	show_if(saver_head, n);
+	show_if(saver_list, n);
+	if (!n) return;
+	saver_row(NULL, !chosen);
+	for (int i = 0; i < apps_count(); i++)
+		if (apps_get(i)->saver) saver_row(apps_get(i), apps_get(i) == chosen);
+}
+
+static void saver_build(lv_obj_t *parent) {
+	const char *v = settings_get("saver");
+	snprintf(saver_id, sizeof saver_id, "%s", v ? v : "");
+	saver_head = section(parent, STR_DISPLAY_HEAD_SAVER);
+	saver_list = lv_obj_create(parent);
+	lv_obj_remove_style_all(saver_list);
+	lv_obj_set_size(saver_list, PANEL_TEXT_W + 2 * LIST_ROW_PAD, LV_SIZE_CONTENT); // see aud_list
+	lv_obj_set_style_translate_x(saver_list, -LIST_ROW_PAD, 0);
+	lv_obj_set_flex_flow(saver_list, LV_FLEX_FLOW_COLUMN);
+	lv_obj_remove_flag(saver_list, LV_OBJ_FLAG_SCROLLABLE);
+	saver_show();
 }
 
 /* ---- About's details: a card with a row each, an icon, its name, and what it is ---- */
@@ -4680,6 +4758,7 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_pad_right(bl_off_row, BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0); // its switch under Auto's (that row's inset for the knob)
 	lv_obj_add_flag(bl_off_row, LV_OBJ_FLAG_HIDDEN);
 	idle_build(pd);
+	saver_build(pd);
 	// The clock's format (and, later, the time zone): after brightness, before touch (Time had
 	// a tab of its own, until Audio needed it)
 	section(pd, STR_DISPLAY_HEAD_CLOCK);

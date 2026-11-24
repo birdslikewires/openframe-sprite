@@ -11,7 +11,8 @@
 ##
 ##    set <key> <value>     set a setting in settings/sprite.txt (an empty value clears it):
 ##                            startup (an app name), calibration (six numbers), clock
-##                            (24h or 12h) or seconds (yes or no)
+##                            (24h or 12h), seconds (yes or no), screensaver and sleep
+##                            (minutes) or saver (a screensaver app's id)
 ##    reboot                restart the OpenFrame
 ##    poweroff              switch it off
 ##    wifi-scan             look for Wi-Fi networks: wpa_cli's scan results, one network a
@@ -307,6 +308,7 @@ case "$CMD" in
 			clock) RE='^(24h|12h)?$' ;;
 			seconds) RE='^(yes|no)?$' ;;
 			sleep|screensaver) RE='^(0|1|2|5|10|15|30|60)?$' ;;
+			saver) RE='^([a-z0-9][a-z0-9._-]{0,62})?$' ;;
 			*) answer "error: unknown setting" ;;
 		esac
 		[[ "$VAL" =~ $RE ]] || answer "error: bad value for $KEY"
