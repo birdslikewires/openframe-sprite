@@ -14,6 +14,9 @@ Shipped with it, under /opt/sprite, built from Debian Trixie's sources without M
 Built into sprite:
   LVGL 9.3 (MIT), https://lvgl.io
   Lucide 0.460 (ISC), https://lucide.dev: the tile icons, as glyphs in a font
+  Montserrat Medium (SIL Open Font License 1.1), Copyright 2011 The Montserrat Project
+    Authors, https://github.com/JulietaUla/Montserrat: the screensaver clock's big text, as
+    fonts made by scripts/make-fonts.sh
   In LVGL's built-in fonts, which Sprite's text and symbols are drawn in:
     Montserrat (SIL Open Font License 1.1), Copyright 2011 The Montserrat Project Authors,
     https://github.com/JulietaUla/Montserrat

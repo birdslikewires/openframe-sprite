@@ -14,6 +14,10 @@ calibration=
 clock=24h
 seconds=no
 
+# The screensaver, a flip clock, comes on once the screen's been left untouched this many
+# minutes: screensaver=5 (the default), or 0 (never), 1, 2, 10, 15, 30 or 60. A tap ends it.
+screensaver=5
+
 # The screen turns off once it's been left untouched this many minutes: sleep=0 (never, the
 # default), 1, 2, 5, 10, 15, 30 or 60. A tap turns it back on. Settings on the screen changes
 # this too.

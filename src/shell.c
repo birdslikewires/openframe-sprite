@@ -4214,82 +4214,103 @@ static lv_obj_t *settings_panel_new(int t) {
 	return p;
 }
 
-/* ---- display sleep: the screen off after a while untouched (of-backlight sleep), and on
-   again at a touch, which goes no further (main.c) ---- */
+/* ---- the screensaver and display sleep: after a while untouched, the screensaver
+   (screensaver.c), then the screen off (of-backlight sleep); a touch ends either and goes no
+   further (main.c) ---- */
 
-static const int sleep_steps[] = { 0, 1, 2, 5, 10, 15, 30, 60 }; // minutes; 0: never
-static int sleep_min;
+static const int idle_steps[] = { 0, 1, 2, 5, 10, 15, 30, 60 }; // minutes; 0: never
+static int ss_min = 5, sleep_min;
 static bool sleeping;
-static lv_obj_t *sleep_label;
 
-static void sleep_text(char *o, size_t n, int m) {
+// A row for one of them: its name, and its time with a stepper, kept as key in sprite.txt
+struct idle_row { const char *key; int *min; lv_obj_t *label; };
+static struct idle_row idle_rows[] = { { "screensaver", &ss_min, NULL }, { "sleep", &sleep_min, NULL } };
+
+static void idle_text(char *o, size_t n, int m) {
 	if (!m) snprintf(o, n, STR_DISPLAY_SLEEP_NEVER);
 	else if (m == 60) snprintf(o, n, STR_DISPLAY_SLEEP_HOUR);
 	else snprintf(o, n, STR_DISPLAY_SLEEP_MIN, m);
 }
 
-static void sleep_step(lv_event_t *e) {
-	int d = (int)(intptr_t)lv_event_get_user_data(e), i = 0, n = sizeof sleep_steps / sizeof sleep_steps[0];
-	while (i < n - 1 && sleep_steps[i] != sleep_min) i++;
+static void idle_step(lv_event_t *e) {
+	intptr_t u = (intptr_t)lv_event_get_user_data(e); // the row's index * 2, +1 for later
+	struct idle_row *r = &idle_rows[u / 2];
+	int d = u % 2 ? 1 : -1, i = 0, n = sizeof idle_steps / sizeof idle_steps[0];
+	while (i < n - 1 && idle_steps[i] != *r->min) i++;
 	i += d;
 	if (i < 0) i = 0;
 	if (i > n - 1) i = n - 1;
-	sleep_min = sleep_steps[i];
+	*r->min = idle_steps[i];
 	char t[24];
-	sleep_text(t, sizeof t, sleep_min);
-	set_text(sleep_label, t);
-	snprintf(t, sizeof t, "%d", sleep_min);
-	settings_set("sleep", t);
+	idle_text(t, sizeof t, *r->min);
+	set_text(r->label, t);
+	snprintf(t, sizeof t, "%d", *r->min);
+	settings_set(r->key, t);
 }
 
-// Once a second: asleep once it's been left sleep_min untouched, unless something asks it not
-// to (a video playing) or the calibration's screen is up. Only if of-backlight's service takes
-// it: without one the screen stays on, and a touch isn't swallowed.
-static void sleep_tick(lv_timer_t *t) {
-	if (!sleep_min || sleeping || cal || sprite_sleep_inhibited()) return;
-	if (sprite_idle_ms() < (uint64_t)sleep_min * 60000) return;
-	if (!sysinfo_backlight_request("sleep")) return;
-	sleeping = true;
-	sprite_set_asleep(true);
-	bar_vol_hide();
+// Once a second: the screensaver once it's been left ss_min untouched, the screen off once
+// sleep_min, unless something asks it not to (a video playing) or the calibration's screen
+// is up. Asleep only if of-backlight's service takes it: without one the screen stays on, and
+// a touch isn't swallowed.
+static void idle_tick(lv_timer_t *t) {
+	if (cal || sprite_sleep_inhibited()) return;
+	uint64_t idle = sprite_idle_ms();
+	if (ss_min && !sleeping && !screensaver_active() && idle >= (uint64_t)ss_min * 60000) {
+		bar_vol_hide();
+		screensaver_start();
+	}
+	if (sleep_min && !sleeping && idle >= (uint64_t)sleep_min * 60000 && sysinfo_backlight_request("sleep")) {
+		sleeping = true;
+		sprite_set_asleep(true);
+		bar_vol_hide();
+	}
 }
 
 void shell_wake(void) {
 	sleeping = false;
 	sysinfo_backlight_request("wake");
+	screensaver_stop(); // awake, and at whatever was under it
 	sprite_request_frame();
 }
 
-// Its row in Display's brightness section: the time, with a stepper
-static void sleep_build(lv_obj_t *parent) {
-	const char *v = settings_get("sleep");
-	sleep_min = 0;
-	for (size_t i = 0; v && i < sizeof sleep_steps / sizeof sleep_steps[0]; i++)
-		if (atoi(v) == sleep_steps[i]) sleep_min = sleep_steps[i];
-	lv_obj_t *r = lv_obj_create(parent);
-	lv_obj_remove_style_all(r);
-	lv_obj_set_size(r, LV_PCT(100), ROW_H);
-	lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
-	lv_obj_set_flex_align(r, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-	lv_obj_set_style_pad_right(r, BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0); // its end under Auto's switch, as the others
-	lv_obj_remove_flag(r, LV_OBJ_FLAG_SCROLLABLE);
-	lv_obj_t *l = lv_label_create(r);
-	lv_label_set_text(l, STR_DISPLAY_SLEEP);
-	lv_obj_set_style_text_color(l, lv_color_hex(C_TEXT), 0);
-	lv_obj_t *st = button_row(r);
-	lv_obj_set_size(st, LV_SIZE_CONTENT, LV_SIZE_CONTENT); // (packed from its start: the row puts it at the right)
-	lv_obj_set_flex_align(st, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-	lv_obj_set_style_pad_column(st, 8, 0);
-	lv_obj_set_width(button(st, LV_SYMBOL_MINUS, BUTTON_OTHER, sleep_step, (void *)(intptr_t)-1), BUTTON_H + 8);
-	sleep_label = lv_label_create(st);
-	lv_obj_set_width(sleep_label, 96);
-	lv_obj_set_style_text_align(sleep_label, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_style_text_color(sleep_label, lv_color_hex(C_TEXT), 0);
-	char t[24];
-	sleep_text(t, sizeof t, sleep_min);
-	lv_label_set_text(sleep_label, t);
-	lv_obj_set_width(button(st, LV_SYMBOL_PLUS, BUTTON_OTHER, sleep_step, (void *)(intptr_t)1), BUTTON_H + 8);
-	lv_timer_create(sleep_tick, 1000, NULL);
+void shell_screensaver_tap(void) { screensaver_stop(); }
+
+bool shell_clock_24(void) { return clock_24; }
+
+// The rows in Display's brightness section: each its time, with a stepper
+static void idle_build(lv_obj_t *parent) {
+	const char *names[] = { STR_DISPLAY_SCREENSAVER, STR_DISPLAY_SLEEP };
+	for (int k = 0; k < 2; k++) {
+		struct idle_row *ir = &idle_rows[k];
+		const char *v = settings_get(ir->key);
+		if (v)
+			for (size_t i = 0; i < sizeof idle_steps / sizeof idle_steps[0]; i++)
+				if (atoi(v) == idle_steps[i]) *ir->min = idle_steps[i];
+		lv_obj_t *r = lv_obj_create(parent);
+		lv_obj_remove_style_all(r);
+		lv_obj_set_size(r, LV_PCT(100), ROW_H);
+		lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
+		lv_obj_set_flex_align(r, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+		lv_obj_set_style_pad_right(r, BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0); // its end under Auto's switch, as the others
+		lv_obj_remove_flag(r, LV_OBJ_FLAG_SCROLLABLE);
+		lv_obj_t *l = lv_label_create(r);
+		lv_label_set_text(l, names[k]);
+		lv_obj_set_style_text_color(l, lv_color_hex(C_TEXT), 0);
+		lv_obj_t *st = button_row(r);
+		lv_obj_set_size(st, LV_SIZE_CONTENT, LV_SIZE_CONTENT); // (packed from its start: the row puts it at the right)
+		lv_obj_set_flex_align(st, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+		lv_obj_set_style_pad_column(st, 8, 0);
+		lv_obj_set_width(button(st, LV_SYMBOL_MINUS, BUTTON_OTHER, idle_step, (void *)(intptr_t)(k * 2)), BUTTON_H + 8);
+		ir->label = lv_label_create(st);
+		lv_obj_set_width(ir->label, 96);
+		lv_obj_set_style_text_align(ir->label, LV_TEXT_ALIGN_CENTER, 0);
+		lv_obj_set_style_text_color(ir->label, lv_color_hex(C_TEXT), 0);
+		char t[24];
+		idle_text(t, sizeof t, *ir->min);
+		lv_label_set_text(ir->label, t);
+		lv_obj_set_width(button(st, LV_SYMBOL_PLUS, BUTTON_OTHER, idle_step, (void *)(intptr_t)(k * 2 + 1)), BUTTON_H + 8);
+	}
+	lv_timer_create(idle_tick, 1000, NULL);
 }
 
 /* ---- About's details: a card with a row each, an icon, its name, and what it is ---- */
@@ -4658,7 +4679,7 @@ static void build_settings(lv_obj_t *scr) {
 	bl_off_row = switch_row(pd, STR_DISPLAY_DARK_OFF, true, bl_off_changed);
 	lv_obj_set_style_pad_right(bl_off_row, BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0); // its switch under Auto's (that row's inset for the knob)
 	lv_obj_add_flag(bl_off_row, LV_OBJ_FLAG_HIDDEN);
-	sleep_build(pd);
+	idle_build(pd);
 	// The clock's format (and, later, the time zone): after brightness, before touch (Time had
 	// a tab of its own, until Audio needed it)
 	section(pd, STR_DISPLAY_HEAD_CLOCK);
@@ -5019,6 +5040,7 @@ void shell_init(void *pixels) {
 	build_netinfo(scr);
 	build_news(scr);
 	build_entry(scr);
+	screensaver_build();
 	updating_resume();
 	if (access(state_path("welcomed"), F_OK)) {
 		lv_timer_t *w = lv_timer_create(welcome_show, 1500, NULL);

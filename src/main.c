@@ -119,6 +119,7 @@ static struct {
 	// (idle-inhibit: a video playing, say; SDL asks for it, through Xwayland too)
 	uint64_t last_input_ms;
 	bool asleep;
+	bool covered; // the shell full screen over everything, an app's too (the screensaver)
 	int inhibitors;
 	struct wlr_idle_inhibit_manager_v1 *idle_inhibit;
 	struct wl_listener new_inhibitor;
@@ -152,6 +153,12 @@ static void input_seen(void) { S.last_input_ms = mono_ms(); }
 uint64_t sprite_idle_ms(void) { return S.last_input_ms ? mono_ms() - S.last_input_ms : 0; }
 bool sprite_sleep_inhibited(void) { return S.inhibitors > 0; }
 void sprite_set_asleep(bool asleep) { S.asleep = asleep; }
+static void apply_foreground(void);
+void sprite_set_covered(bool covered) {
+	if (S.covered == covered) return;
+	S.covered = covered;
+	apply_foreground();
+}
 
 // A touch (or key) while asleep: it wakes the screen and goes no further, so it can't tap
 // something nobody could see. True if it did.
@@ -308,7 +315,7 @@ static void apply_foreground(void) {
 	}
 	// An app that keeps the bar (bar=yes) has the shell's top strip above it: only that strip is
 	// shown, so nothing is composited under the app.
-	bool bar = S.fg && S.fg->bar;
+	bool bar = S.fg && S.fg->bar && !S.covered;
 	if (bar) {
 		wlr_scene_buffer_set_source_box(S.shell_node, &(struct wlr_fbox){ 0, 0, SPRITE_W, SPRITE_BAR_H });
 		wlr_scene_buffer_set_dest_size(S.shell_node, SPRITE_W, SPRITE_BAR_H);
@@ -316,9 +323,9 @@ static void apply_foreground(void) {
 		wlr_scene_buffer_set_source_box(S.shell_node, NULL);
 		wlr_scene_buffer_set_dest_size(S.shell_node, 0, 0);
 	}
-	bool shell = (S.fg == NULL && S.hold == NULL) || bar;
+	bool shell = (S.fg == NULL && S.hold == NULL) || bar || S.covered;
 	wlr_scene_node_set_enabled(&S.shell_node->node, shell);
-	wlr_scene_node_set_enabled(&S.handle->node, S.fg != NULL);
+	wlr_scene_node_set_enabled(&S.handle->node, S.fg != NULL && !S.covered);
 	wlr_scene_node_raise_to_top(&S.handle->node);
 	handle_show(S.fg);
 	shell_set_visible(shell);
@@ -695,6 +702,12 @@ static void input_press(double x, double y, uint32_t t, uint32_t button) {
 		return;
 	}
 	input_seen();
+	if (S.covered && !S.release_pending) {
+		S.button_down = true;
+		S.gesture = G_DONE;
+		shell_screensaver_tap();
+		return;
+	}
 	if (S.release_pending) {
 		S.release_pending = false;
 		wl_event_source_timer_update(S.release_timer, 0);
@@ -829,6 +842,7 @@ static void kb_key(struct wl_listener *l, void *data) {
 	uint32_t mods = wlr_keyboard_get_modifiers(k->wlr);
 	// a key wakes the screen too, and goes no further (its release does, harmlessly)
 	if (e->state == WL_KEYBOARD_KEY_STATE_PRESSED && wake_on_input()) return;
+	if (e->state == WL_KEYBOARD_KEY_STATE_PRESSED && S.covered) { shell_screensaver_tap(); return; }
 	if (e->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
 		for (int i = 0; i < n; i++) {
 			if (syms[i] >= XKB_KEY_XF86Switch_VT_1 && syms[i] <= XKB_KEY_XF86Switch_VT_12) {

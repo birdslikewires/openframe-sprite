@@ -120,11 +120,19 @@ void shell_set_bar_app(struct sprite_app *app); // an app is in front below the 
 void shell_frame(void);                       // the display wants a frame: draw what has changed
 void shell_notice(const char *text);          // a banner on the home screen
 void shell_wake(void);                        // display sleep: a touch woke the screen
+void shell_screensaver_tap(void);             // a touch while the screensaver's up: it goes
+bool shell_clock_24(void);                    // the clock's a 24-hour one (Settings, Display)
+// screensaver.c: Sprite's own screensaver, the split-flap clock
+void screensaver_build(void);
+void screensaver_start(void);
+void screensaver_stop(void);
+bool screensaver_active(void);
 // main.c, for display sleep: how long since a touch or key, whether a surface asks for no
 // sleep (idle-inhibit), and marking the screen asleep (the next touch only wakes it)
 uint64_t sprite_idle_ms(void);
 bool sprite_sleep_inhibited(void);
 void sprite_set_asleep(bool asleep);
+void sprite_set_covered(bool covered); // the shell over everything, an app's too (the screensaver)
 
 // main.c: performance trace (SPRITE_TRACE_PERF=1), one line a second while anything moves
 void perf_render(double ms);                  // the shell drew a frame, taking ms
