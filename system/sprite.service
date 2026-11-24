@@ -3,10 +3,9 @@
 # the person's account, and nothing runs as it unless someone's logged in.
 [Unit]
 Description=Sprite, the OpenFrame touch shell
-# tty1 is shared: the installer (of-flash), the MAC store reboot (of-mac-gate) and first-boot
-# provisioning (of-provision) use it first. Starting under any of them would break it, as
-# with X (see xinit.service.d/openframe.conf).
-After=systemd-user-sessions.service of-flash.service of-mac-gate.service of-provision.service
+# tty1 is shared: the installer (of-flash) and the MAC store reboot (of-mac-gate) use it
+# first. Starting under either would break it, as with X (see xinit.service.d/openframe.conf).
+After=systemd-user-sessions.service of-flash.service of-mac-gate.service
 # The boot splash (Plymouth, the firmware's bird) stays up until Sprite draws over it: Sprite
 # takes plymouth-quit's place, as display managers do, putting Plymouth aside as it starts,
 # and once its first frame is up, ending it through the helper (splash-done). If Sprite

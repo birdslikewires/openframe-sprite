@@ -223,7 +223,7 @@ logind. `sprite` has no password, login or sudo, and keeps its state in `/var/li
 in: so an app that got the better of Sprite or Xwayland, which take everything apps send
 to the display, would have `sprite`, not root. `of` is in the `sprite-apps` group, so a
 Wayland client started by hand can use `WAYLAND_DISPLAY=/run/sprite-apps/wayland-0`.
-It starts after `of-flash`, `of-mac-gate`, `of-provision` and Plymouth, which all use tty1
+It starts after `of-flash`, `of-mac-gate` and Plymouth, which all use tty1
 first. If it keeps failing, the login prompt comes back (`OnFailure=getty@tty1.service`).
 The log is in the journal: `sudo journalctl _COMM=sprite` (under the PAM session, Sprite's
 own lines aren't filed under the unit). `SPRITE_TRACE_INPUT=1` logs every press given to an
