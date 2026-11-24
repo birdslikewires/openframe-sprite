@@ -123,6 +123,7 @@ void shell_notice(const char *text);          // a banner on the home screen
 void shell_wake(void);                        // display sleep: a touch woke the screen
 void shell_screensaver_tap(void);             // a touch while the screensaver's up: it goes
 bool shell_clock_24(void);                    // the clock's a 24-hour one (Settings, Display)
+bool shell_time_known(void);                  // the time's been synced this boot (till then, zeros)
 // screensaver.c: Sprite's own screensaver, the split-flap clock
 void screensaver_build(void);
 void screensaver_start(void);

@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <sys/timex.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -400,6 +401,19 @@ static void clock_layout(void) {
 
 static void updating_check(void);
 
+// Whether the time's right: only once it's been synced from the network this boot, as
+// OpenFrames have no clock battery (the OpenFrame 1) or a flat one, and start at whatever time
+// was saved or none. systemd-timesyncd's mark, or the kernel told it's in sync (another NTP
+// client). Once known, known for good: it's still right enough if the network goes.
+bool shell_time_known(void) {
+	static bool known;
+	if (!known) {
+		struct timex tx = { 0 };
+		known = access("/run/systemd/timesync/synchronized", F_OK) == 0 || ntp_adjtime(&tx) != TIME_ERROR;
+	}
+	return known;
+}
+
 static void update_clock(lv_timer_t *t) {
 	updating_check(); // Sprite's own update, about to restart it (once a second, as this is)
 	struct timespec ts;
@@ -407,9 +421,14 @@ static void update_clock(lv_timer_t *t) {
 	struct tm tm;
 	localtime_r(&ts.tv_sec, &tm);
 	char s[32];
-	strftime(s, sizeof s, clock_24 ? (clock_secs ? "%H:%M:%S" : "%H:%M") : (clock_secs ? "%-I:%M:%S %P" : "%-I:%M %P"), &tm);
+	// Till the time's known: zeros, dimmed, and no date
+	bool known = shell_time_known();
+	if (known) strftime(s, sizeof s, clock_24 ? (clock_secs ? "%H:%M:%S" : "%H:%M") : (clock_secs ? "%-I:%M:%S %P" : "%-I:%M %P"), &tm);
+	else snprintf(s, sizeof s, clock_secs ? "00:00:00" : "00:00");
 	if (strcmp(s, lv_label_get_text(bar_clock))) lv_label_set_text(bar_clock, s);
-	strftime(s, sizeof s, "%a %e %b", &tm);
+	lv_obj_set_style_text_color(bar_clock, lv_color_hex(known ? C_TEXT : C_DIM), 0);
+	if (known) strftime(s, sizeof s, "%a %e %b", &tm);
+	else s[0] = 0;
 	if (strcmp(s, lv_label_get_text(bar_date))) lv_label_set_text(bar_date, s);
 	// next: just after the next second begins
 	if (clock_timer) lv_timer_set_period(clock_timer, 1000 - ts.tv_nsec / 1000000 + 5);

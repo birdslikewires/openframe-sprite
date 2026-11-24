@@ -37,10 +37,11 @@ struct flap {
 	char now;               // the digit it shows (' ' for none)
 };
 
-static lv_obj_t *ss, *ampm, *date_num, *date_day, *date_month;
+static lv_obj_t *ss, *ampm, *date_row, *date_num, *date_day, *date_month;
 static struct flap flaps[4];
 static lv_timer_t *ss_timer;
 static int shown_min = -1;
+static bool shown_known;
 
 // A half of a flap: the card's colour, clipped to its half, the digit centred on the whole
 // card's height (so each half shows its part)
@@ -170,17 +171,23 @@ static void ss_show(bool animate) {
 	time_t now = time(NULL);
 	struct tm tm;
 	localtime_r(&now, &tm);
-	if (animate && tm.tm_min == shown_min) return;
+	bool known = shell_time_known();
+	if (animate && tm.tm_min == shown_min && known == shown_known) return;
 	shown_min = tm.tm_min;
+	shown_known = known;
 	bool h24 = shell_clock_24();
 	int h = h24 ? tm.tm_hour : (tm.tm_hour % 12 ? tm.tm_hour % 12 : 12);
 	char d[4] = { h / 10 ? (char)('0' + h / 10) : (h24 ? '0' : ' '), (char)('0' + h % 10),
 		      (char)('0' + tm.tm_min / 10), (char)('0' + tm.tm_min % 10) };
+	// Till the time's been synced (see shell_time_known): zeros, no am or pm, no date; the
+	// flaps turn to the time once it is
+	if (!known) memset(d, '0', sizeof d);
+	lv_obj_set_style_opa(date_row, known ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
 	// the units first, then the tens a little after: as one tumbles into the next
 	for (int i = 3; i >= 0; i--) flap_to(&flaps[i], d[i], animate, (uint32_t)(3 - i) * 90);
 	char t[48];
 	if (!h24) { strftime(t, sizeof t, "%P", &tm); lv_label_set_text(ampm, t); }
-	lv_obj_set_style_opa(ampm, h24 ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
+	lv_obj_set_style_opa(ampm, h24 || !known ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
 	snprintf(t, sizeof t, "%d", tm.tm_mday);
 	lv_label_set_text(date_num, t);
 	strftime(t, sizeof t, "%A", &tm);
@@ -224,7 +231,7 @@ void screensaver_build(void) {
 	// The date under it: the day's number in a box, then the weekday over the month, the month
 	// level with the number (the row's ends aligned, the column raised by the box's border and
 	// padding, so the two labels, the same font, sit on one line)
-	lv_obj_t *row = lv_obj_create(ss);
+	lv_obj_t *row = date_row = lv_obj_create(ss);
 	lv_obj_remove_style_all(row);
 	lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
