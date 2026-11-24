@@ -99,6 +99,7 @@ jobs:
           '
 
       - name: Release
+        id: release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -121,3 +122,22 @@ jobs:
           \`sudo apt install ./openframe-sprite_${version}_i386.deb\` (it needs the OpenFrame repository, linux.openbeak.net, for openframe-scripts). Installing it puts sprite on tty1 in place of the login prompt."
           gh release create "$tag" --title "openframe-sprite ${version}" --notes "$notes" --latest \
             "$rel/openframe-sprite_${version}_i386.deb" "$rel/openframe-sprite_i386.deb" "$rel/openframe-sprite.news" "$rel/SHA256SUMS"
+          echo "released=yes" >> "$GITHUB_OUTPUT"
+
+      # openframe-linux's sprite.yml brings the newest release into linux.openbeak.net's testing
+      # suite. It runs every three hours anyway; started here, a release is there in minutes.
+      # It's told by a repository_dispatch (sprite-released), as openframe-kernel tells
+      # openframe-linux of its kernels, with the same kind of token: DISPATCH_TOKEN, fine-grained,
+      # openframe-linux only, Contents: read and write. Without it, the schedule still brings it.
+      - name: Bring it into testing
+        if: steps.release.outputs.released == 'yes'
+        env:
+          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::notice::No DISPATCH_TOKEN: sprite.yml brings this release into testing at its next scheduled run."
+            exit 0
+          fi
+          gh api repos/birdslikewires/openframe-linux/dispatches --method POST \
+            --field event_type=sprite-released --field "client_payload[version]=${version}" ||
+            echo "::warning::Couldn't start openframe-linux's sprite.yml: its next scheduled run brings this release in."
