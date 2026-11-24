@@ -40,6 +40,12 @@ UtmpIdentifier=tty1
 UtmpMode=user
 Environment=XDG_SESSION_TYPE=wayland WLR_RENDERER=pixman PATH=/opt/sprite/bin:/usr/local/bin:/usr/bin:/bin
 ExecStartPre=-+/usr/bin/plymouth deactivate
+# The splash goes when Sprite has drawn its first frame (it asks the helper). Should that never
+# happen without Sprite failing (it hangs, say), the splash would stay, and so would the start-up
+# waiting on it (plymouth-quit-wait, multi-user.target): so it's quit anyway a minute on,
+# keeping the picture (nothing, as usual, if it's gone). A transient timer: one already set,
+# on a restart, is left alone.
+ExecStartPost=-+/usr/bin/systemd-run --quiet --no-block --on-active=60 --unit=sprite-splash-backstop --description="Boot splash quit if Sprite hasn't" /bin/sh -c "plymouth --ping && plymouth quit --retain-splash; exit 0"
 ExecStart=/opt/sprite/bin/sprite
 Restart=on-failure
 RestartSec=2

@@ -217,6 +217,7 @@ static void start_keeper(const char *kind, const char *name) {
 	pid_t pid = fork();
 	if (pid == 0) {
 		close(p[0]);
+		signal(SIGHUP, SIG_DFL); // (the compositor ignores it: an ignored signal survives exec)
 		sigset_t set;
 		sigemptyset(&set);
 		sigprocmask(SIG_SETMASK, &set, NULL);
@@ -322,6 +323,7 @@ void apps_launch(struct sprite_app *app) {
 	if (pid < 0) { wlr_log(WLR_ERROR, "fork: %s", strerror(errno)); return; }
 	if (pid == 0) {
 		setsid();
+		signal(SIGHUP, SIG_DFL); // (the compositor ignores it: an ignored signal survives exec)
 		sigset_t set;
 		sigemptyset(&set);
 		sigprocmask(SIG_SETMASK, &set, NULL); // the compositor blocks SIGCHLD for its loop
