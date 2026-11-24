@@ -27,6 +27,8 @@ extern const lv_font_t sprite_clock_180, sprite_clock_56;
 #define FLAP_GAP 14          // between a pair's two flaps
 #define COLON_W 56           // between the hours and the minutes
 #define CLOCK_TOP 56
+#define DATE_BOX_BORDER 3
+#define DATE_BOX_PAD 2
 #define FLIP_MS 180          // each half of a flip
 
 enum { HALF_TOP_NEW, HALF_BOT_OLD, HALF_FLAP_TOP, HALF_FLAP_BOT, N_HALVES };
@@ -214,22 +216,24 @@ void screensaver_build(void) {
 	lv_obj_set_style_text_color(ampm, lv_color_hex(C_DATE_DIM), 0);
 	lv_label_set_text(ampm, "");
 	lv_obj_align_to(ampm, flaps[3].card, LV_ALIGN_OUT_BOTTOM_RIGHT, 0, 6);
-	// The date under it: the day's number in a box, then the weekday over the month
+	// The date under it: the day's number in a box, then the weekday over the month, the month
+	// level with the number (the row's ends aligned, the column raised by the box's border and
+	// padding, so the two labels, the same font, sit on one line)
 	lv_obj_t *row = lv_obj_create(ss);
 	lv_obj_remove_style_all(row);
 	lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
 	lv_obj_set_style_pad_column(row, 20, 0);
 	lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 	lv_obj_t *box = lv_obj_create(row);
 	lv_obj_remove_style_all(box);
 	lv_obj_set_size(box, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
 	lv_obj_set_style_border_color(box, lv_color_hex(C_DIGIT), 0);
-	lv_obj_set_style_border_width(box, 3, 0);
+	lv_obj_set_style_border_width(box, DATE_BOX_BORDER, 0);
 	lv_obj_set_style_radius(box, 12, 0);
 	lv_obj_set_style_pad_hor(box, 16, 0);
-	lv_obj_set_style_pad_ver(box, 2, 0);
+	lv_obj_set_style_pad_ver(box, DATE_BOX_PAD, 0);
 	lv_obj_remove_flag(box, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 	date_num = lv_label_create(box);
 	lv_obj_set_style_text_font(date_num, &sprite_clock_56, 0);
@@ -238,6 +242,7 @@ void screensaver_build(void) {
 	lv_obj_remove_style_all(col);
 	lv_obj_set_size(col, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
 	lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_style_pad_bottom(col, DATE_BOX_BORDER + DATE_BOX_PAD, 0);
 	lv_obj_remove_flag(col, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 	date_day = lv_label_create(col);
 	lv_obj_set_style_text_font(date_day, &lv_font_montserrat_28, 0);
