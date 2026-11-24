@@ -1029,8 +1029,14 @@ static void splash_build(void) {
 			uint32_t v = a[y * sprite_bird.header.stride + x];
 			px[y * SPLASH_W + x] = v << 24 | v << 16 | v << 8 | v;
 		}
-	for (int y = 330 - SPLASH_Y; y < 334 - SPLASH_Y; y++)
-		for (int x = 320 - SPLASH_X; x < 480 - SPLASH_X; x++) px[y * SPLASH_W + x] = 0xffffffff;
+	// the bar, full: 160x4 at 320,330, its ends round as the home pill's (and Plymouth's)
+	for (int y = 0; y < 4; y++)
+		for (int x = 0; x < 160; x++) {
+			double cx = x + 0.5, cy = y + 0.5, ex = cx < 2 ? 2 : cx > 158 ? 158 : cx;
+			double d = hypot(cx - ex, cy - 2) - 2, cov = d <= -0.5 ? 1.0 : d >= 0.5 ? 0.0 : 0.5 - d;
+			uint32_t v = (uint32_t)(cov * 255 + 0.5);
+			px[(330 - SPLASH_Y + y) * SPLASH_W + 320 - SPLASH_X + x] = v << 24 | v << 16 | v << 8 | v;
+		}
 	S.splashbuf.pixels = px;
 	S.splashbuf.format = DRM_FORMAT_ARGB8888;
 	wlr_buffer_init(&S.splashbuf.base, &shellbuf_impl, SPLASH_W, SPLASH_H);
