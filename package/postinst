@@ -58,11 +58,17 @@ case "$1" in
 		# power cut leaves no half-written file.
 		if [ -d /boot/settings ] && { [ ! -e "$SETTINGS" ] || [ -e "$OLDSETTINGS" ]; }; then
 			if /usr/lib/openframe/bootrw open; then
-				if [ -e "$OLDSETTINGS" ] && [ ! -e "$SETTINGS" ]; then
-					# its old name: moved, settings and all (a rename, so nothing's half-written)
-					mv -f "$OLDSETTINGS" "$SETTINGS" && sync || true
-				elif [ -e "$OLDSETTINGS" ]; then
-					rm -f "$OLDSETTINGS" && sync || true # (the new one's there already)
+				if [ -e "$OLDSETTINGS" ]; then
+					# Its old name: the owner's settings, moved to the new one. Over it, if it's
+					# there too: only a Sprite from before the new name writes the old one, so
+					# it's the one in use (an image's interface.txt beside it is the template).
+					# Copied, synced and renamed, then the old one goes: a power cut leaves one
+					# or the other whole.
+					if cp "$OLDSETTINGS" "$SETTINGS.new" && sync && mv -f "$SETTINGS.new" "$SETTINGS" && sync; then
+						rm -f "$OLDSETTINGS" && sync || true
+					else
+						rm -f "$SETTINGS.new" || true
+					fi
 				fi
 				if [ ! -e "$SETTINGS" ]; then
 					cp /opt/sprite/share/sprite/interface.txt "$SETTINGS.new" && sync && mv -f "$SETTINGS.new" "$SETTINGS" && sync || true
