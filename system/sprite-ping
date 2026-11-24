@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-## sprite-ping v26.11.1 (22nd November 2026)
+## sprite-ping v26.11.2 (24th November 2026)
 ##  Tells openbeak.net that this OpenFrame is running: once after it starts (once its clock
 ##  is set), then every hour after that (sprite-ping.timer), so each unit has a minute of its
 ##  own and is due again an hour after it was last heard. It's how OpenBeak sees how many
@@ -10,7 +10,9 @@
 ##  Sent, and nothing else (Settings' About tab says so too):
 ##    the Wi-Fi card's and Ethernet's MAC addresses (the ones the stock software reported, so
 ##    a unit can be matched to what it was before), the model, the firmware, sprite's,
-##    openframe-scripts', the firmware package's, the kernel's and Debian's versions, whether
+##    openframe-scripts', the firmware package's, the kernel's (and the running kernel's build,
+##    uname -v) and Debian's versions, the last time a new kernel didn't start and the
+##    previous one was put back (openframe-scripts' of-kernel-check), whether
 ##    it starts from internal memory or USB, its memory, free and total storage, swap in use,
 ##    how long it's been up, and whether it's a test unit (channel=testing, from
 ##    OF-BOOT/settings/test.txt) or not (release).
@@ -61,6 +63,8 @@ curl -fsS -G -o /dev/null --max-time 30 --retry 3 --retry-delay 20 --retry-all-e
 	--data-urlencode "scripts=$(ver openframe-scripts)" \
 	--data-urlencode "fwpkg=$(ver openframe-firmware)" \
 	--data-urlencode "kernel=$(ver "linux-image-$(uname -r)")" \
+	--data-urlencode "kbuild=$(uname -v)" \
+	--data-urlencode "kfail=$(tail -n 1 /var/lib/openframe-scripts/kernel-failed 2>/dev/null)" \
 	--data-urlencode "debian=$(cat /etc/debian_version 2>/dev/null)" \
 	--data-urlencode "boot=$BOOT" \
 	--data-urlencode "ram=$(mem MemTotal)" \

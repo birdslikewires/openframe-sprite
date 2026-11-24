@@ -518,7 +518,7 @@ erase.failed = It wasn't erased
 # Heading, under Erase
 info.head = INFORMATION
 # Under it, what sprite-ping sends
-info.ping = Once an hour, this OpenFrame tells openbeak.net that it's running: its network (MAC) addresses, its model, the versions of its firmware and software, and how full its memory and storage are. Nothing else is sent. It helps us see how many OpenFrames are still running, and whether updates have reached them.
+info.ping = Once an hour, this OpenFrame tells openbeak.net that it's running: its network (MAC) addresses, its model, the versions of its firmware and software (and when an update's kernel last failed to start), and how full its memory and storage are. Nothing else is sent. It helps us see how many OpenFrames are still running, and whether updates have reached them.
 
 ## Power
 

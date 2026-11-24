@@ -194,8 +194,10 @@ The first time it's installed, it takes tty1 from the login prompt (marked in
 its clock is set, and then every hour after that (`sprite-ping.timer`), so each unit has a
 minute of its own and the server knows when to expect it next. It sends the Wi-Fi card's and Ethernet's MAC addresses (the ones the stock
 software reported, so a unit can be matched to what it was before), the model, the firmware,
-the versions of Sprite, openframe-scripts, the firmware package, the kernel and Debian,
-whether it starts from internal memory or USB, its memory, free and total storage, and swap
+the versions of Sprite, openframe-scripts, the firmware package, the kernel (and the running
+kernel's build) and Debian, when an update's kernel last failed to start and the previous
+one was put back (openframe-scripts' `of-kernel-check`), whether it starts from internal
+memory or USB, its memory, free and total storage, and swap
 in use, and how long it's been up. Nothing else. The server keeps it without the address it
 came from. About in Settings says so too. It's part of Sprite: removing the package removes
 it, and `sudo systemctl disable --now sprite-ping.timer` stops it (enabled once per system, so
