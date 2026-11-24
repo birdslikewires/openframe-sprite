@@ -1015,10 +1015,55 @@ void sprite_request_frame(void) {
 #define SPLASH_Y 199
 #define SPLASH_W 206 // the bird (to x 478) and the bar (320 to 480)
 #define SPLASH_H 135 // the bird (to y 281) and the bar (330 to 334)
-#define SPLASH_HOLD_MS 350
-#define SPLASH_FADE_MS 500
+#define BAR_X (320 - SPLASH_X) // the bar, in the buffer: 160x4 at 320,330 on the screen
+#define BAR_Y (330 - SPLASH_Y)
+#define BAR_W 160
+#define BAR_H 4
+#define SPLASH_FILL_MS 300 // the bar run on to full, from where Plymouth left it
+#define SPLASH_HOLD_MS 200 // then held, full
+#define SPLASH_FADE_MS 500 // then faded away
 
 extern const lv_image_dsc_t sprite_bird;
+
+// How much of the bar Plymouth had filled as Sprite started (and Plymouth stopped drawing): its
+// progress is where each service started in the last boot, as a fraction of its whole run,
+// which it keeps in /var/lib/plymouth/boot-duration ("0.682:sprite.service"). Full without it.
+static double splash_from(void) {
+	FILE *f = fopen("/var/lib/plymouth/boot-duration", "r");
+	if (!f) return 1;
+	char line[160];
+	double p = 1;
+	while (fgets(line, sizeof line, f)) {
+		char *colon = strchr(line, ':');
+		if (colon && !strcmp(colon + 1, "sprite.service\n")) p = strtod(line, NULL);
+	}
+	fclose(f);
+	return p < 0 ? 0 : p > 1 ? 1 : p;
+}
+
+// The pill's edge (as the home pill's): coverage of pixel x,y by a w-wide, BAR_H-high pill
+static double pill_cov(int x, int y, int w) {
+	const double r = BAR_H / 2.0;
+	double cx = x + 0.5, cy = y + 0.5, ex = cx < r ? r : cx > w - r ? w - r : cx;
+	double d = hypot(cx - ex, cy - r) - r;
+	return d <= -0.5 ? 1.0 : d >= 0.5 ? 0.0 : 0.5 - d;
+}
+
+// The bar, its track (as Plymouth's, 0x3a grey) filled in white to frac, premultiplied
+static void splash_bar(double frac) {
+	uint32_t *px = S.splashbuf.pixels;
+	int fw = (int)(frac * BAR_W + 0.5);
+	if (fw > 0 && fw < BAR_H + 1) fw = BAR_H + 1; // the fill: its two round ends and a pixel between
+	for (int y = 0; y < BAR_H; y++)
+		for (int x = 0; x < BAR_W; x++) {
+			double t = pill_cov(x, y, BAR_W), f = x < fw ? pill_cov(x, y, fw) : 0;
+			double a = f + t * (1 - f), c = f + (0x3a / 255.0) * t * (1 - f);
+			uint32_t A = (uint32_t)(a * 255 + 0.5), C = (uint32_t)(c * 255 + 0.5);
+			px[(BAR_Y + y) * SPLASH_W + BAR_X + x] = A << 24 | C << 16 | C << 8 | C;
+		}
+}
+
+static double splash_start; // the bar's fill in the first frame
 
 static void splash_build(void) {
 	uint32_t *px = calloc(SPLASH_W * SPLASH_H, 4);
@@ -1029,16 +1074,10 @@ static void splash_build(void) {
 			uint32_t v = a[y * sprite_bird.header.stride + x];
 			px[y * SPLASH_W + x] = v << 24 | v << 16 | v << 8 | v;
 		}
-	// the bar, full: 160x4 at 320,330, its ends round as the home pill's (and Plymouth's)
-	for (int y = 0; y < 4; y++)
-		for (int x = 0; x < 160; x++) {
-			double cx = x + 0.5, cy = y + 0.5, ex = cx < 2 ? 2 : cx > 158 ? 158 : cx;
-			double d = hypot(cx - ex, cy - 2) - 2, cov = d <= -0.5 ? 1.0 : d >= 0.5 ? 0.0 : 0.5 - d;
-			uint32_t v = (uint32_t)(cov * 255 + 0.5);
-			px[(330 - SPLASH_Y + y) * SPLASH_W + 320 - SPLASH_X + x] = v << 24 | v << 16 | v << 8 | v;
-		}
 	S.splashbuf.pixels = px;
 	S.splashbuf.format = DRM_FORMAT_ARGB8888;
+	splash_start = splash_from();
+	splash_bar(splash_start);
 	wlr_buffer_init(&S.splashbuf.base, &shellbuf_impl, SPLASH_W, SPLASH_H);
 	float black[4] = { 0, 0, 0, 1 };
 	S.splash_black = wlr_scene_rect_create(&S.scene->tree, SPRITE_W, SPRITE_H, black);
@@ -1052,13 +1091,28 @@ static void splash_raise(void) { // above anything apply_foreground raised
 	wlr_scene_node_raise_to_top(&S.splash_bird->node);
 }
 
+static void splash_bar_show(double frac) {
+	splash_bar(frac);
+	pixman_region32_t r;
+	pixman_region32_init_rect(&r, BAR_X, BAR_Y, BAR_W, BAR_H);
+	wlr_scene_buffer_set_buffer_with_damage(S.splash_bird, &S.splashbuf.base, &r);
+	pixman_region32_fini(&r);
+}
+
 static int splash_step(void *data) {
 	uint64_t t = mono_ms() - S.splash_t0;
-	if (t < SPLASH_HOLD_MS) {
-		wl_event_source_timer_update(S.splash_timer, (int)(SPLASH_HOLD_MS - t));
+	if (t < SPLASH_FILL_MS) { // the bar on to full, slowing as it gets there
+		double f = (double)t / SPLASH_FILL_MS;
+		splash_bar_show(splash_start + (1 - splash_start) * (1 - (1 - f) * (1 - f)));
+		wl_event_source_timer_update(S.splash_timer, 16);
 		return 0;
 	}
-	double f = (double)(t - SPLASH_HOLD_MS) / SPLASH_FADE_MS;
+	if (t < SPLASH_FILL_MS + SPLASH_HOLD_MS) {
+		splash_bar_show(1);
+		wl_event_source_timer_update(S.splash_timer, (int)(SPLASH_FILL_MS + SPLASH_HOLD_MS - t));
+		return 0;
+	}
+	double f = (double)(t - SPLASH_FILL_MS - SPLASH_HOLD_MS) / SPLASH_FADE_MS;
 	if (f >= 1) { // gone
 		wlr_scene_node_destroy(&S.splash_black->node);
 		wlr_scene_node_destroy(&S.splash_bird->node);
@@ -1076,11 +1130,11 @@ static int splash_step(void *data) {
 	return 0;
 }
 
-static void splash_shown(void) { // the first frame's on the screen: hold from now, then fade
+static void splash_shown(void) { // the first frame's on the screen: the bar on from now, then the fade
 	if (!S.splash_black || S.splash_timer) return;
 	S.splash_t0 = mono_ms();
 	S.splash_timer = wl_event_loop_add_timer(S.loop, splash_step, NULL);
-	if (S.splash_timer) wl_event_source_timer_update(S.splash_timer, SPLASH_HOLD_MS);
+	if (S.splash_timer) wl_event_source_timer_update(S.splash_timer, 16);
 }
 
 static void splash_done(char *reply, void *ctx) {
