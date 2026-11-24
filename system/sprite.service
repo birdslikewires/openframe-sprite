@@ -44,10 +44,14 @@ ExecStartPre=-+/usr/bin/plymouth deactivate
 # happen without Sprite failing (it hangs, say), the splash would stay, and so would the start-up
 # waiting on it (plymouth-quit-wait, multi-user.target): so it's quit anyway a minute on,
 # keeping the picture (nothing, as usual, if it's gone). A transient timer: one already set,
-# on a restart, is left alone.
-ExecStartPost=-+/usr/bin/systemd-run --quiet --no-block --on-active=60 --unit=sprite-splash-backstop --description="Boot splash quit if Sprite hasn't" /bin/sh -c "plymouth --ping && plymouth quit --retain-splash; exit 0"
+# on a restart, is left alone. Set before Sprite starts, never in an ExecStartPost: TTYVHangup
+# hangs up tty1 around every command, and one after Sprite's start sent it SIGHUP while it was
+# still loading (before it ignores it), which systemd took for a clean exit: no Sprite.
+ExecStartPre=-+/usr/bin/systemd-run --quiet --no-block --on-active=60 --unit=sprite-splash-backstop --description="Boot splash quit if Sprite hasn't" /bin/sh -c "plymouth --ping && plymouth quit --retain-splash; exit 0"
 ExecStart=/opt/sprite/bin/sprite
 Restart=on-failure
+# (SIGHUP is a clean exit to systemd: restarted all the same, should one ever get through)
+RestartForceExitStatus=SIGHUP
 RestartSec=2
 
 [Install]
