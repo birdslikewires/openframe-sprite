@@ -4277,8 +4277,8 @@ static void sleep_build(lv_obj_t *parent) {
 	lv_label_set_text(l, STR_DISPLAY_SLEEP);
 	lv_obj_set_style_text_color(l, lv_color_hex(C_TEXT), 0);
 	lv_obj_t *st = button_row(r);
-	lv_obj_set_size(st, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-	lv_obj_set_flex_align(st, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_size(st, LV_SIZE_CONTENT, LV_SIZE_CONTENT); // (packed from its start: the row puts it at the right)
+	lv_obj_set_flex_align(st, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_style_pad_column(st, 8, 0);
 	lv_obj_set_width(button(st, LV_SYMBOL_MINUS, BUTTON_OTHER, sleep_step, (void *)(intptr_t)-1), BUTTON_H + 8);
 	sleep_label = lv_label_create(st);
