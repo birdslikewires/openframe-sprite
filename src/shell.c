@@ -86,7 +86,7 @@ static lv_display_t *disp;
 static lv_indev_t *indev;
 static int ptr_x, ptr_y;
 static bool ptr_pressed;
-static lv_obj_t *bar_clock, *bar_date, *bar_title, *net_eth, *net_wifi, *net_warn, *net_box, *net_tab_dot, *upd_box;
+static lv_obj_t *bar_clock, *bar_date, *bar_title, *net_eth, *net_wifi, *net_warn, *net_box, *net_tab_dot, *upd_box, *upd_tab_dot;
 static lv_obj_t *bar_left, *aud_box, *bar_vol, *bar_vol_slider; // the bar's speaker, and its volume slider
 static lv_obj_t *page_home, *pager, *strip, *page_settings, *page_wifi, *page_entry, *page_netinfo, *page_news, *toast;
 enum { NETINFO_ETH, NETINFO_WIFI };
@@ -424,7 +424,8 @@ static void clock_settings_changed(void) {
 
 static uint8_t eth_px[NET_ICON * NET_ICON], wifi_px[5][NET_ICON * NET_ICON], lock_px[NET_ICON * NET_ICON];
 static uint8_t warn_px[NET_ICON * NET_ICON], restart_px[2][NET_ICON * NET_ICON], speaker_px[3][NET_ICON * NET_ICON];
-static lv_image_dsc_t eth_img, wifi_img[5], lock_img, warn_img, restart_img[2], speaker_img[3];
+static uint8_t download_px[NET_ICON * NET_ICON];
+static lv_image_dsc_t eth_img, wifi_img[5], lock_img, warn_img, restart_img[2], speaker_img[3], download_img;
 
 static bool in_rect(double x, double y, double x0, double y0, double x1, double y1) {
 	return x >= x0 && x < x1 && y >= y0 && y < y1;
@@ -447,6 +448,14 @@ static int wifi_part(double x, double y) {
 	if (r >= 9.0 && r <= 11.1) return 3;
 	if (r >= 12.8 && r <= 14.9) return 4;
 	return 0;
+}
+
+// Updates waiting: an arrow down into a tray ("download")
+static bool download_shape(double x, double y) {
+	if (in_rect(x, y, 9, 2, 11, 11)) return true;                       // the shaft
+	if (y >= 7.5 && y <= 13 && fabs(x - 10) <= (13 - y) * 0.9) return true; // its head
+	return (in_rect(x, y, 2.5, 13, 4.5, 18) || in_rect(x, y, 15.5, 13, 17.5, 18) || // the tray
+		in_rect(x, y, 2.5, 16, 17.5, 18));
 }
 
 // The sound (the bar's speaker): a box and its cone (1), then two waves beside it (2, 3)
@@ -567,6 +576,14 @@ static void make_net_icons(void) {
 		draw_icon(restart_px[i], -3 - i, false);
 		make_img(&restart_img[i], restart_px[i]);
 	}
+	for (int y = 0; y < NET_ICON; y++) // updates waiting
+		for (int x = 0; x < NET_ICON; x++) {
+			int a = 0;
+			for (int sy = 0; sy < 4; sy++)
+				for (int sx = 0; sx < 4; sx++) a += download_shape(x + (sx + 0.5) / 4, y + (sy + 0.5) / 4);
+			download_px[y * NET_ICON + x] = (uint8_t)(a * 255 / 16);
+		}
+	make_img(&download_img, download_px);
 	for (int i = 0; i < 3; i++) { // the speaker: no waves lit (silent), one, both
 		draw_speaker(speaker_px[i], i);
 		make_img(&speaker_img[i], speaker_px[i]);
@@ -622,6 +639,22 @@ static bool firmware_at_restart(void) {
 	return flash;
 }
 
+// of-update's status between runs (/var/lib/of-update/status, anyone may read it): how many
+// updates are waiting, and whether the last run went wrong. Read straight from the file,
+// with the bar's other signs, every 5 s.
+static void update_waiting(int *pending, bool *failed) {
+	*pending = 0;
+	*failed = false;
+	FILE *f = fopen("/var/lib/of-update/status", "r");
+	if (!f) return;
+	char line[160];
+	while (fgets(line, sizeof line, f)) {
+		if (!strncmp(line, "pending=", 8)) *pending = atoi(line + 8);
+		else if (!strncmp(line, "result=", 7)) *failed = strncmp(line + 7, "ok", 2) && line[7] != '\n' && line[7];
+	}
+	fclose(f);
+}
+
 static void update_net(lv_timer_t *t) {
 	struct sprite_net n;
 	sysinfo_net(&n);
@@ -672,10 +705,21 @@ static void update_net(lv_timer_t *t) {
 	// ... and once an update needs a restart, a restart sign there instead, until it's had one
 	// (at about 4am, or from Settings' Updates tab, where this goes)
 	bool restart = !updating && access("/run/reboot-required", F_OK) == 0;
-	if (updating || restart) {
+	// ... and otherwise, while updates are waiting (for the night, or Update now), a download
+	// sign, and a dot on Settings' Updates tab: blue, or amber if the last run went wrong
+	int pending;
+	bool failed;
+	update_waiting(&pending, &failed);
+	bool waiting = !updating && !restart && pending > 0;
+	if (upd_tab_dot) {
+		show_if(upd_tab_dot, pending > 0 || failed);
+		lv_obj_set_style_bg_color(upd_tab_dot, lv_color_hex(failed ? C_WARN : C_ACCENT), 0);
+	}
+	if (updating || restart || waiting) {
 		lv_obj_t *sign = lv_obj_get_child(upd_box, 0);
-		show_if(sign, restart); // the restart sign, with "!" when the restart flashes firmware
+		show_if(sign, restart || waiting); // the restart sign ("!" when the restart flashes firmware), or download
 		if (restart) lv_image_set_src(sign, &restart_img[firmware_at_restart()]);
+		else if (waiting) lv_image_set_src(sign, &download_img);
 		show_if(lv_obj_get_child(upd_box, 1), updating); // the spinner
 		if (edge) lv_obj_align_to(upd_box, edge, LV_ALIGN_OUT_LEFT_MID, 0, 0);
 		else lv_obj_align(upd_box, LV_ALIGN_RIGHT_MID, -GEAR_W - BAR_EDGE, 0);
@@ -4292,7 +4336,17 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_bg_opa(net_tab_dot, LV_OPA_COVER, 0);
 	lv_obj_remove_flag(net_tab_dot, LV_OBJ_FLAG_CLICKABLE);
 	lv_obj_add_flag(net_tab_dot, LV_OBJ_FLAG_HIDDEN);
-	settings_tab_new(rail, TAB_UPDATES, UI_ICON_REFRESH_CW, STR_TAB_UPDATES);
+	lv_obj_t *ut = settings_tab_new(rail, TAB_UPDATES, UI_ICON_REFRESH_CW, STR_TAB_UPDATES);
+	upd_tab_dot = lv_obj_create(ut); // there while updates are waiting (update_net), as Network's is
+	lv_obj_remove_style_all(upd_tab_dot);
+	lv_obj_add_flag(upd_tab_dot, LV_OBJ_FLAG_IGNORE_LAYOUT);
+	lv_obj_set_size(upd_tab_dot, 10, 10);
+	lv_obj_align(upd_tab_dot, LV_ALIGN_RIGHT_MID, 0, 0);
+	lv_obj_set_style_radius(upd_tab_dot, LV_RADIUS_CIRCLE, 0);
+	lv_obj_set_style_bg_color(upd_tab_dot, lv_color_hex(C_ACCENT), 0);
+	lv_obj_set_style_bg_opa(upd_tab_dot, LV_OPA_COVER, 0);
+	lv_obj_remove_flag(upd_tab_dot, LV_OBJ_FLAG_CLICKABLE);
+	lv_obj_add_flag(upd_tab_dot, LV_OBJ_FLAG_HIDDEN);
 	lv_obj_t *rule = lv_obj_create(rail); // a hairline, inset as the tabs' glyphs are
 	lv_obj_remove_style_all(rule);
 	lv_obj_set_size(rule, BACK_W - 2 * 14, 1);
