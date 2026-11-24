@@ -1119,6 +1119,7 @@ static lv_obj_t *button_row(lv_obj_t *parent) {
 #define DIALOG_MIN_W 460
 #define DIALOG_PAD 24
 #define C_CARD 0x1c242c
+#define TAB_DOT_DROP 1   // a tab's dot, below the middle: it sits by lower-case letters
 #define HINT_GAP 6         // between a setting's name and the hint under it
 static lv_obj_t *dialog_backdrop;    // the open dialog's own dimmed backdrop, if it made one
 
@@ -4330,7 +4331,7 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_remove_style_all(net_tab_dot);
 	lv_obj_add_flag(net_tab_dot, LV_OBJ_FLAG_IGNORE_LAYOUT); // at the end, taking no room from the name
 	lv_obj_set_size(net_tab_dot, 10, 10);
-	lv_obj_align(net_tab_dot, LV_ALIGN_RIGHT_MID, 0, 0);
+	lv_obj_align(net_tab_dot, LV_ALIGN_RIGHT_MID, 0, TAB_DOT_DROP);
 	lv_obj_set_style_radius(net_tab_dot, LV_RADIUS_CIRCLE, 0);
 	lv_obj_set_style_bg_color(net_tab_dot, lv_color_hex(C_WARN), 0);
 	lv_obj_set_style_bg_opa(net_tab_dot, LV_OPA_COVER, 0);
@@ -4341,7 +4342,7 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_remove_style_all(upd_tab_dot);
 	lv_obj_add_flag(upd_tab_dot, LV_OBJ_FLAG_IGNORE_LAYOUT);
 	lv_obj_set_size(upd_tab_dot, 10, 10);
-	lv_obj_align(upd_tab_dot, LV_ALIGN_RIGHT_MID, 0, 0);
+	lv_obj_align(upd_tab_dot, LV_ALIGN_RIGHT_MID, 0, TAB_DOT_DROP);
 	lv_obj_set_style_radius(upd_tab_dot, LV_RADIUS_CIRCLE, 0);
 	lv_obj_set_style_bg_color(upd_tab_dot, lv_color_hex(C_ACCENT), 0);
 	lv_obj_set_style_bg_opa(upd_tab_dot, LV_OPA_COVER, 0);
