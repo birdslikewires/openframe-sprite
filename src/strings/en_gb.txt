@@ -422,7 +422,7 @@ upd.version = Version %s
 # Heading over an update's notes. %s the part, %s the version
 upd.notes.head = %s, VERSION %s
 # Parts of the OpenFrame, by package
-upd.part.sprite = Sprite
+upd.part.sprite = Interface
 upd.part.system = System
 upd.part.crystalhd = Crystal HD
 upd.part.resampler = Resampler
@@ -437,10 +437,10 @@ upd.time.note = The OpenFrame updates itself once a day at about this time, or s
 upd.time.ask = Updates install within half an hour of this time each day. If one needs a restart, the OpenFrame restarts then too, so pick a time nobody's watching.
 # Title
 upd.time.not_changed = The time wasn't changed
-# Title once Sprite has updated itself
-upd.sprite_updated = Sprite has been updated
+# Title once the interface (Sprite) has updated itself
+upd.sprite_updated = The interface has been updated
 # Toast. %s is the version
-upd.sprite_is_now = Sprite is now %s
+upd.sprite_is_now = The interface is now %s
 # Under that title. %s is the version
 upd.sprite_restarts = Version %s. It restarts in a moment, and carries on where it was.
 upd.sprite_restarts.nover = It restarts in a moment, and carries on where it was.
@@ -458,7 +458,7 @@ about.row.storage = Storage
 about.row.ethernet = Ethernet
 about.row.wifi = Wi-Fi
 about.row.up = Up
-about.row.sprite = Sprite
+about.row.sprite = Interface
 about.row.system = System
 about.row.kernel = Kernel
 about.row.crystalhd = Crystal HD
@@ -606,4 +606,4 @@ helper.erase_needs_update = This system can't be erased from here (its openframe
 helper.erase_not_started = The erase didn't start.
 helper.cant_wait = Couldn't wait for the update.
 # When Sprite can't reach its helper at all
-helper.not_running = Sprite's helper isn't running.
+helper.not_running = The OpenFrame's helper isn't running.
