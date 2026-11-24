@@ -444,8 +444,6 @@ about.no_address = connected, no address
 about.not_connected = not connected
 # The last line on a test unit (starts with \n)
 about.test_unit = \nTest unit: updates before they're released
-# What sprite-ping sends
-about.ping = Once an hour, this OpenFrame tells openbeak.net that it's running: its network (MAC) addresses, its model, the versions of its firmware and software, and how full its memory and storage are. Nothing else is sent. It helps us see how many OpenFrames are still running, and whether updates have reached them.
 # Heading
 erase.head = ERASE
 erase.note = Puts this OpenFrame back as it came, for its next owner. Its updates and touch calibration stay; everything else that's been set up on it goes.
@@ -464,6 +462,11 @@ erase.erasing = Erasing...
 erase.erasing.note = This takes a few minutes. The OpenFrame restarts by itself when it's done. Don't switch it off.
 # Title
 erase.failed = It wasn't erased
+
+# Heading, under Erase
+info.head = INFORMATION
+# Under it, what sprite-ping sends
+info.ping = Once an hour, this OpenFrame tells openbeak.net that it's running: its network (MAC) addresses, its model, the versions of its firmware and software, and how full its memory and storage are. Nothing else is sent. It helps us see how many OpenFrames are still running, and whether updates have reached them.
 
 ## Power
 

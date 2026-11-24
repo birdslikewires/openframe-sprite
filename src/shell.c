@@ -4507,13 +4507,6 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_text_font(about_label, &lv_font_montserrat_20, 0);
 	lv_obj_set_style_text_color(about_label, lv_color_hex(C_TEXT), 0);
 	lv_obj_set_style_text_line_space(about_label, 4, 0);
-	// What sprite-ping sends (system/sprite-ping): said where an owner can find it.
-	lv_obj_t *tl = lv_label_create(pa);
-	lv_label_set_text(tl, STR_ABOUT_PING);
-	lv_obj_set_width(tl, LV_PCT(100));
-	lv_obj_set_style_margin_top(tl, HEADING_SPACE, 0);
-	lv_obj_set_style_text_font(tl, &lv_font_montserrat_16, 0);
-	lv_obj_set_style_text_color(tl, lv_color_hex(C_DIM), 0);
 	// Erasing it for its next owner (openframe-scripts' of-reset), asked twice
 	section(pa, STR_ERASE_HEAD);
 	lv_obj_t *el = lv_label_create(pa);
@@ -4523,6 +4516,13 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_text_color(el, lv_color_hex(C_DIM), 0);
 	lv_obj_t *erow = button_row(pa);
 	button(erow, LV_SYMBOL_TRASH "  " STR_ERASE_BUTTON, BUTTON_DANGER, reset_ask, NULL);
+	// Information: what sprite-ping sends (system/sprite-ping), said where an owner can find it
+	section(pa, STR_INFO_HEAD);
+	lv_obj_t *tl = lv_label_create(pa);
+	lv_label_set_text(tl, STR_INFO_PING);
+	lv_obj_set_width(tl, LV_PCT(100));
+	lv_obj_set_style_text_font(tl, &lv_font_montserrat_16, 0);
+	lv_obj_set_style_text_color(tl, lv_color_hex(C_DIM), 0);
 
 	// Power
 	lv_obj_t *pp = settings_panel_new(TAB_POWER);
