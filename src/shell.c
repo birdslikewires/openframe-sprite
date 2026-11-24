@@ -4246,7 +4246,7 @@ static lv_obj_t *settings_panel_new(int t) {
 static const int idle_steps[] = { 0, 1, 2, 5, 10, 15, 30, 60 }; // minutes; 0: never
 static int ss_min = 5, sleep_min;
 static bool sleeping;
-static char saver_id[64]; // the screensaver app chosen (sprite.txt's saver=), or "": the flip clock
+static char saver_id[64]; // the screensaver app chosen (interface.txt's saver=), or "": the flip clock
 static lv_obj_t *saver_head, *saver_list;
 
 static struct sprite_app *saver_app(void) {
@@ -4257,7 +4257,7 @@ static struct sprite_app *saver_app(void) {
 	return NULL;
 }
 
-// A row for one of them: its name, and its time with a stepper, kept as key in sprite.txt
+// A row for one of them: its name, and its time with a stepper, kept as key in interface.txt
 struct idle_row { const char *key; int *min; lv_obj_t *label; };
 static struct idle_row idle_rows[] = { { "screensaver", &ss_min, NULL }, { "sleep", &sleep_min, NULL } };
 

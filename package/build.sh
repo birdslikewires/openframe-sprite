@@ -27,7 +27,7 @@ install -m 755 system/sprite-ping "$pkg$P/libexec/sprite-ping"
 cp -a "$P/lib/$multiarch/libwlroots-0.18.so" "$pkg$P/lib/$multiarch/"
 cp -a "$P"/lib/libSDL2-2.0.so* "$P"/lib/libSDL-1.2.so* "$pkg$P/lib/"
 rm -f "$pkg$P"/lib/*.so.*.*.*.debug
-install -m 644 settings/sprite.txt "$pkg$P/share/sprite/sprite.txt"
+install -m 644 settings/interface.txt "$pkg$P/share/sprite/interface.txt"
 install -m 644 apps/settings.app "$pkg$P/share/sprite/apps/"
 install -m 644 system/sprite.service system/sprite-helper.socket system/sprite-helper@.service \
   system/sprite-ping.service system/sprite-ping.timer \

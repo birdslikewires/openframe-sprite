@@ -188,7 +188,8 @@ needs Mesa: Debian's own wlroots, Xwayland and SDL2 do, at about 250 MB. It depe
 
 The first time it's installed, it takes tty1 from the login prompt (marked in
 `/var/lib/openframe-sprite`, so disabling Sprite by hand afterwards sticks), and puts
-`settings/sprite.txt` on OF-BOOT if there isn't one. Removing it brings the login prompt back.
+`settings/interface.txt` on OF-BOOT if there isn't one (moving one from its old name,
+`sprite.txt`). Removing it brings the login prompt back.
 
 **It tells openbeak.net that the unit is running** (`sprite-ping`): once after it starts, when
 its clock is set, and then every hour after that (`sprite-ping.timer`), so each unit has a
@@ -240,8 +241,9 @@ It also expects the touchscreen calibration in `spike/touch/` to be installed.
 
 ### Settings
 
-`settings/sprite.txt` on the OF-BOOT volume, alongside `wifi.txt` and the rest, so it can be
-edited from a PC:
+`settings/interface.txt` on the OF-BOOT volume (`sprite.txt` until 26.11.122), alongside
+`wifi.txt` and the rest, so it can be edited from a PC. Owners never see the name Sprite: to
+them it's the OpenFrame's interface.
 
 ```
 startup=Clock      # the app to open at startup, by the name on its tile (or its id)

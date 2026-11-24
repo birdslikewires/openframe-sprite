@@ -50,7 +50,7 @@ static char env_wayland[64], env_x[32];
 // access granted. So a root helper connects (which starts Xwayland), lets the apps' user in,
 // reports back through a pipe, and stays connected so the grant lasts. X11 apps launch
 // once it has reported.
-// The app opened at startup: "startup=" in settings/sprite.txt, by the app's name or id.
+// The app opened at startup: "startup=" in settings/interface.txt, by the app's name or id.
 static char autostart_id[64];
 
 static pid_t keeper_pid;

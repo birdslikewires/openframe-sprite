@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// sprite's settings: settings/sprite.txt on the OF-BOOT volume, key=value lines like the
-// other OpenFrame settings files, so they can be edited from a PC. sprite reads them at
+// sprite's settings: settings/interface.txt on the OF-BOOT volume (sprite.txt until 26.11.122:
+// read if there's no interface.txt, for a unit the package couldn't move it on), key=value lines
+// like the other OpenFrame settings files, so they can be edited from a PC. sprite reads them at
 // start. Changes from the touchscreen go through the root helper (/boot is read-only).
 #define _GNU_SOURCE
 #include <stdio.h>
@@ -9,7 +10,8 @@
 
 #include "sprite.h"
 
-#define SETTINGS_FILE "/boot/settings/sprite.txt"
+#define SETTINGS_FILE "/boot/settings/interface.txt"
+#define OLD_SETTINGS_FILE "/boot/settings/sprite.txt"
 #define MAX_SETTINGS 16
 
 static struct { char key[32], value[160]; } settings[MAX_SETTINGS];
@@ -18,6 +20,7 @@ static int n_settings;
 void settings_load(void) {
 	const char *path = getenv("SPRITE_SETTINGS") ? getenv("SPRITE_SETTINGS") : SETTINGS_FILE;
 	FILE *f = fopen(path, "r");
+	if (!f && !getenv("SPRITE_SETTINGS")) f = fopen(OLD_SETTINGS_FILE, "r");
 	if (!f) return;
 	char line[256];
 	while (fgets(line, sizeof line, f) && n_settings < MAX_SETTINGS) {

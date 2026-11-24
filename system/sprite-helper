@@ -9,7 +9,7 @@
 ##  as its text in src/strings/en_gb.txt; the rest (about apps, or requests Sprite never makes)
 ##  are plain text. Requests:
 ##
-##    set <key> <value>     set a setting in settings/sprite.txt (an empty value clears it):
+##    set <key> <value>     set a setting in settings/interface.txt (an empty value clears it):
 ##                            startup (an app name), calibration (six numbers), clock
 ##                            (24h or 12h), seconds (yes or no), screensaver and sleep
 ##                            (minutes) or saver (a screensaver app's id)
@@ -92,8 +92,9 @@
 ##  swap and 64 processes (with MEMCG and CGROUP_PIDS in the kernel), past which the kernel
 ##  ends it, not something else. It's bound to sprite.service, so it stops when sprite does.
 
-SETTINGS="/boot/settings/sprite.txt"
-TEMPLATE="/opt/sprite/share/sprite/sprite.txt"
+SETTINGS="/boot/settings/interface.txt"
+OLDSETTINGS="/boot/settings/sprite.txt"   # its name until 26.11.122 (the postinst moves it)
+TEMPLATE="/opt/sprite/share/sprite/interface.txt"
 WIFITXT="/boot/settings/wifi.txt"
 SSHTXT="/boot/settings/ssh.txt"
 NAMETXT="/boot/settings/name.txt"
@@ -318,6 +319,8 @@ case "$CMD" in
 		trap 'rm -f "$NEW"' EXIT
 		if [ -f "$SETTINGS" ]; then
 			cp "$SETTINGS" "$NEW"
+		elif [ -f "$OLDSETTINGS" ]; then
+			cp "$OLDSETTINGS" "$NEW"
 		elif [ -f "$TEMPLATE" ]; then
 			cp "$TEMPLATE" "$NEW"
 		fi

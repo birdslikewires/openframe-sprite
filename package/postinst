@@ -2,8 +2,9 @@
 
 # openframe-sprite postinst
 #  Once per system, sprite takes tty1 from the login prompt (getty@tty1), so it starts at
-#  boot; disabling it afterwards sticks. The settings file goes onto OF-BOOT if there isn't
-#  one, for editing from a PC. On an upgrade, a running Sprite says so, then restarts on the
+#  boot; disabling it afterwards sticks. The settings file (settings/interface.txt) goes onto
+#  OF-BOOT if there isn't one, for editing from a PC; one under its old name (sprite.txt, until
+#  26.11.122) is moved to the new. On an upgrade, a running Sprite says so, then restarts on the
 #  new version.
 #  sprite gets its user, and sandboxed apps their group (sysusers.d) and socket directory
 #  (tmpfiles.d). "of", the person's account, joins the group, to try apps by hand.
@@ -14,7 +15,8 @@ set -e
 
 ENABLEMARKER="/var/lib/openframe-sprite/enable-default"
 PINGMARKER="/var/lib/openframe-sprite/ping-default"
-SETTINGS="/boot/settings/sprite.txt"
+SETTINGS="/boot/settings/interface.txt"
+OLDSETTINGS="/boot/settings/sprite.txt"
 
 # True inside a chroot, as when an image is being built.
 in_chroot() {
@@ -54,9 +56,17 @@ case "$1" in
 		# /boot is read-only (bootrw makes it writable while this writes; in a chroot it's
 		# writable already and bootrw does nothing). A synced copy is renamed into place, so a
 		# power cut leaves no half-written file.
-		if [ -d /boot/settings ] && [ ! -e "$SETTINGS" ]; then
+		if [ -d /boot/settings ] && { [ ! -e "$SETTINGS" ] || [ -e "$OLDSETTINGS" ]; }; then
 			if /usr/lib/openframe/bootrw open; then
-				cp /opt/sprite/share/sprite/sprite.txt "$SETTINGS.new" && sync && mv -f "$SETTINGS.new" "$SETTINGS" && sync || true
+				if [ -e "$OLDSETTINGS" ] && [ ! -e "$SETTINGS" ]; then
+					# its old name: moved, settings and all (a rename, so nothing's half-written)
+					mv -f "$OLDSETTINGS" "$SETTINGS" && sync || true
+				elif [ -e "$OLDSETTINGS" ]; then
+					rm -f "$OLDSETTINGS" && sync || true # (the new one's there already)
+				fi
+				if [ ! -e "$SETTINGS" ]; then
+					cp /opt/sprite/share/sprite/interface.txt "$SETTINGS.new" && sync && mv -f "$SETTINGS.new" "$SETTINGS" && sync || true
+				fi
 				/usr/lib/openframe/bootrw close
 			fi
 		fi

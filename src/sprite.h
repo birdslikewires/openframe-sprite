@@ -145,7 +145,7 @@ void perf_render(double ms);                  // the shell drew a frame, taking 
 // main.c provides this for shell.c's flush callback
 void sprite_shell_damage(int x, int y, int w, int h, bool commit);
 
-// settings.c: settings/sprite.txt on OF-BOOT
+// settings.c: settings/interface.txt on OF-BOOT
 void settings_load(void);
 const char *settings_get(const char *key);        // NULL when unset or empty
 void settings_set(const char *key, const char *value); // in memory now, on disk via the helper
