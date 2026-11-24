@@ -436,14 +436,53 @@ upd.sprite_restarts.nover = It restarts in a moment, and carries on where it was
 
 # Heading
 about.head = ABOUT
-# The details, a line each. Ethernet, Wi-Fi, memory free and total, storage free, hours and minutes up, kernel, Sprite and (if so) the test unit line
-about.summary = Ethernet: %s\nWi-Fi: %s\nMemory: %ld MB free of %ld MB\nStorage: %ld MB free\nUp: %dh %02dm\nKernel: %s\nSprite: %s%s
-# Wi-Fi in the details. %s the address, %s the signal
-about.wifi_signal = %s, signal %s
+# The details: a row each, its name on the left and what it is on the right
+about.row.model = Model
+about.row.firmware = Firmware
+about.row.cpu = Processor
+about.row.memory = Memory
+about.row.storage = Storage
+about.row.ethernet = Ethernet
+about.row.wifi = Wi-Fi
+about.row.up = Up
+about.row.sprite = Sprite
+about.row.system = System
+about.row.kernel = Kernel
+about.row.crystalhd = Crystal HD
+about.row.test_unit = Test unit
+# Firmware: %s the version, %s who made it
+about.firmware = %s, %s
+# Processor: %s the chip (Intel Atom Z520), %s its speed in GHz
+about.cpu = %s, %s GHz
+# Memory: %ld free, %ld in all, in MB
+about.memory = %ld MB free of %ld MB
+# Storage: %s free, %s in all, then where the system is (one of the two below)
+about.storage = %s free of %s, %s
+about.on_internal = internal memory
+about.on_usb = USB stick
+# Sizes. %ld in MB; %.1f and %ld in GB
+about.mb = %ld MB
+about.gb_frac = %.1f GB
+about.gb = %ld GB
+# Ethernet and Wi-Fi, without an address
 about.no_address = connected, no address
 about.not_connected = not connected
-# The last line on a test unit (starts with \n)
-about.test_unit = \nTest unit: updates before they're released
+# Wi-Fi: %s the address, %s the signal (one of the four below)
+about.wifi_signal = %s, signal %s
+about.signal.weak = weak
+about.signal.fair = fair
+about.signal.good = good
+about.signal.excellent = excellent
+# How long it's been running. %d days and hours; hours; hours and minutes; minutes
+about.up.days = %d days, %d h
+about.up.day = 1 day, %d h
+about.up.hours = %d h %d min
+about.up.minutes = %d min
+# A Crystal HD card: %s its chip (BCM70015), and whether its driver has it
+about.crystalhd.ready = %s, ready
+about.crystalhd.no_driver = %s, no driver
+# On a test unit
+about.test_unit = Updates before they're released
 # Heading
 erase.head = ERASE
 erase.note = Puts this OpenFrame back as it came, for its next owner. Its updates and touch calibration stay; everything else that's been set up on it goes.

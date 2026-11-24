@@ -6,8 +6,9 @@ export PKG_CONFIG_PATH := $(PREFIX)/lib/i386-linux-gnu/pkgconfig:$(PREFIX)/lib/p
 CC ?= cc
 CFLAGS ?= -O2 -g -march=atom
 VERSION ?= dev
-# -Werror=format: a message in src/strings whose placeholders don't match the code stops the build.
-CFLAGS += -DSPRITE_VERSION=\"$(VERSION)\" -std=gnu11 -Wall -Werror=format -Wno-unused-parameter -DWLR_USE_UNSTABLE -DLV_CONF_INCLUDE_SIMPLE \
+# -Werror=format: a message in src/strings whose placeholders don't match the code stops the build
+# (one cut short to fit, a longer translation say, is only warned of).
+CFLAGS += -DSPRITE_VERSION=\"$(VERSION)\" -std=gnu11 -Wall -Werror=format -Wno-error=format-truncation -Wno-unused-parameter -DWLR_USE_UNSTABLE -DLV_CONF_INCLUDE_SIMPLE \
 	-Isrc -Ithird_party -Ithird_party/lvgl -Ibuild/gen $(shell pkg-config --cflags $(PKGS))
 LDLIBS = $(shell pkg-config --libs $(PKGS)) -lpthread -lm
 LDFLAGS += -Wl,-rpath,$(PREFIX)/lib/i386-linux-gnu

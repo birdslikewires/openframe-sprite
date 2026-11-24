@@ -18,7 +18,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/statvfs.h>
+#include <sys/sysmacros.h>
 #include <sys/time.h>
 #include <sys/un.h>
 #include <sys/utsname.h>
@@ -452,14 +454,119 @@ void sysinfo_set_backlight(const char *arg) {
 	sysinfo_run(cmd);
 }
 
-void sysinfo_summary(char *buf, size_t len) {
-	struct utsname u;
-	uname(&u);
-	int up = 0;
-	FILE *f = fopen("/proc/uptime", "r");
-	if (f) { double d; if (fscanf(f, "%lf", &d) == 1) up = (int)d; fclose(f); }
+// A size in MB as people say it: "494 MB", "1.4 GB", "54 GB"
+static void size_text(long mb, char *o, size_t n) {
+	if (mb < 1000) snprintf(o, n, STR_ABOUT_MB, mb);
+	else if (mb < 10000) snprintf(o, n, STR_ABOUT_GB_FRAC, mb / 1024.0);
+	else snprintf(o, n, STR_ABOUT_GB, (mb + 512) / 1024);
+}
+
+// A line of a file in /sys, less its newline ("" if there's none)
+static void sys_line(const char *path, char *o, size_t n) {
+	o[0] = 0;
+	FILE *f = fopen(path, "r");
+	if (!f) return;
+	if (fgets(o, (int)n, f)) o[strcspn(o, "\n")] = 0;
+	fclose(f);
+}
+
+// The processor as people say it: "Intel(R) Atom(TM) CPU Z520   @ 1.33GHz" is
+// "Intel Atom Z520, 1.33 GHz"
+static void cpu_text(char *o, size_t n) {
+	char line[160] = "", name[160] = "";
+	FILE *f = fopen("/proc/cpuinfo", "r");
+	if (f) {
+		while (fgets(line, sizeof line, f))
+			if (!strncmp(line, "model name", 10) && strchr(line, ':')) {
+				snprintf(name, sizeof name, "%s", strchr(line, ':') + 2);
+				name[strcspn(name, "\n")] = 0;
+				break;
+			}
+		fclose(f);
+	}
+	char out[160] = "", *at = strstr(name, " @ "), ghz[24] = "";
+	if (at) { snprintf(ghz, sizeof ghz, "%s", at + 3); *at = 0; }
+	char *save = NULL;
+	for (char *w = strtok_r(name, " ", &save); w; w = strtok_r(NULL, " ", &save)) {
+		if (!strcmp(w, "CPU") || !strcmp(w, "Processor")) continue;
+		char word[64];
+		snprintf(word, sizeof word, "%s", w);
+		for (char *m; (m = strstr(word, "(R)")) || (m = strstr(word, "(TM)")) || (m = strstr(word, "(tm)"));)
+			memmove(m, m + (m[1] == 'R' ? 3 : 4), strlen(m + (m[1] == 'R' ? 3 : 4)) + 1);
+		if (!word[0]) continue;
+		size_t l = strlen(out);
+		snprintf(out + l, sizeof out - l, "%s%s", l ? " " : "", word);
+	}
+	char *g = strstr(ghz, "GHz");
+	if (g) *g = 0;
+	if (ghz[0]) snprintf(o, n, STR_ABOUT_CPU, out, ghz);
+	else snprintf(o, n, "%s", out);
+}
+
+// openframe-scripts' version, from dpkg's status (read again only when it changes), less
+// its epoch
+static void system_version(char *o, size_t n) {
+	static char ver[32];
+	static time_t seen;
+	struct stat st;
+	if (stat("/var/lib/dpkg/status", &st) == 0 && st.st_mtime != seen) {
+		seen = st.st_mtime;
+		ver[0] = 0;
+		FILE *f = fopen("/var/lib/dpkg/status", "r");
+		if (f) {
+			char line[256];
+			bool ours = false;
+			while (fgets(line, sizeof line, f)) {
+				if (!strncmp(line, "Package: ", 9)) ours = !strcmp(line + 9, "openframe-scripts\n");
+				else if (ours && !strncmp(line, "Version: ", 9)) {
+					char *v = line + 9, *c = strchr(v, ':');
+					snprintf(ver, sizeof ver, "%.31s", c ? c + 1 : v);
+					ver[strcspn(ver, "\n")] = 0;
+					break;
+				}
+			}
+			fclose(f);
+		}
+	}
+	snprintf(o, n, "%s", ver);
+}
+
+// A Crystal HD card (Broadcom 14e4:1612 or 1615) on the PCI bus, and whether its driver has it
+static void crystalhd_text(char *o, size_t n) {
+	o[0] = 0;
+	DIR *d = opendir("/sys/bus/pci/devices");
+	if (!d) return;
+	struct dirent *e;
+	while ((e = readdir(d))) {
+		if (e->d_name[0] == '.') continue;
+		char p[300], v[16], dev[16], drv[256];
+		snprintf(p, sizeof p, "/sys/bus/pci/devices/%s/vendor", e->d_name);
+		sys_line(p, v, sizeof v);
+		snprintf(p, sizeof p, "/sys/bus/pci/devices/%s/device", e->d_name);
+		sys_line(p, dev, sizeof dev);
+		if (strcmp(v, "0x14e4") || (strcmp(dev, "0x1612") && strcmp(dev, "0x1615"))) continue;
+		const char *chip = !strcmp(dev, "0x1615") ? "BCM70015" : "BCM70012";
+		snprintf(p, sizeof p, "/sys/bus/pci/devices/%s/driver", e->d_name);
+		ssize_t l = readlink(p, drv, sizeof drv - 1);
+		drv[l > 0 ? l : 0] = 0;
+		snprintf(o, n, strstr(drv, "crystalhd") ? STR_ABOUT_CRYSTALHD_READY : STR_ABOUT_CRYSTALHD_NO_DRIVER, chip);
+		break;
+	}
+	closedir(d);
+}
+
+void sysinfo_about(struct sprite_about *a) {
+	memset(a, 0, sizeof *a);
+	sys_line("/sys/class/dmi/id/product_name", a->model, sizeof a->model);
+	char ver[40], vendor[40];
+	sys_line("/sys/class/dmi/id/bios_version", ver, sizeof ver);
+	sys_line("/sys/class/dmi/id/bios_vendor", vendor, sizeof vendor);
+	if (ver[0] && vendor[0]) snprintf(a->firmware, sizeof a->firmware, STR_ABOUT_FIRMWARE, ver, vendor);
+	else snprintf(a->firmware, sizeof a->firmware, "%s", ver[0] ? ver : vendor);
+	cpu_text(a->cpu, sizeof a->cpu);
+
 	long mem_total = 0, mem_avail = 0;
-	f = fopen("/proc/meminfo", "r");
+	FILE *f = fopen("/proc/meminfo", "r");
 	if (f) {
 		char line[128];
 		while (fgets(line, sizeof line, f)) {
@@ -468,22 +575,54 @@ void sysinfo_summary(char *buf, size_t len) {
 		}
 		fclose(f);
 	}
+	if (mem_total) snprintf(a->memory, sizeof a->memory, STR_ABOUT_MEMORY, mem_avail / 1024, mem_total / 1024);
+
+	// The system's own storage: what's free of it, and whether it's the internal memory or a
+	// USB stick (the root filesystem's device)
 	struct statvfs sv;
-	long root_free = statvfs("/", &sv) == 0 ? (long)(sv.f_bavail * (sv.f_frsize / 1024)) / 1024 : -1;
+	if (statvfs("/", &sv) == 0) {
+		char fr[16], tot[16];
+		size_text((long)(sv.f_bavail * (sv.f_frsize / 1024)) / 1024, fr, sizeof fr);
+		size_text((long)(sv.f_blocks * (sv.f_frsize / 1024)) / 1024, tot, sizeof tot);
+		struct stat rs;
+		bool mmc = false;
+		if (stat("/", &rs) == 0) {
+			char p[96], link[256];
+			snprintf(p, sizeof p, "/sys/dev/block/%u:%u", major(rs.st_dev), minor(rs.st_dev));
+			ssize_t l = readlink(p, link, sizeof link - 1);
+			link[l > 0 ? l : 0] = 0;
+			mmc = strstr(link, "/mmcblk") != NULL;
+		}
+		snprintf(a->storage, sizeof a->storage, STR_ABOUT_STORAGE, fr, tot, mmc ? STR_ABOUT_ON_INTERNAL : STR_ABOUT_ON_USB);
+	}
+
 	struct sprite_net n;
 	sysinfo_net(&n);
-	char wifi[96];
+	snprintf(a->eth, sizeof a->eth, "%s", n.eth_ip[0] ? n.eth_ip : n.eth_up ? STR_ABOUT_NO_ADDRESS : STR_ABOUT_NOT_CONNECTED);
+	a->wifi_present = n.wifi_present;
 	const char *wstate = n.wifi_ip[0] ? n.wifi_ip : n.wifi_up ? STR_ABOUT_NO_ADDRESS : STR_ABOUT_NOT_CONNECTED;
-	static const char *strength[] = { "", "weak", "fair", "good", "excellent" };
+	static const char *strength[] = { "", STR_ABOUT_SIGNAL_WEAK, STR_ABOUT_SIGNAL_FAIR, STR_ABOUT_SIGNAL_GOOD, STR_ABOUT_SIGNAL_EXCELLENT };
 	if (n.wifi_ip[0] && n.wifi_dbm < 0)
-		snprintf(wifi, sizeof wifi, STR_ABOUT_WIFI_SIGNAL, wstate, strength[wifi_level(n.wifi_dbm)]);
-	else snprintf(wifi, sizeof wifi, "%s", wstate);
-	snprintf(buf, len,
-		 STR_ABOUT_SUMMARY,
-		 n.eth_ip[0] ? n.eth_ip : n.eth_up ? STR_ABOUT_NO_ADDRESS : STR_ABOUT_NOT_CONNECTED,
-		 wifi, mem_avail / 1024, mem_total / 1024, root_free, up / 3600, (up / 60) % 60, u.release,
-		 SPRITE_VERSION,
-		 // a test unit (OF-BOOT/settings/test.txt): openframe-linux's test-settings writes this list
-		 access("/etc/apt/sources.list.d/openframe-testing.list", F_OK) == 0
-			 ? STR_ABOUT_TEST_UNIT : "");
+		snprintf(a->wifi, sizeof a->wifi, STR_ABOUT_WIFI_SIGNAL, wstate, strength[wifi_level(n.wifi_dbm)]);
+	else snprintf(a->wifi, sizeof a->wifi, "%s", wstate);
+
+	int up = 0;
+	f = fopen("/proc/uptime", "r");
+	if (f) { double d; if (fscanf(f, "%lf", &d) == 1) up = (int)d; fclose(f); }
+	int days = up / 86400, hours = up / 3600 % 24, mins = up / 60 % 60;
+	if (days > 1) snprintf(a->up, sizeof a->up, STR_ABOUT_UP_DAYS, days, hours);
+	else if (days == 1) snprintf(a->up, sizeof a->up, STR_ABOUT_UP_DAY, hours);
+	else if (hours) snprintf(a->up, sizeof a->up, STR_ABOUT_UP_HOURS, hours, mins);
+	else snprintf(a->up, sizeof a->up, STR_ABOUT_UP_MINUTES, mins);
+
+	snprintf(a->sprite, sizeof a->sprite, "%s", SPRITE_VERSION);
+	system_version(a->system, sizeof a->system);
+	struct utsname u;
+	uname(&u);
+	snprintf(a->kernel, sizeof a->kernel, "%s", u.release);
+	char *of = strstr(a->kernel, "-openframe");
+	if (of) *of = 0;
+	crystalhd_text(a->crystalhd, sizeof a->crystalhd);
+	// a test unit (OF-BOOT/settings/test.txt): openframe-linux's test-settings writes this list
+	a->test_unit = access("/etc/apt/sources.list.d/openframe-testing.list", F_OK) == 0;
 }

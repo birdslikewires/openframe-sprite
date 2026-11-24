@@ -129,7 +129,12 @@ static int scroll_y0, scroll_max;
 static void drag_input(int x, int y, bool pressed, bool was_pressed);
 static void tile_drop(bool place);
 static void tile_follow(int x, int y);
-static lv_obj_t *bl_slider, *bl_auto, *about_label;
+static lv_obj_t *bl_slider, *bl_auto;
+// About's details: a row each (an icon, its name, what it is), in a card
+enum { AB_MODEL, AB_FIRMWARE, AB_CPU, AB_MEMORY, AB_STORAGE, AB_ETH, AB_WIFI, AB_UP, AB_SPRITE, AB_SYSTEM,
+       AB_KERNEL, AB_CRYSTALHD, AB_TEST, N_ABOUT };
+static lv_obj_t *about_row[N_ABOUT], *about_val[N_ABOUT];
+static void about_show(void);
 static lv_obj_t *bl_hint, *bl_off_row; // automatic brightness: what the range means; off in the dark
 static lv_obj_t *bl_now;                // the level now, by the heading
 static void bl_mode_show(bool autobl);
@@ -946,9 +951,7 @@ static void refresh_settings(lv_timer_t *t) {
 	if (settings_tab == TAB_UPDATES) upd_refresh();
 	eth_show();
 	net_notes_show();
-	static char text[768];
-	sysinfo_summary(text, sizeof text);
-	set_text(about_label, text); // (only if it changed)
+	if (settings_tab == TAB_ABOUT) about_show();
 	bool autobl = sysinfo_backlight_auto();
 	if (autobl) lv_obj_add_state(bl_auto, LV_STATE_CHECKED);
 	else lv_obj_remove_state(bl_auto, LV_STATE_CHECKED);
@@ -4114,6 +4117,7 @@ static void settings_show_tab(int t) {
 	if (t == TAB_AUDIO) aud_refresh();
 	if (t == TAB_DISPLAY) bl_limits_ask();
 	if (t == TAB_NETWORK && wifi_status_label) wifi_refresh(); // (polled only while it shows)
+	if (t == TAB_ABOUT) about_show(); // (and polled only while it shows)
 }
 
 static void tab_clicked(lv_event_t *e) { settings_show_tab((int)(intptr_t)lv_event_get_user_data(e)); }
@@ -4163,6 +4167,94 @@ static lv_obj_t *settings_panel_new(int t) {
 	lv_obj_set_scrollbar_mode(p, LV_SCROLLBAR_MODE_OFF);
 	tab_panel[t] = p;
 	return p;
+}
+
+/* ---- About's details: a card with a row each, an icon, its name, and what it is ---- */
+
+#define ABOUT_ROW_H 40
+
+static void about_build(lv_obj_t *parent) {
+	static const struct { const char *icon, *name; } rows[N_ABOUT] = {
+		[AB_MODEL] = { UI_ICON_MONITOR, STR_ABOUT_ROW_MODEL },
+		[AB_FIRMWARE] = { UI_ICON_MICROCHIP, STR_ABOUT_ROW_FIRMWARE },
+		[AB_CPU] = { UI_ICON_CPU, STR_ABOUT_ROW_CPU },
+		[AB_MEMORY] = { UI_ICON_MEMORY_STICK, STR_ABOUT_ROW_MEMORY },
+		[AB_STORAGE] = { UI_ICON_HARD_DRIVE, STR_ABOUT_ROW_STORAGE },
+		[AB_ETH] = { UI_ICON_NETWORK, STR_ABOUT_ROW_ETHERNET },
+		[AB_WIFI] = { UI_ICON_WIFI, STR_ABOUT_ROW_WIFI },
+		[AB_UP] = { UI_ICON_CLOCK, STR_ABOUT_ROW_UP },
+		[AB_SPRITE] = { UI_ICON_LAYOUT_GRID, STR_ABOUT_ROW_SPRITE },
+		[AB_SYSTEM] = { UI_ICON_PACKAGE, STR_ABOUT_ROW_SYSTEM },
+		[AB_KERNEL] = { UI_ICON_TERMINAL, STR_ABOUT_ROW_KERNEL },
+		[AB_CRYSTALHD] = { UI_ICON_CLAPPERBOARD, STR_ABOUT_ROW_CRYSTALHD },
+		[AB_TEST] = { UI_ICON_FLASK_CONICAL, STR_ABOUT_ROW_TEST_UNIT },
+	};
+	lv_obj_t *card = lv_obj_create(parent);
+	lv_obj_remove_style_all(card);
+	lv_obj_set_size(card, LV_PCT(100), LV_SIZE_CONTENT);
+	lv_obj_set_style_bg_color(card, lv_color_hex(C_CARD), 0);
+	lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+	lv_obj_set_style_radius(card, 12, 0);
+	lv_obj_set_style_pad_hor(card, 16, 0);
+	lv_obj_set_style_pad_ver(card, 4, 0);
+	lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+	lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+	for (int i = 0; i < N_ABOUT; i++) {
+		lv_obj_t *r = about_row[i] = lv_obj_create(card);
+		lv_obj_remove_style_all(r);
+		lv_obj_set_size(r, LV_PCT(100), ABOUT_ROW_H);
+		lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
+		lv_obj_set_flex_align(r, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+		lv_obj_set_style_pad_column(r, 12, 0);
+		// a hairline under each but the last showing (about_show)
+		lv_obj_set_style_border_side(r, LV_BORDER_SIDE_BOTTOM, 0);
+		lv_obj_set_style_border_width(r, 1, 0);
+		lv_obj_set_style_border_color(r, lv_color_hex(C_BG), 0);
+		lv_obj_remove_flag(r, LV_OBJ_FLAG_SCROLLABLE);
+		lv_obj_t *ic = lv_label_create(r);
+		lv_label_set_text(ic, rows[i].icon);
+		lv_obj_set_style_text_font(ic, &sprite_ui_24, 0);
+		lv_obj_set_style_text_color(ic, lv_color_hex(C_ACCENT), 0);
+		lv_obj_set_width(ic, 24);
+		lv_obj_t *nm = lv_label_create(r);
+		lv_label_set_text(nm, rows[i].name);
+		lv_obj_set_style_text_font(nm, &lv_font_montserrat_16, 0);
+		lv_obj_set_style_text_color(nm, lv_color_hex(C_DIM), 0);
+		lv_obj_set_width(nm, 112);
+		lv_obj_t *v = about_val[i] = lv_label_create(r);
+		lv_label_set_text(v, "");
+		lv_label_set_long_mode(v, LV_LABEL_LONG_DOT);
+		lv_obj_set_style_text_font(v, &lv_font_montserrat_16, 0);
+		lv_obj_set_style_text_color(v, lv_color_hex(C_TEXT), 0);
+		lv_obj_set_style_text_align(v, LV_TEXT_ALIGN_RIGHT, 0);
+		lv_obj_set_flex_grow(v, 1);
+		lv_obj_set_height(v, lv_font_get_line_height(&lv_font_montserrat_16));
+	}
+	about_show();
+}
+
+// The details now (as Settings refreshes): Wi-Fi's row only with a Wi-Fi card, Crystal HD's
+// with a card, the test unit's on one
+static void about_show(void) {
+	if (!about_val[0]) return;
+	struct sprite_about a;
+	sysinfo_about(&a);
+	const char *v[N_ABOUT] = {
+		[AB_MODEL] = a.model, [AB_FIRMWARE] = a.firmware, [AB_CPU] = a.cpu, [AB_MEMORY] = a.memory,
+		[AB_STORAGE] = a.storage, [AB_ETH] = a.eth, [AB_WIFI] = a.wifi, [AB_UP] = a.up,
+		[AB_SPRITE] = a.sprite, [AB_SYSTEM] = a.system, [AB_KERNEL] = a.kernel,
+		[AB_CRYSTALHD] = a.crystalhd, [AB_TEST] = a.test_unit ? STR_ABOUT_TEST_UNIT : "",
+	};
+	lv_obj_t *last = NULL;
+	for (int i = 0; i < N_ABOUT; i++) {
+		bool show = v[i][0] && (i != AB_WIFI || a.wifi_present);
+		show_if(about_row[i], show);
+		if (!show) continue;
+		set_text(about_val[i], v[i]); // (only if it changed)
+		lv_obj_set_style_border_width(about_row[i], 1, 0);
+		last = about_row[i];
+	}
+	if (last) lv_obj_set_style_border_width(last, 0, 0);
 }
 
 static void build_settings(lv_obj_t *scr) {
@@ -4545,10 +4637,7 @@ static void build_settings(lv_obj_t *scr) {
 	row_pressable(nr, name_clicked, NULL);
 	name_refresh();
 	section(pa, STR_ABOUT_HEAD);
-	about_label = lv_label_create(pa);
-	lv_obj_set_style_text_font(about_label, &lv_font_montserrat_20, 0);
-	lv_obj_set_style_text_color(about_label, lv_color_hex(C_TEXT), 0);
-	lv_obj_set_style_text_line_space(about_label, 4, 0);
+	about_build(pa);
 	// Erasing it for its next owner (openframe-scripts' of-reset), asked twice
 	section(pa, STR_ERASE_HEAD);
 	lv_obj_t *el = lv_label_create(pa);
