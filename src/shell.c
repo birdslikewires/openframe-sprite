@@ -388,7 +388,9 @@ static void clock_layout(void) {
 		 widest, widest);
 	int w = text_w(sample, f);
 	if (!clock_24) w += text_w(" am", f) > text_w(" pm", f) ? text_w(" am", f) : text_w(" pm", f);
-	lv_obj_set_width(bar_clock, w);
+	// The date where the widest time would end, so it never moves as the time does; the clock's
+	// touch target fits the time as it is, its pressed light centred on it
+	lv_obj_align(bar_date, LV_ALIGN_LEFT_MID, CLOCK_PAD + w + 10, 0);
 }
 
 static void updating_check(void);
@@ -699,15 +701,13 @@ static void build_bar(lv_obj_t *scr) {
 	// Everything in the bar is centred on its midline. Left: the time and date, as far in from
 	// the left edge as the gear's glyph is from the right.
 	int inset = (GEAR_W - text_w(LV_SYMBOL_SETTINGS, &lv_font_montserrat_20)) / 2 + BAR_EDGE;
-	// The clock is a touch target the bar's height (Settings at Display), CLOCK_PAD wider each
-	// side for its pressed light; the group is that much further left, and the date that much
-	// closer, so the time and date sit where they would without it. The date does nothing.
+	// The clock is a touch target the bar's height (Settings at Display), as wide as the time
+	// is and CLOCK_PAD more each side for its pressed light; the group is that much further
+	// left, so the time sits where it would without it. The date, placed by clock_layout, does
+	// nothing.
 	lv_obj_t *left = bar_left = lv_obj_create(bar);
 	lv_obj_remove_style_all(left);
 	lv_obj_set_size(left, LV_SIZE_CONTENT, BAR_H);
-	lv_obj_set_flex_flow(left, LV_FLEX_FLOW_ROW);
-	lv_obj_set_flex_align(left, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-	lv_obj_set_style_pad_column(left, 10 - CLOCK_PAD, 0);
 	lv_obj_align(left, LV_ALIGN_LEFT_MID, inset - CLOCK_PAD, 0);
 	lv_obj_remove_flag(left, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 	lv_obj_t *cbox = lv_obj_create(left);
@@ -720,6 +720,7 @@ static void build_bar(lv_obj_t *scr) {
 	lv_obj_set_style_bg_opa(cbox, LV_OPA_20, LV_STATE_PRESSED);
 	rounded(cbox);
 	lv_obj_add_event_cb(cbox, clock_clicked, LV_EVENT_CLICKED, NULL);
+	lv_obj_align(cbox, LV_ALIGN_LEFT_MID, 0, 0);
 	bar_clock = lv_label_create(cbox);
 	lv_obj_align(bar_clock, LV_ALIGN_LEFT_MID, 0, 0);
 	lv_obj_set_style_text_font(bar_clock, &lv_font_montserrat_20, 0);
