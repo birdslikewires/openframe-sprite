@@ -61,10 +61,11 @@ deps=$(cd "$work/deb" && dpkg-shlibdeps -O --ignore-missing-info -l"$pkg$P/lib/$
 # openframe-scripts from the version with of-audio's holder= lines, found quickly (apps
 # restarted as the sound output changes), after of-audio (the Audio tab), of-backlight resume
 # <min> <max> (the brightness slider let go), name-settings (the name, on the About tab),
-# of-backlight show and set, and of-update set-time:
+# of-backlight show and set, of-update set-time, and of-backlight sleep and wake (display
+# sleep, 1:26.11.153):
 # so apt holds this Sprite back on a unit until that's released too, whatever order they're
 # promoted in. Raise it when Sprite starts to need something newer from it.
-deps="$deps, x11-xkb-utils, xkb-data, libx11-6, libxext6, libxcursor1, libxfixes3, libxi6, libxrandr2, libxss1, libasound2t64, openframe-scripts (>= 1:26.11.143), curl, iproute2"
+deps="$deps, x11-xkb-utils, xkb-data, libx11-6, libxext6, libxcursor1, libxfixes3, libxi6, libxrandr2, libxss1, libasound2t64, openframe-scripts (>= 1:26.11.153), curl, iproute2"
 
 size=$(du -sk "$pkg/opt" "$pkg/usr" | awk '{ s += $1 } END { print s }')
 cat > "$pkg/DEBIAN/control" <<CONTROL
