@@ -13,3 +13,8 @@ calibration=
 # or seconds=yes. Settings on the screen changes these too.
 clock=24h
 seconds=no
+
+# The screen turns off once it's been left untouched this many minutes: sleep=0 (never, the
+# default), 1, 2, 5, 10, 15, 30 or 60. A tap turns it back on. Settings on the screen changes
+# this too.
+sleep=0

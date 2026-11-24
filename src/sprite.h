@@ -119,6 +119,12 @@ void shell_set_visible(bool visible);
 void shell_set_bar_app(struct sprite_app *app); // an app is in front below the bar (NULL: none)
 void shell_frame(void);                       // the display wants a frame: draw what has changed
 void shell_notice(const char *text);          // a banner on the home screen
+void shell_wake(void);                        // display sleep: a touch woke the screen
+// main.c, for display sleep: how long since a touch or key, whether a surface asks for no
+// sleep (idle-inhibit), and marking the screen asleep (the next touch only wakes it)
+uint64_t sprite_idle_ms(void);
+bool sprite_sleep_inhibited(void);
+void sprite_set_asleep(bool asleep);
 
 // main.c: performance trace (SPRITE_TRACE_PERF=1), one line a second while anything moves
 void perf_render(double ms);                  // the shell drew a frame, taking ms

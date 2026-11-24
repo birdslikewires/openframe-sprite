@@ -161,6 +161,12 @@ display.auto = Auto
 display.auto.note = Automatic brightness follows the room, between the two ends of the slider.
 # Switch
 display.dark_off = Screen off in the dark
+# A row: the screen off after it's been left untouched a while (a tap turns it back on)
+display.sleep = Screen off after
+# Its time: never, minutes (%d), an hour
+display.sleep.never = Never
+display.sleep.min = %d min
+display.sleep.hour = 1 hour
 # Title when brightness couldn't be changed
 display.not_changed = Brightness not changed
 # Heading

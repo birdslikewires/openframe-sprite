@@ -31,6 +31,7 @@
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_data_device.h>
+#include <wlr/types/wlr_idle_inhibit_v1.h>
 #include <wlr/types/wlr_input_device.h>
 #include <wlr/types/wlr_keyboard.h>
 #include <wlr/types/wlr_output.h>
@@ -113,6 +114,14 @@ static struct {
 	struct { int renders, frames, missed; double render_sum, render_max, gap_max, first, last; } perf;
 	double calib[6];        // touch correction (see sprite.h)
 	bool calibrating;
+	// Display sleep (the shell decides when): the time of the last touch or key, whether the
+	// screen's asleep (a touch then only wakes it), and how many surfaces ask it not to sleep
+	// (idle-inhibit: a video playing, say; SDL asks for it, through Xwayland too)
+	uint64_t last_input_ms;
+	bool asleep;
+	int inhibitors;
+	struct wlr_idle_inhibit_manager_v1 *idle_inhibit;
+	struct wl_listener new_inhibitor;
 	struct wl_event_source *release_timer; // see SPRITE_DEBOUNCE_MS
 	bool release_pending;
 	uint32_t release_button, release_time;
@@ -130,6 +139,47 @@ struct keyboard {
 };
 
 struct wl_event_loop *sprite_event_loop(void) { return S.loop; }
+
+/* ---- display sleep: how long since a touch, and waking with the next ---- */
+
+static uint64_t mono_ms(void) {
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+static void input_seen(void) { S.last_input_ms = mono_ms(); }
+
+uint64_t sprite_idle_ms(void) { return S.last_input_ms ? mono_ms() - S.last_input_ms : 0; }
+bool sprite_sleep_inhibited(void) { return S.inhibitors > 0; }
+void sprite_set_asleep(bool asleep) { S.asleep = asleep; }
+
+// A touch (or key) while asleep: it wakes the screen and goes no further, so it can't tap
+// something nobody could see. True if it did.
+static bool wake_on_input(void) {
+	input_seen();
+	if (!S.asleep) return false;
+	S.asleep = false;
+	wlr_log(WLR_INFO, "awake: a touch");
+	shell_wake();
+	return true;
+}
+
+struct inhibitor { struct wl_listener destroy; };
+static void inhibitor_destroy(struct wl_listener *l, void *data) {
+	struct inhibitor *in = wl_container_of(l, in, destroy);
+	wl_list_remove(&in->destroy.link);
+	free(in);
+	S.inhibitors--;
+	input_seen(); // the idle time counts from when it stopped (the film ended), not from long before
+}
+static void new_inhibitor(struct wl_listener *l, void *data) {
+	struct wlr_idle_inhibitor_v1 *w = data;
+	struct inhibitor *in = calloc(1, sizeof *in);
+	if (!in) return;
+	in->destroy.notify = inhibitor_destroy;
+	wl_signal_add(&w->events.destroy, &in->destroy);
+	S.inhibitors++;
+}
 
 /* ---- shell buffer: LVGL renders straight into this memory, the scene samples it ---- */
 
@@ -611,6 +661,7 @@ static void finger(double *x, double *y) {
 }
 
 static void input_motion(double x, double y, uint32_t t) {
+	if (S.button_down) input_seen();
 	switch (S.gesture) {
 	case G_DONE:
 		return;
@@ -637,6 +688,13 @@ static void input_motion(double x, double y, uint32_t t) {
 
 static void finish_release(double x, double y, uint32_t t, uint32_t button);
 static void input_press(double x, double y, uint32_t t, uint32_t button) {
+	if (S.asleep && !S.release_pending) {
+		wake_on_input();
+		S.button_down = true;
+		S.gesture = G_DONE; // the rest of the stroke too
+		return;
+	}
+	input_seen();
 	if (S.release_pending) {
 		S.release_pending = false;
 		wl_event_source_timer_update(S.release_timer, 0);
@@ -769,6 +827,8 @@ static void kb_key(struct wl_listener *l, void *data) {
 	const xkb_keysym_t *syms;
 	int n = xkb_state_key_get_syms(k->wlr->xkb_state, e->keycode + 8, &syms);
 	uint32_t mods = wlr_keyboard_get_modifiers(k->wlr);
+	// a key wakes the screen too, and goes no further (its release does, harmlessly)
+	if (e->state == WL_KEYBOARD_KEY_STATE_PRESSED && wake_on_input()) return;
 	if (e->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
 		for (int i = 0; i < n; i++) {
 			if (syms[i] >= XKB_KEY_XF86Switch_VT_1 && syms[i] <= XKB_KEY_XF86Switch_VT_12) {
@@ -1140,6 +1200,11 @@ int main(int argc, char **argv) {
 	wlr_scene_node_set_position(&S.handle->node, (SPRITE_W - SPRITE_HANDLE_W) / 2,
 		S.home_bottom ? SPRITE_H - SPRITE_HANDLE_Y - SPRITE_HANDLE_H : SPRITE_HANDLE_Y);
 	wlr_scene_node_set_enabled(&S.handle->node, false);
+
+	S.idle_inhibit = wlr_idle_inhibit_v1_create(S.display);
+	S.new_inhibitor.notify = new_inhibitor;
+	wl_signal_add(&S.idle_inhibit->events.new_inhibitor, &S.new_inhibitor);
+	S.last_input_ms = mono_ms(); // idle from the start, as if touched then
 
 	S.xdg_shell = wlr_xdg_shell_create(S.display, 3);
 	S.new_xdg_toplevel.notify = new_xdg_toplevel;
