@@ -4116,7 +4116,7 @@ static lv_obj_t *settings_panel_new(int t) {
 	lv_obj_set_style_pad_left(p, CONTENT_X - 8, 0);
 	lv_obj_set_style_pad_right(p, CONTENT_X, 0);
 	lv_obj_set_style_pad_top(p, CONTENT_TOP, 0);
-	lv_obj_set_style_pad_bottom(p, 8, 0); // Network, the fullest, ends 16 px from the bottom
+	lv_obj_set_style_pad_bottom(p, CONTENT_TOP, 0); // scrolled to its end, as far from the bottom as it starts from the top
 	lv_obj_set_style_pad_row(p, ROW_GAP, 0);
 	lv_obj_set_scroll_dir(p, LV_DIR_VER);
 	lv_obj_set_scrollbar_mode(p, LV_SCROLLBAR_MODE_OFF);
