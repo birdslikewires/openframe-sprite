@@ -892,6 +892,7 @@ static void toast_expire(lv_timer_t *t) {
 static void show_toast(const char *text, uint32_t ms) {
 	lv_label_set_text(lv_obj_get_child(toast, 0), text);
 	lv_obj_remove_flag(toast, LV_OBJ_FLAG_HIDDEN);
+	lv_obj_move_foreground(toast); // over a message or the calibration's screen there too
 	if (toast_timer) lv_timer_delete(toast_timer);
 	toast_timer = lv_timer_create(toast_expire, ms, NULL);
 	lv_timer_set_repeat_count(toast_timer, 1);
@@ -1310,6 +1311,17 @@ static lv_obj_t *scrolling_screen(void) {
 	return NULL;
 }
 
+// Nothing over the pages on the top layer (a message, a lifted tile...): the toast, which
+// lives there too, doesn't count, as touches go through it.
+static bool top_layer_free(void) {
+	lv_obj_t *top = lv_layer_top();
+	for (uint32_t i = 0; i < lv_obj_get_child_count(top); i++) {
+		lv_obj_t *o = lv_obj_get_child(top, i);
+		if (o != toast && !lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN)) return false;
+	}
+	return true;
+}
+
 // Called with each position the shell is given, before LVGL sees it: page turning and
 // scrolling, the same way everywhere.
 static void drag_input(int x, int y, bool pressed, bool was_pressed) {
@@ -1318,7 +1330,7 @@ static void drag_input(int x, int y, bool pressed, bool was_pressed) {
 		else tile_drop(true);
 		return;
 	}
-	bool free = !sheet && !cal && !lv_obj_get_child_count(lv_layer_top());
+	bool free = !sheet && !cal && top_layer_free();
 	if (pressed && !was_pressed) { // a touch begins
 		// one page can be flicked too, against the ends: it shows there's paging to be had
 		drag_can_page = free && pager && !lv_obj_has_flag(page_home, LV_OBJ_FLAG_HIDDEN);
@@ -1703,8 +1715,12 @@ static void build_home(lv_obj_t *scr) {
 	lv_obj_set_size(strip, SPRITE_W, SPRITE_H - BAR_H);
 	lv_obj_remove_flag(strip, LV_OBJ_FLAG_SCROLLABLE);
 
-	toast = lv_obj_create(scr);
+	// On the top layer, over every page: made here on the screen, the pages made after it
+	// (Settings, Wi-Fi, What's new...) were drawn over it, their text through it. Touches go
+	// through it to what's underneath.
+	toast = lv_obj_create(lv_layer_top());
 	lv_obj_remove_style_all(toast);
+	lv_obj_remove_flag(toast, LV_OBJ_FLAG_CLICKABLE);
 	lv_obj_set_size(toast, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
 	lv_obj_set_style_bg_color(toast, lv_color_hex(0x26313c), 0);
 	lv_obj_set_style_bg_opa(toast, LV_OPA_COVER, 0);
