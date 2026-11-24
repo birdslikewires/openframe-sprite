@@ -3,17 +3,21 @@
 # the person's account, and nothing runs as it unless someone's logged in.
 [Unit]
 Description=Sprite, the OpenFrame touch shell
-# tty1 is shared: the installer (of-flash), the MAC store reboot (of-mac-gate), first-boot
-# provisioning (of-provision) and Plymouth all use it first. Starting under any of them
-# would break it, as with X (see xinit.service.d/openframe.conf).
+# tty1 is shared: the installer (of-flash), the MAC store reboot (of-mac-gate) and first-boot
+# provisioning (of-provision) use it first. Starting under any of them would break it, as
+# with X (see xinit.service.d/openframe.conf).
 After=systemd-user-sessions.service of-flash.service of-mac-gate.service of-provision.service
-After=plymouth-quit.service plymouth-quit-wait.service getty@tty1.service
+# The boot splash (Plymouth, the firmware's bird) stays up until Sprite draws over it: Sprite
+# takes plymouth-quit's place, as display managers do, putting Plymouth aside as it starts,
+# and once its first frame is up, ending it through the helper (splash-done). If Sprite
+# fails, plymouth-quit runs.
+After=plymouth-start.service plymouth-quit.service getty@tty1.service
 # OpenFrame Flash stopped and left its message on tty1 (what went wrong, what to do): it holds
 # the login prompt off with this, and Sprite too, or it would cover the message
 ConditionPathExists=!/run/of-flash/hold
-Conflicts=getty@tty1.service
+Conflicts=getty@tty1.service plymouth-quit.service
 # If sprite can't run, the login prompt comes back rather than a blank screen.
-OnFailure=getty@tty1.service
+OnFailure=getty@tty1.service plymouth-quit.service
 StartLimitIntervalSec=60
 StartLimitBurst=3
 
@@ -25,15 +29,17 @@ StateDirectory=sprite
 StateDirectoryMode=0700
 PAMName=login
 TTYPath=/dev/tty1
-TTYReset=yes
+# Hung up, but not reset or cleared: either puts tty1 back in text mode, and the console then
+# covered the boot splash's picture with black till Sprite drew (logind puts tty1 in graphics
+# mode for Sprite's session anyway)
 TTYVHangup=yes
-TTYVTDisallocate=yes
 StandardInput=tty-fail
 StandardOutput=journal
 StandardError=journal
 UtmpIdentifier=tty1
 UtmpMode=user
 Environment=XDG_SESSION_TYPE=wayland WLR_RENDERER=pixman PATH=/opt/sprite/bin:/usr/local/bin:/usr/bin:/bin
+ExecStartPre=-+/usr/bin/plymouth deactivate
 ExecStart=/opt/sprite/bin/sprite
 Restart=on-failure
 RestartSec=2

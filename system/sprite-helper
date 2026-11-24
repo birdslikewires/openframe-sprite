@@ -69,6 +69,8 @@
 ##    update-news           what's new in OpenBeak's waiting updates, as of-update news prints
 ##                            it (part= and news= lines), then "ok"
 ##    after-update <what>   reboot or poweroff once the update being installed has finished
+##    splash-done           end the boot splash, leaving its picture on the screen, once
+##                            Sprite has drawn over it (plymouth quit --retain-splash)
 ##    factory-reset         erase the OpenFrame for its next owner and restart it
 ##                            (openframe-scripts' of-reset --yes), answering at once: it carries
 ##                            on by itself, as a service of its own, while Sprite waits
@@ -531,6 +533,12 @@ case "$CMD" in
 	update-news)
 		[ -x /usr/local/sbin/of-update ] || answer "error: helper.no_updates"
 		/usr/local/sbin/of-update news
+		answer ok
+		;;
+	splash-done)
+		if command -v plymouth >/dev/null 2>&1 && plymouth --ping 2>/dev/null; then
+			plymouth quit --retain-splash 2>/dev/null || answer "error: plymouth didn't quit"
+		fi
 		answer ok
 		;;
 	factory-reset)

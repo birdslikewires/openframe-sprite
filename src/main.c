@@ -103,6 +103,12 @@ static struct {
 	struct sprite_app *fg;          // app on screen, NULL = home
 	struct sprite_app *hold;        // black screen until this app's window appears
 	struct wl_event_source *hold_timer;
+	// The boot splash carried on (see splash_build): its black, its bird and bar, and the fade
+	struct wlr_scene_rect *splash_black;
+	struct wlr_scene_buffer *splash_bird;
+	struct shell_buffer splashbuf;
+	struct wl_event_source *splash_timer;
+	uint64_t splash_t0;
 	enum gesture gesture;
 	bool home_bottom;       // the home handle is at the bottom edge
 	double app_press_y;     // where a touch given to the app began
@@ -170,6 +176,7 @@ bool sprite_sleep_inhibited(void) {
 }
 void sprite_set_asleep(bool asleep) { S.asleep = asleep; }
 static void apply_foreground(void);
+static void splash_raise(void);
 // A screensaver app runs over the flip clock, which covers the screen while it starts (and
 // if it fails, or quits); it's never the foreground app, and gets no input: a touch ends it.
 void sprite_saver_start(struct sprite_app *app) {
@@ -364,6 +371,7 @@ static void apply_foreground(void) {
 	wlr_scene_node_set_enabled(&S.shell_node->node, shell);
 	wlr_scene_node_set_enabled(&S.handle->node, S.fg != NULL && !S.covered);
 	wlr_scene_node_raise_to_top(&S.handle->node);
+	splash_raise();
 	handle_show(S.fg);
 	shell_set_visible(shell);
 	shell_set_bar_app(bar ? S.fg : NULL);
@@ -996,11 +1004,96 @@ void sprite_request_frame(void) {
 
 // The panel is ready for a frame: the shell draws what has changed (in step with the display,
 // one frame per refresh), then the scene, with that, goes to the screen.
+/* ---- the first frames: the boot splash carried on ----
+   Plymouth's last picture (openframe-scripts' theme: the firmware's bird, 204x82 at 274,199,
+   on black, with a 160x4 bar under it, here full) is Sprite's first frame, held a moment, then
+   faded away to the shell. In the scene, over everything, so the shell is drawn once and the
+   fade is only the compositor blending: an LVGL fade redrew the whole home screen each frame
+   (18 ms on an OpenFrame 1, 30 frames a second, choppy). */
+
+#define SPLASH_X 274
+#define SPLASH_Y 199
+#define SPLASH_W 206 // the bird (to x 478) and the bar (320 to 480)
+#define SPLASH_H 135 // the bird (to y 281) and the bar (330 to 334)
+#define SPLASH_HOLD_MS 350
+#define SPLASH_FADE_MS 500
+
+extern const lv_image_dsc_t sprite_bird;
+
+static void splash_build(void) {
+	uint32_t *px = calloc(SPLASH_W * SPLASH_H, 4);
+	if (!px) return;
+	const uint8_t *a = sprite_bird.data; // white, premultiplied: each channel the alpha
+	for (uint32_t y = 0; y < sprite_bird.header.h; y++)
+		for (uint32_t x = 0; x < sprite_bird.header.w; x++) {
+			uint32_t v = a[y * sprite_bird.header.stride + x];
+			px[y * SPLASH_W + x] = v << 24 | v << 16 | v << 8 | v;
+		}
+	for (int y = 330 - SPLASH_Y; y < 334 - SPLASH_Y; y++)
+		for (int x = 320 - SPLASH_X; x < 480 - SPLASH_X; x++) px[y * SPLASH_W + x] = 0xffffffff;
+	S.splashbuf.pixels = px;
+	S.splashbuf.format = DRM_FORMAT_ARGB8888;
+	wlr_buffer_init(&S.splashbuf.base, &shellbuf_impl, SPLASH_W, SPLASH_H);
+	float black[4] = { 0, 0, 0, 1 };
+	S.splash_black = wlr_scene_rect_create(&S.scene->tree, SPRITE_W, SPRITE_H, black);
+	S.splash_bird = wlr_scene_buffer_create(&S.scene->tree, &S.splashbuf.base);
+	wlr_scene_node_set_position(&S.splash_bird->node, SPLASH_X, SPLASH_Y);
+}
+
+static void splash_raise(void) { // above anything apply_foreground raised
+	if (!S.splash_black) return;
+	wlr_scene_node_raise_to_top(&S.splash_black->node);
+	wlr_scene_node_raise_to_top(&S.splash_bird->node);
+}
+
+static int splash_step(void *data) {
+	uint64_t t = mono_ms() - S.splash_t0;
+	if (t < SPLASH_HOLD_MS) {
+		wl_event_source_timer_update(S.splash_timer, (int)(SPLASH_HOLD_MS - t));
+		return 0;
+	}
+	double f = (double)(t - SPLASH_HOLD_MS) / SPLASH_FADE_MS;
+	if (f >= 1) { // gone
+		wlr_scene_node_destroy(&S.splash_black->node);
+		wlr_scene_node_destroy(&S.splash_bird->node);
+		S.splash_black = NULL;
+		S.splash_bird = NULL;
+		wl_event_source_remove(S.splash_timer);
+		S.splash_timer = NULL;
+		return 0;
+	}
+	float o = (float)(1 - (f < 0.5 ? 2 * f * f : 1 - 2 * (1 - f) * (1 - f))); // eased in and out
+	float black[4] = { 0, 0, 0, o };
+	wlr_scene_rect_set_color(S.splash_black, black);
+	wlr_scene_buffer_set_opacity(S.splash_bird, o);
+	wl_event_source_timer_update(S.splash_timer, 16);
+	return 0;
+}
+
+static void splash_shown(void) { // the first frame's on the screen: hold from now, then fade
+	if (!S.splash_black || S.splash_timer) return;
+	S.splash_t0 = mono_ms();
+	S.splash_timer = wl_event_loop_add_timer(S.loop, splash_step, NULL);
+	if (S.splash_timer) wl_event_source_timer_update(S.splash_timer, SPLASH_HOLD_MS);
+}
+
+static void splash_done(char *reply, void *ctx) {
+	wlr_log(WLR_INFO, "boot splash: %s", helper_reply_status(reply));
+}
+
 static void output_frame(struct wl_listener *l, void *data) {
 	struct output *o = wl_container_of(l, o, frame);
 	struct wlr_scene_output *so = wlr_scene_get_scene_output(S.scene, o->wlr);
 	shell_frame();
 	wlr_scene_output_commit(so, NULL);
+	// The boot splash (Plymouth, put aside as sprite.service started, its picture still up)
+	// goes once Sprite's first frame is on the screen in its place: only root may end it
+	static bool splash_ended;
+	if (!splash_ended) {
+		splash_ended = true;
+		helper_request("splash-done\n", splash_done, NULL);
+		splash_shown();
+	}
 	struct timespec now;
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	wlr_scene_output_send_frame_done(so, &now);
@@ -1195,6 +1288,10 @@ static void prepare_runtime_dir(uid_t uid, gid_t gid) {
 }
 
 int main(int argc, char **argv) {
+	// No hangups: Sprite has tty1, and the boot splash, which had it before, ending as Sprite
+	// starts could send one (it ended a Sprite still starting at boot, which systemd took for
+	// a clean exit and didn't restart)
+	signal(SIGHUP, SIG_IGN);
 	// Block SIGCHLD before LVGL starts its render threads, so the event loop's signalfd
 	// receives it rather than whichever thread the kernel picks.
 	sigset_t chld;
@@ -1256,6 +1353,7 @@ int main(int argc, char **argv) {
 	wlr_scene_node_set_position(&S.handle->node, (SPRITE_W - SPRITE_HANDLE_W) / 2,
 		S.home_bottom ? SPRITE_H - SPRITE_HANDLE_Y - SPRITE_HANDLE_H : SPRITE_HANDLE_Y);
 	wlr_scene_node_set_enabled(&S.handle->node, false);
+	splash_build();
 
 	S.idle_inhibit = wlr_idle_inhibit_v1_create(S.display);
 	S.new_inhibitor.notify = new_inhibitor;
