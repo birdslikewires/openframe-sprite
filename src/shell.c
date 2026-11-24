@@ -980,21 +980,24 @@ static void gear_clicked(lv_event_t *e) {
 	refresh_settings(NULL);
 }
 
-// The network icons (and the warning): Settings, at the Network tab, from wherever we are.
-static void net_clicked(lv_event_t *e) {
+// A bar icon's tap, as the gear's: Settings at its tab t, from wherever we are, or home if
+// Settings is showing that tab already (a second tap closes it, as the gear's does).
+static void bar_icon_tab(int t) {
+	if (!bar_app && showing(page_settings) && settings_tab == t) {
+		show_page(page_home);
+		return;
+	}
 	bar_leave_app();
-	settings_show_tab(TAB_NETWORK);
+	settings_show_tab(t);
 	show_page(page_settings);
 	refresh_settings(NULL);
 }
 
-// The updating sign: Settings, at Updates.
-static void upd_box_clicked(lv_event_t *e) {
-	bar_leave_app();
-	settings_show_tab(TAB_UPDATES);
-	show_page(page_settings);
-	refresh_settings(NULL);
-}
+// The network icons (and the warning): Settings at Network.
+static void net_clicked(lv_event_t *e) { bar_icon_tab(TAB_NETWORK); }
+
+// The updating sign: Settings at Updates.
+static void upd_box_clicked(lv_event_t *e) { bar_icon_tab(TAB_UPDATES); }
 
 /* ---- long-press sheet: open, close, open at startup ---- */
 
@@ -3395,10 +3398,7 @@ static void aud_box_clicked(lv_event_t *e) {
 		return;
 	}
 	bar_vol_hide();
-	bar_leave_app();
-	settings_show_tab(TAB_AUDIO);
-	show_page(page_settings);
-	refresh_settings(NULL);
+	bar_icon_tab(TAB_AUDIO);
 }
 
 // As Settings' slider does, which follows it (and kept for the next start the same way)
