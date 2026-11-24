@@ -46,7 +46,7 @@
 #define BACK_X 16
 #define BACK_W (RAIL_W - 2 * BACK_X) // 176: the width of Settings' tabs
 #define NET_ICON 20                                         // the network icons in the bar
-#define GEAR_W 48                                           // the Settings gear's touch area
+#define GEAR_W 40                                           // the Settings gear's touch area (and each bar icon's space)
 // The home grid: 6 columns by 3 rows of apps, as OpenPeak's own home screen had. Each app has a
 // cell (the whole cell takes the touch) with an icon and a label of up to two lines below it.
 #define GRID_COLS 6
@@ -565,8 +565,11 @@ static void make_net_icons(void) {
 // warning shows left of them while of-netplan has something to say about the settings files,
 // and the Network tab in Settings has an amber dot. The icons are one touch target, sized to
 // those showing, that opens Settings at the Network tab.
-#define NET_GAP 12
-#define NET_PAD 8
+// Each icon right of centre has a space the gear's width (GEAR_W), the icon in its middle, so
+// they're all as wide to touch and evenly spaced, centre to centre: the gear, the network icons
+// (each of them, the warning too), the speaker, and the update sign.
+#define NET_GAP (GEAR_W - NET_ICON)       // between two icons in one touch target
+#define NET_PAD ((GEAR_W - NET_ICON) / 2) // and either side of them
 static bool wifi_scanning;
 static struct wifi_status wifi_now;                       // what the helper last said
 
