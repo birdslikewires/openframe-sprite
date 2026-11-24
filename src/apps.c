@@ -252,6 +252,7 @@ void apps_x11_ready(bool ready) {
 	for (int i = 0; i < n_apps; i++) {
 		if (!apps[i].pending) continue;
 		apps[i].pending = false;
+		if (apps[i].close_on_start) { apps[i].close_on_start = false; continue; } // closed meanwhile
 		if (ready) apps_launch(&apps[i]);
 		else wlr_log(WLR_ERROR, "%s not started: X is not available", apps[i].name);
 	}
@@ -292,11 +293,14 @@ static void launched(char *reply, void *data) {
 		a->exit_src = wl_event_loop_add_fd(sprite_event_loop(), a->pidfd, WL_EVENT_READABLE, app_gone, a);
 	wlr_log(WLR_INFO, "launched %s in its sandbox (pid %d)", a->name, pid);
 	if (!a->exit_src) app_gone(-1, 0, a); // gone already
+	else if (a->close_on_start) { a->close_on_start = false; apps_close(a); } // closed while starting
 	else shell_apps_changed();
 }
 
 void apps_launch(struct sprite_app *app) {
-	if (app->builtin || app->pid || app->pending) return;
+	if (app->builtin) return;
+	app->close_on_start = false; // opened again before it had started: it's wanted after all
+	if (app->pid || app->pending) return;
 	// Xwayland admits only its own user until it's opened to the apps' (or their group)
 	if (app->x11 && !x_open && (apps_sandboxed() || getuid() == 0)) {
 		app->pending = true;
@@ -397,7 +401,15 @@ static int close_cb(void *data) {
 }
 
 void apps_close(struct sprite_app *a) {
-	if (a->builtin || a->pid <= 0) return;
+	if (a->builtin) return;
+	if (a->pid <= 0) {
+		// Not running yet: still starting (the helper, or waiting for X), it's stopped as soon
+		// as it is; due to be reopened (apps_restart), it isn't
+		if (a->pending) a->close_on_start = true;
+		if (a->restart_timer) wl_event_source_timer_update(a->restart_timer, 0);
+		a->reopening = false;
+		return;
+	}
 	a->closing = true;
 	a->close_stage = 0;
 	if (a->restart_timer) wl_event_source_timer_update(a->restart_timer, 0);

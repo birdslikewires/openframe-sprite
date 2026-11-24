@@ -115,13 +115,12 @@ static struct {
 	double calib[6];        // touch correction (see sprite.h)
 	bool calibrating;
 	// Display sleep (the shell decides when): the time of the last touch or key, whether the
-	// screen's asleep (a touch then only wakes it), and how many surfaces ask it not to sleep
-	// (idle-inhibit: a video playing, say; SDL asks for it, through Xwayland too)
+	// screen's asleep (a touch then only wakes it); surfaces asking it not to sleep (idle-inhibit:
+	// a video playing, say) are wlroots' list, counted only for the app on screen
 	uint64_t last_input_ms;
 	bool asleep;
 	bool covered; // the shell full screen over everything, an app's too (the screensaver)
 	struct sprite_app *saver; // a screensaver app: over everything once its window maps
-	int inhibitors;
 	struct wlr_idle_inhibit_manager_v1 *idle_inhibit;
 	struct wl_listener new_inhibitor;
 	struct wl_event_source *release_timer; // see SPRITE_DEBOUNCE_MS
@@ -152,7 +151,23 @@ static uint64_t mono_ms(void) {
 static void input_seen(void) { S.last_input_ms = mono_ms(); }
 
 uint64_t sprite_idle_ms(void) { return S.last_input_ms ? mono_ms() - S.last_input_ms : 0; }
-bool sprite_sleep_inhibited(void) { return S.inhibitors > 0; }
+// Idle is held off only by the app on screen (the protocol's "while its surface is visible"):
+// one left running behind the home screen (an SDL game: SDL asks by default, through Xwayland
+// too), or a screensaver app, doesn't keep the screen awake.
+bool sprite_sleep_inhibited(void) {
+	if (!S.fg || S.fg->saver) return false;
+	struct wlr_idle_inhibitor_v1 *in;
+	wl_list_for_each(in, &S.idle_inhibit->inhibitors, link) {
+		struct wlr_surface *root = in->surface ? wlr_surface_get_root_surface(in->surface) : NULL;
+		struct sprite_view *v;
+		wl_list_for_each(v, &S.views, link) {
+			if (!v->mapped || v->app != S.fg) continue;
+			struct wlr_surface *s = v->xdg ? v->xdg->base->surface : v->xw ? v->xw->surface : NULL;
+			if (s && s == root) return true;
+		}
+	}
+	return false;
+}
 void sprite_set_asleep(bool asleep) { S.asleep = asleep; }
 static void apply_foreground(void);
 // A screensaver app runs over the flip clock, which covers the screen while it starts (and
@@ -162,6 +177,7 @@ void sprite_saver_start(struct sprite_app *app) {
 	S.saver = app;
 	wlr_log(WLR_INFO, "screensaver %s", app->name);
 	if (app->pid == 0) apps_launch(app);
+	else if (app->closing) app->reopening = true; // still going from the last time: again once it's gone
 	apply_foreground();
 }
 void sprite_saver_end(void) {
@@ -193,7 +209,6 @@ static void inhibitor_destroy(struct wl_listener *l, void *data) {
 	struct inhibitor *in = wl_container_of(l, in, destroy);
 	wl_list_remove(&in->destroy.link);
 	free(in);
-	S.inhibitors--;
 	input_seen(); // the idle time counts from when it stopped (the film ended), not from long before
 }
 static void new_inhibitor(struct wl_listener *l, void *data) {
@@ -202,7 +217,6 @@ static void new_inhibitor(struct wl_listener *l, void *data) {
 	if (!in) return;
 	in->destroy.notify = inhibitor_destroy;
 	wl_signal_add(&w->events.destroy, &in->destroy);
-	S.inhibitors++;
 }
 
 /* ---- shell buffer: LVGL renders straight into this memory, the scene samples it ---- */
@@ -712,7 +726,7 @@ static void input_motion(double x, double y, uint32_t t) {
 		forward_to_app(x, y, t);
 		return;
 	default:
-		if (S.fg) forward_to_app(x, y, t);
+		if (S.fg && !S.covered && !S.asleep) forward_to_app(x, y, t); // no hover under the screensaver
 		else shell_pointer((int)x, (int)y, false);
 	}
 }
@@ -820,6 +834,10 @@ static void cursor_button(struct wl_listener *l, void *data) {
 }
 static void cursor_axis(struct wl_listener *l, void *data) {
 	struct wlr_pointer_axis_event *e = data;
+	input_seen();
+	// a wheel wakes the screen or ends the screensaver, as a press does, and goes no further
+	if (wake_on_input()) return;
+	if (S.covered) { shell_screensaver_tap(); return; }
 	if (S.fg) wlr_seat_pointer_notify_axis(S.seat, e->time_msec, e->orientation, e->delta,
 					       e->delta_discrete, e->source, e->relative_direction);
 }

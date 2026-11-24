@@ -308,7 +308,7 @@ case "$CMD" in
 			clock) RE='^(24h|12h)?$' ;;
 			seconds) RE='^(yes|no)?$' ;;
 			sleep|screensaver) RE='^(0|1|2|5|10|15|30|60)?$' ;;
-			saver) RE='^([a-z0-9][a-z0-9._-]{0,62})?$' ;;
+			saver) RE='^([A-Za-z0-9_][A-Za-z0-9_.-]{0,47})?$' ;; # an app's id (app-start's rule)
 			*) answer "error: unknown setting" ;;
 		esac
 		[[ "$VAL" =~ $RE ]] || answer "error: bad value for $KEY"

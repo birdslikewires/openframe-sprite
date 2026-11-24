@@ -1003,8 +1003,10 @@ static lv_obj_t *wifi_status_label;
 
 static void saver_show(void); // (Display: which screensaver)
 
+static bool unseen(void); // (the screensaver up, or the screen off: Settings' polling waits)
+
 static void refresh_settings(lv_timer_t *t) {
-	if (!visible) return;
+	if (!visible || unseen()) return;
 	if (showing(page_wifi)) { wifi_refresh(); return; }
 	if (showing(page_netinfo)) { netinfo_show(); return; }
 	if (!showing(page_settings)) return;
@@ -1897,7 +1899,7 @@ static void bl_limits_save(void) {
 // The level the backlight has now, by the heading, read four times a second while the
 // Display tab's in view: it follows the slider as it's dragged, and automatic brightness.
 static void bl_now_tick(lv_timer_t *t) {
-	if (!bl_now || !visible || !showing(page_settings) || settings_tab != TAB_DISPLAY) return;
+	if (!bl_now || !visible || unseen() || !showing(page_settings) || settings_tab != TAB_DISPLAY) return;
 	int b = sysinfo_backlight();
 	char s[16] = "";
 	if (b == 0) snprintf(s, sizeof s, STR_COMMON_OFF);
@@ -2631,7 +2633,7 @@ static void wifi_build_list(void) {
 	if (!wifi_ever_scanned) return;
 	if (!wifi_scanning) {
 		if (wifi_n) lv_obj_add_flag(wifi_note, LV_OBJ_FLAG_HIDDEN);
-		else if (!strncmp(lv_label_get_text(wifi_note), "Looking", 7)) lv_label_set_text(wifi_note, STR_WIFI_NONE_FOUND);
+		else if (!strcmp(lv_label_get_text(wifi_note), STR_WIFI_LOOKING)) lv_label_set_text(wifi_note, STR_WIFI_NONE_FOUND);
 	}
 	for (int i = 0; i < wifi_n; i++) {
 		const struct wifi_net *w = &wifi_nets[i];
@@ -3237,7 +3239,7 @@ static void aud_dac_show(void) {
 	// what it's playing: as it was opened (hw_params), or on an older kernel, as stream0 has it
 	bool playing = d.hw_known ? d.hw_rate > 0 : d.running && d.run_rate > 0;
 	int now_bits = d.hw_known ? d.hw_bits : d.run_bits, now_rate = d.hw_known ? d.hw_rate : d.run_rate;
-	const char *way = aud_direct ? STR_AUDIO_DAC_DIRECT : "mixed";
+	const char *way = aud_direct ? STR_AUDIO_DAC_DIRECT : STR_AUDIO_DAC_MIXED;
 	if (playing) {
 		char r[16];
 		rate_text(now_rate, r, sizeof r);
@@ -3254,7 +3256,7 @@ static void aud_dac_show(void) {
 }
 
 static void aud_dac_tick(lv_timer_t *t) {
-	if (visible && showing(page_settings) && settings_tab == TAB_AUDIO) aud_dac_show();
+	if (visible && !unseen() && showing(page_settings) && settings_tab == TAB_AUDIO) aud_dac_show();
 }
 
 static void aud_show(void) {
@@ -3662,7 +3664,7 @@ static void news_done(char *reply, void *data) {
 	lv_obj_clean(news_body);
 	if (strcmp(st, "ok")) {
 		lv_obj_t *l = lv_label_create(news_body);
-		lv_label_set_text(l, strncmp(st, "error: ", 7) ? STR_COMMON_CANT_TELL : st + 7);
+		lv_label_set_text(l, strncmp(st, "error: ", 7) ? STR_COMMON_CANT_TELL : reason_text(st));
 		return;
 	}
 	static char lines[256][200];
@@ -3993,7 +3995,7 @@ static void upd_status_done(char *reply, void *data) {
 	const char *st = helper_reply_status(reply);
 	if (!upd_status_label) return;
 	if (strcmp(st, "ok")) {
-		set_text(upd_status_label, strncmp(st, "error: ", 7) ? STR_COMMON_CANT_TELL : st + 7);
+		set_text(upd_status_label, strncmp(st, "error: ", 7) ? STR_COMMON_CANT_TELL : reason_text(st));
 		set_text(upd_detail_label, "");
 		show_if(upd_now_btn, false);
 		show_if(upd_restart_btn, false);
@@ -4317,6 +4319,8 @@ void shell_screensaver_tap(void) {
 }
 
 bool shell_clock_24(void) { return clock_24; }
+
+static bool unseen(void) { return sleeping || screensaver_active(); }
 
 // The rows in Display's brightness section: each its time, with a stepper
 static void idle_build(lv_obj_t *parent) {

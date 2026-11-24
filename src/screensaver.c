@@ -285,7 +285,7 @@ void screensaver_stop(void) {
 	for (int i = 0; i < 4; i++) {
 		lv_anim_delete(flaps[i].half[HALF_FLAP_TOP], fold_cb);
 		lv_anim_delete(flaps[i].half[HALF_FLAP_BOT], fold_cb);
-		flaps[i].now = ' ';
+		flaps[i].now = 0; // none: the next start sets every flap, a blank one too
 	}
 	shown_min = -1;
 	sprite_set_covered(false);

@@ -76,6 +76,7 @@ struct sprite_app {
 	// closing and restarting
 	bool closing;       // closed from the shell: don't restart it
 	bool reopening;     // closed to be opened again at once (apps_restart)
+	bool close_on_start; // closed while it was still starting: stopped once it's running
 	bool reopen_behind; // and its window to come back behind what's showing, not in front
 	int close_stage;
 	struct wl_event_source *close_timer, *restart_timer;

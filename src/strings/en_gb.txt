@@ -144,8 +144,9 @@ audio.dac.to =  to
 audio.dac.bits_either = %d or %d-bit
 # Now, with the bits. %d is the bits, then the rate, then how
 audio.dac.now = %d-bit at %s, %s
-# How it plays, direct
+# How it plays: direct, or mixed
 audio.dac.direct = direct to the DAC, unchanged
+audio.dac.mixed = mixed
 audio.dac.not_playing = not playing
 # A rate such as 44.1 kHz. %.1f is the number
 audio.rate.khz_frac = %.1f kHz
