@@ -6,7 +6,7 @@
 ##  starts one of these per connection to /run/sprite-helper.sock, with the connection
 ##  as stdin and stdout. It reads one request, answers "ok" or "error: <reason>", and
 ##  exits. A reason an owner may see is a key (helper.name_length, say), which Sprite shows
-##  as its text in src/text/en_gb.txt; the rest (about apps, or requests Sprite never makes)
+##  as its text in src/strings/en_gb.txt; the rest (about apps, or requests Sprite never makes)
 ##  are plain text. Requests:
 ##
 ##    set <key> <value>     set a setting in settings/sprite.txt (an empty value clears it):

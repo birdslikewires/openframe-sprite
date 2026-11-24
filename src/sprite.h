@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 #include <wayland-server-core.h>
-#include "text.h" // the on-screen text, TX_*: generated from src/text/en_gb.txt (Makefile)
+#include "sprite_strings.h" // the on-screen text, STR_*: generated from src/strings/en_gb.txt (Makefile)
 
 #ifndef SPRITE_VERSION // the package build sets it (package/version.sh)
 #define SPRITE_VERSION "dev"

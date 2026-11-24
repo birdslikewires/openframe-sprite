@@ -288,7 +288,7 @@ static void apply_foreground(void) {
 static int hold_timeout(void *data) {
 	if (!S.hold) return 0;
 	char s[128];
-	snprintf(s, sizeof s, TX_APP_DIDNT_OPEN, S.hold->name);
+	snprintf(s, sizeof s, STR_APP_DIDNT_OPEN, S.hold->name);
 	wlr_log(WLR_ERROR, "%s", s);
 	S.hold = NULL;
 	apply_foreground();

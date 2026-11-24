@@ -6,16 +6,16 @@ export PKG_CONFIG_PATH := $(PREFIX)/lib/i386-linux-gnu/pkgconfig:$(PREFIX)/lib/p
 CC ?= cc
 CFLAGS ?= -O2 -g -march=atom
 VERSION ?= dev
-# -Werror=format: a message in src/text whose placeholders don't match the code stops the build.
+# -Werror=format: a message in src/strings whose placeholders don't match the code stops the build.
 CFLAGS += -DSPRITE_VERSION=\"$(VERSION)\" -std=gnu11 -Wall -Werror=format -Wno-unused-parameter -DWLR_USE_UNSTABLE -DLV_CONF_INCLUDE_SIMPLE \
 	-Isrc -Ithird_party -Ithird_party/lvgl -Ibuild/gen $(shell pkg-config --cflags $(PKGS))
 LDLIBS = $(shell pkg-config --libs $(PKGS)) -lpthread -lm
 LDFLAGS += -Wl,-rpath,$(PREFIX)/lib/i386-linux-gnu
 
-# The on-screen text: src/text/en_gb.txt, and another language's changes to it with
-# TEXT_LANG=<its file's name> (src/text/en_us.txt, say).
-TEXT_LANG ?= en_gb
-TEXT_SRC = src/text/en_gb.txt $(if $(filter-out en_gb,$(TEXT_LANG)),src/text/$(TEXT_LANG).txt)
+# The on-screen text: src/strings/en_gb.txt, and another language's changes to it with
+# STRINGS_LANG=<its file's name> (src/strings/en_us.txt, say).
+STRINGS_LANG ?= en_gb
+STRINGS_SRC = src/strings/en_gb.txt $(if $(filter-out en_gb,$(STRINGS_LANG)),src/strings/$(STRINGS_LANG).txt)
 
 SRC = src/main.c src/shell.c src/apps.c src/sysinfo.c src/settings.c src/wifi.c src/audio.c src/icons_40.c src/ui_icons.c
 LVGL_SRC = $(shell find third_party/lvgl/src -name '*.c' 2>/dev/null)
@@ -28,7 +28,7 @@ out/sprite: $(OBJ) $(LVGL_OBJ)
 	@echo link $@
 	@$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
-out/obj/src/%.o: src/%.c src/sprite.h src/lv_conf.h build/gen/xdg-shell-protocol.h build/gen/text.h
+out/obj/src/%.o: src/%.c src/sprite.h src/lv_conf.h build/gen/xdg-shell-protocol.h build/gen/sprite_strings.h
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -36,10 +36,10 @@ out/obj/third_party/%.o: third_party/%.c src/lv_conf.h
 	@mkdir -p $(dir $@)
 	@$(CC) $(CFLAGS) -w -c $< -o $@
 
-build/gen/text.h: $(TEXT_SRC) scripts/make-text.awk scripts/check-text.sh system/sprite-helper
+build/gen/sprite_strings.h: $(STRINGS_SRC) scripts/make-strings.awk scripts/check-strings.sh system/sprite-helper
 	@mkdir -p build/gen
-	sh scripts/check-text.sh
-	awk -f scripts/make-text.awk $(TEXT_SRC) > $@.new && mv $@.new $@
+	sh scripts/check-strings.sh
+	awk -f scripts/make-strings.awk $(STRINGS_SRC) > $@.new && mv $@.new $@
 
 # wlroots' xdg-shell header includes the server protocol header, which we generate.
 WP = $(shell pkg-config --variable=pkgdatadir wayland-protocols)

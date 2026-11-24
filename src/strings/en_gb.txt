@@ -10,7 +10,7 @@
 #   - Lines starting with # are notes, and Sprite ignores them.
 #
 # Another language goes in a file of its own beside this one (en_us.txt, say), with only the
-# messages it changes; the rest come from here. Build with it as TEXT_LANG=en_us.
+# messages it changes; the rest come from here. Build with it as STRINGS_LANG=en_us.
 #
 # Dates and the clock (Mon 24 Nov, 2:15 pm) come from the system, not this file. So do the
 # notes for updates, which come with each package.

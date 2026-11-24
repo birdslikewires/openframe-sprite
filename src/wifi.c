@@ -13,7 +13,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include <wayland-server-core.h>
-#define SPRITE_TEXT_HELPER // text_helper[], for helper_reason()
+#define SPRITE_STRINGS_HELPER // strings_helper[], for helper_reason()
 #include "sprite.h"
 
 #define REPLY_MAX 16384
@@ -89,12 +89,12 @@ const char *helper_reply_status(char *reply) {
 }
 
 // A reply's "error: <reason>" as a sentence to show: a key (helper.name_length) as its text
-// in en_gb.txt, anything else as it is, less "error: ".
+// in src/strings/en_gb.txt, anything else as it is, less "error: ".
 const char *helper_reason(const char *st) {
 	const char *r = strncmp(st, "error: ", 7) ? st : st + 7;
 	if (!strncmp(r, "helper.", 7))
-		for (size_t i = 0; i < sizeof text_helper / sizeof text_helper[0]; i++)
-			if (!strcmp(r, text_helper[i].key)) return text_helper[i].text;
+		for (size_t i = 0; i < sizeof strings_helper / sizeof strings_helper[0]; i++)
+			if (!strcmp(r, strings_helper[i].key)) return strings_helper[i].text;
 	return r;
 }
 
