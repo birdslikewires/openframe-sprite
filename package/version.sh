@@ -8,7 +8,7 @@
 # gives a new version.
 
 [ "${1:-}" = --news ] && NEWS=1
-paths=(src apps/settings.app build package system settings Makefile scripts/fetch-lvgl.sh .github/workflows/package.yml)
+paths=(src apps/settings.app build package system settings Makefile scripts/fetch-lvgl.sh scripts/make-text.awk scripts/check-text.sh .github/workflows/package.yml)
 EPOCH=""
 # With --news: the owners' notes instead, from the "News:" trailers of the commits that made
 # each version, newest first, a line each: the version, a tab, the note. A commit may carry

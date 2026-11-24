@@ -469,23 +469,17 @@ void sysinfo_summary(char *buf, size_t len) {
 	struct sprite_net n;
 	sysinfo_net(&n);
 	char wifi[96];
-	const char *wstate = n.wifi_ip[0] ? n.wifi_ip : n.wifi_up ? "connected, no address" : "not connected";
+	const char *wstate = n.wifi_ip[0] ? n.wifi_ip : n.wifi_up ? TX_ABOUT_NO_ADDRESS : TX_ABOUT_NOT_CONNECTED;
 	static const char *strength[] = { "", "weak", "fair", "good", "excellent" };
 	if (n.wifi_ip[0] && n.wifi_dbm < 0)
-		snprintf(wifi, sizeof wifi, "%s, signal %s", wstate, strength[wifi_level(n.wifi_dbm)]);
+		snprintf(wifi, sizeof wifi, TX_ABOUT_WIFI_SIGNAL, wstate, strength[wifi_level(n.wifi_dbm)]);
 	else snprintf(wifi, sizeof wifi, "%s", wstate);
 	snprintf(buf, len,
-		 "Ethernet: %s\n"
-		 "Wi-Fi: %s\n"
-		 "Memory: %ld MB free of %ld MB\n"
-		 "Storage: %ld MB free\n"
-		 "Up: %dh %02dm\n"
-		 "Kernel: %s\n"
-		 "Sprite: %s%s",
-		 n.eth_ip[0] ? n.eth_ip : n.eth_up ? "connected, no address" : "not connected",
+		 TX_ABOUT_SUMMARY,
+		 n.eth_ip[0] ? n.eth_ip : n.eth_up ? TX_ABOUT_NO_ADDRESS : TX_ABOUT_NOT_CONNECTED,
 		 wifi, mem_avail / 1024, mem_total / 1024, root_free, up / 3600, (up / 60) % 60, u.release,
 		 SPRITE_VERSION,
 		 // a test unit (OF-BOOT/settings/test.txt): openframe-linux's test-settings writes this list
 		 access("/etc/apt/sources.list.d/openframe-testing.list", F_OK) == 0
-			 ? "\nTest unit: updates before they're released" : "");
+			 ? TX_ABOUT_TEST_UNIT : "");
 }

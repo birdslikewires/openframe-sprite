@@ -5,7 +5,9 @@
 ##  Does the few things sprite (which runs as its own user, sprite) can't do itself. systemd
 ##  starts one of these per connection to /run/sprite-helper.sock, with the connection
 ##  as stdin and stdout. It reads one request, answers "ok" or "error: <reason>", and
-##  exits. Requests:
+##  exits. A reason an owner may see is a key (helper.name_length, say), which Sprite shows
+##  as its text in src/text/en_gb.txt; the rest (about apps, or requests Sprite never makes)
+##  are plain text. Requests:
 ##
 ##    set <key> <value>     set a setting in settings/sprite.txt (an empty value clears it):
 ##                            startup (an app name), calibration (six numbers), clock
@@ -105,7 +107,7 @@ answer() { echo "$*"; exit 0; }
 # open it with bootrw, and replace the file with a synced copy, so a power cut leaves the
 # old file or the new one.
 boot_write() {
-	/usr/lib/openframe/bootrw open || answer "error: /boot can't be made writable"
+	/usr/lib/openframe/bootrw open || answer "error: helper.boot_readonly"
 	mkdir -p "${2%/*}" && sync && cp "$1" "$2.new" && sync && mv -f "$2.new" "$2" && sync
 	local OK=$?
 	/usr/lib/openframe/bootrw close
@@ -168,10 +170,10 @@ wifi_write() {
 		END {
 			if (!dn) print line("name", ENVIRON["N"])
 			if (!dp) print line("password", ENVIRON["P"])
-		}' "$NEW" > "$NEW.2" && mv "$NEW.2" "$NEW" || answer "error: preparing wifi.txt failed"
+		}' "$NEW" > "$NEW.2" && mv "$NEW.2" "$NEW" || answer "error: helper.preparing_wifi"
 	chmod 600 "$NEW"
 	boot_write "$NEW" "$WIFITXT"
-	systemctl --no-block start of-netplan.service || answer "error: of-netplan didn't start"
+	systemctl --no-block start of-netplan.service || answer "error: helper.netplan"
 }
 
 # An app's manifest: the first directory to have the id wins, as in sprite.
@@ -327,7 +329,7 @@ case "$CMD" in
 		answer ok
 		;;
 	wifi-scan)
-		IF=$(wifi_if) || answer "error: no Wi-Fi"
+		IF=$(wifi_if) || answer "error: helper.no_wifi"
 		CTRL="$WPACTRL"
 		if [ ! -S "$CTRL/$IF" ]; then
 			# No wpa_supplicant running for it (no network set up): start one of our own
@@ -338,7 +340,7 @@ case "$CMD" in
 			PIDF="/run/sprite-helper-wpa.pid"
 			trap 'kill "$(cat "$PIDF" 2>/dev/null)" 2>/dev/null; rm -f "$CONF" "$PIDF"' EXIT
 			wpa_supplicant -B -q -i "$IF" -c "$CONF" -P "$PIDF" >/dev/null 2>&1 ||
-				answer "error: wpa_supplicant didn't start"
+				answer "error: helper.wpa"
 			for _ in 1 2 3 4 5 6 7 8 9 10; do [ -S "$CTRL/$IF" ] && break; sleep 0.2; done
 		fi
 		wpa_cli -p "$CTRL" -i "$IF" scan >/dev/null 2>&1
@@ -354,7 +356,7 @@ case "$CMD" in
 		answer ok
 		;;
 	wifi-status)
-		IF=$(wifi_if) || answer "error: no Wi-Fi"
+		IF=$(wifi_if) || answer "error: helper.no_wifi"
 		echo "interface=$IF"
 		SAVED=$(wifi_txt_get name)
 		echo "saved=${SAVED//$'\n'/}"
@@ -368,17 +370,17 @@ case "$CMD" in
 		answer ok
 		;;
 	wifi-join)
-		wifi_if >/dev/null || answer "error: no Wi-Fi"
-		IFS= read -r -t 5 NAME || answer "error: no network name"
+		wifi_if >/dev/null || answer "error: helper.no_wifi"
+		IFS= read -r -t 5 NAME || answer "error: helper.no_network_name"
 		IFS= read -r -t 5 PASS || [ -n "$PASS" ] || PASS=""
 		# A name of 1-32 bytes and a password that of-netplan will take (8-63 characters,
 		# or 64 hex digits, or none for an open network), neither with control characters,
 		# which would break the file's lines.
 		export LC_ALL=C
-		(( ${#NAME} >= 1 && ${#NAME} <= 32 )) || answer "error: the network name must be 1 to 32 characters"
-		[[ "$NAME$PASS" =~ [[:cntrl:]] ]] && answer "error: control characters aren't allowed"
+		(( ${#NAME} >= 1 && ${#NAME} <= 32 )) || answer "error: helper.network_name_length"
+		[[ "$NAME$PASS" =~ [[:cntrl:]] ]] && answer "error: helper.control_chars"
 		[ -z "$PASS" ] || (( ${#PASS} >= 8 && ${#PASS} <= 63 )) || [[ "$PASS" =~ ^[0-9a-fA-F]{64}$ ]] ||
-			answer "error: the password must be 8 to 63 characters"
+			answer "error: helper.wifi_password_length"
 		wifi_write "$NAME" "$PASS"
 		answer ok
 		;;
@@ -416,22 +418,22 @@ case "$CMD" in
 		answer ok
 		;;
 	ssh-password)
-		IFS= read -r -t 5 PASS || answer "error: no password"
+		IFS= read -r -t 5 PASS || answer "error: helper.no_password"
 		export LC_ALL=C
-		(( ${#PASS} >= 8 && ${#PASS} <= 64 )) || answer "error: the password must be 8 to 64 characters"
-		[[ "$PASS" =~ [[:cntrl:]] ]] && answer "error: control characters aren't allowed"
-		printf 'of:%s\n' "$PASS" | chpasswd || answer "error: the password couldn't be set"
+		(( ${#PASS} >= 8 && ${#PASS} <= 64 )) || answer "error: helper.ssh_password_length"
+		[[ "$PASS" =~ [[:cntrl:]] ]] && answer "error: helper.control_chars"
+		printf 'of:%s\n' "$PASS" | chpasswd || answer "error: helper.password_not_set"
 		unset PASS
 		# The SSH server waits for a way in (openframe-linux's ssh.service.d): there is one now.
 		systemctl --no-block start ssh.service 2>/dev/null
 		answer ok
 		;;
 	name-set)
-		IFS= read -r -t 5 NAME || answer "error: no name"
-		[ -x /usr/lib/openframe/name-settings ] || answer "error: this system can't be named until it's updated"
+		IFS= read -r -t 5 NAME || answer "error: helper.no_name"
+		[ -x /usr/lib/openframe/name-settings ] || answer "error: helper.name_needs_update"
 		export LC_ALL=C.UTF-8
-		(( ${#NAME} <= 64 )) || answer "error: the name must be 64 characters or fewer"
-		[[ "$NAME" =~ [[:cntrl:]] ]] && answer "error: control characters aren't allowed"
+		(( ${#NAME} <= 64 )) || answer "error: helper.name_length"
+		[[ "$NAME" =~ [[:cntrl:]] ]] && answer "error: helper.control_chars"
 		NEW=$(mktemp) || answer "error: no temporary file"
 		trap 'rm -f "$NEW"' EXIT
 		if [ -f "$NAMETXT" ]; then cp "$NAMETXT" "$NEW"
@@ -446,13 +448,13 @@ case "$CMD" in
 				if (tolower(k) == "name") { if (!done) print line(ENVIRON["N"]); done = 1; next }
 			}
 			{ print }
-			END { if (!done) print line(ENVIRON["N"]) }' "$NEW" > "$NEW.2" && mv "$NEW.2" "$NEW" || answer "error: preparing name.txt failed"
+			END { if (!done) print line(ENVIRON["N"]) }' "$NEW" > "$NEW.2" && mv "$NEW.2" "$NEW" || answer "error: helper.preparing_name"
 		boot_write "$NEW" "$NAMETXT"
-		/usr/lib/openframe/name-settings >/dev/null 2>&1 || answer "error: the name couldn't be applied"
+		/usr/lib/openframe/name-settings >/dev/null 2>&1 || answer "error: helper.name_not_applied"
 		answer ok
 		;;
 	audio-status|audio-set|audio-store)
-		[ -x /usr/local/sbin/of-audio ] || answer "error: this system can't choose its sound output until it's updated"
+		[ -x /usr/local/sbin/of-audio ] || answer "error: helper.audio_needs_update"
 		case "$CMD" in
 			audio-status) /usr/local/sbin/of-audio status 2>/dev/null ;;
 			audio-store) /usr/local/sbin/of-audio store ;;
@@ -465,13 +467,13 @@ case "$CMD" in
 					ARGS+=("$kv")
 				done
 				(( ${#ARGS[@]} )) || answer "error: nothing to set"
-				/usr/local/sbin/of-audio set "${ARGS[@]}" >/dev/null 2>&1 || answer "error: the sound output couldn't be changed"
+				/usr/local/sbin/of-audio set "${ARGS[@]}" >/dev/null 2>&1 || answer "error: helper.audio_not_changed"
 				;;
 		esac
 		answer ok
 		;;
 	ssh-off)
-		usermod -p '*' of || answer "error: the password couldn't be removed"
+		usermod -p '*' of || answer "error: helper.password_not_removed"
 		rm -f "$(getent passwd of | cut -d: -f6)"/.ssh/authorized_keys{,2} /root/.ssh/authorized_keys{,2}
 		if [ -f "$SSHTXT" ] && grep -qiE '^[[:space:]]*key[[:space:]]*=[[:space:]]*[^[:space:]]' "$SSHTXT"; then
 			NEW=$(mktemp) || answer "error: no temporary file"
@@ -481,7 +483,7 @@ case "$CMD" in
 					k = substr($0, 1, index($0, "=") - 1); gsub(/[[:space:]]/, "", k)
 					if (tolower(k) == "key") { if (!done) print "key="; done = 1; next }
 				}
-				{ print }' "$SSHTXT" > "$NEW" || answer "error: preparing ssh.txt failed"
+				{ print }' "$SSHTXT" > "$NEW" || answer "error: helper.preparing_ssh"
 			boot_write "$NEW" "$SSHTXT"
 		fi
 		# The server, and the sessions it started (which outlive it: each is its own process)
@@ -490,54 +492,54 @@ case "$CMD" in
 		answer ok
 		;;
 	update-status)
-		[ -x /usr/local/sbin/of-update ] || answer "error: this system doesn't update itself"
+		[ -x /usr/local/sbin/of-update ] || answer "error: helper.no_updates"
 		/usr/local/sbin/of-update status
 		answer ok
 		;;
 	update-check|update-now)
-		[ -x /usr/local/sbin/of-update ] || answer "error: this system doesn't update itself"
+		[ -x /usr/local/sbin/of-update ] || answer "error: helper.no_updates"
 		if [ "$CMD" = update-now ]; then
-			systemctl --no-block start of-update@now.service || answer "error: the update didn't start"
+			systemctl --no-block start of-update@now.service || answer "error: helper.update_not_started"
 		else
 			systemd-run --no-block --quiet --collect --unit=of-update-check -p Nice=10 -p IOSchedulingClass=idle \
-				/usr/local/sbin/of-update check >/dev/null 2>&1 || answer "error: the check didn't start"
+				/usr/local/sbin/of-update check >/dev/null 2>&1 || answer "error: helper.check_not_started"
 		fi
 		answer ok
 		;;
 	update-time)
 		[[ "$ARG" =~ ^([01][0-9]|2[0-3]):00$ ]] || answer "error: update-time HH:00"
 		grep -q "set-time" /usr/local/sbin/of-update 2>/dev/null ||
-			answer "error: this system's updates can't be moved yet (its openframe-scripts is too old)"
-		/usr/local/sbin/of-update set-time "$ARG" >/dev/null 2>&1 || answer "error: the time couldn't be saved"
+			answer "error: helper.update_time_needs_update"
+		/usr/local/sbin/of-update set-time "$ARG" >/dev/null 2>&1 || answer "error: helper.time_not_saved"
 		answer ok
 		;;
 	backlight-settings)
-		/usr/local/bin/of-backlight settings 2>/dev/null || answer "error: no brightness settings here"
+		/usr/local/bin/of-backlight settings 2>/dev/null || answer "error: helper.no_brightness"
 		answer ok
 		;;
 	backlight-set)
 		[[ "$ARG" =~ ^([0-9]{1,3})\ ([0-9]{1,3})\ ([0-9]{1,4})$ ]] || answer "error: backlight-set <min> <max> <off_below>"
 		grep -q "of-backlight set" /usr/local/bin/of-backlight 2>/dev/null ||
-			answer "error: this system's brightness limits can't be changed yet (its openframe-scripts is too old)"
+			answer "error: helper.brightness_needs_update"
 		/usr/local/bin/of-backlight set "min=${BASH_REMATCH[1]}" "max=${BASH_REMATCH[2]}" "off_below=${BASH_REMATCH[3]}" >/dev/null 2>&1 ||
-			answer "error: the brightness settings couldn't be saved"
+			answer "error: helper.brightness_not_saved"
 		answer ok
 		;;
 	update-news)
-		[ -x /usr/local/sbin/of-update ] || answer "error: this system doesn't update itself"
+		[ -x /usr/local/sbin/of-update ] || answer "error: helper.no_updates"
 		/usr/local/sbin/of-update news
 		answer ok
 		;;
 	factory-reset)
-		[ -x /usr/local/sbin/of-reset ] || answer "error: this system can't be erased from here (its openframe-scripts is too old)"
+		[ -x /usr/local/sbin/of-reset ] || answer "error: helper.erase_needs_update"
 		systemd-run --no-block --quiet --collect --unit=of-reset /usr/local/sbin/of-reset --yes >/dev/null 2>&1 ||
-			answer "error: the erase didn't start"
+			answer "error: helper.erase_not_started"
 		answer ok
 		;;
 	after-update)
 		case "$ARG" in reboot|poweroff) ;; *) answer "error: after-update reboot or poweroff" ;; esac
 		systemd-run --no-block --quiet --collect --unit=of-update-after /usr/local/sbin/of-update after "$ARG" >/dev/null 2>&1 ||
-			answer "error: couldn't wait for the update"
+			answer "error: helper.cant_wait"
 		answer ok
 		;;
 	*)

@@ -18,6 +18,8 @@ on:
       - 'settings/**'
       - 'Makefile'
       - 'scripts/fetch-lvgl.sh'
+      - 'scripts/make-text.awk'
+      - 'scripts/check-text.sh'
       - '.github/workflows/package.yml'
   workflow_dispatch:
 

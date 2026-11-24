@@ -141,6 +141,21 @@ CI (`.github/workflows/package.yml`) builds the package on every change to what 
 installs it on a clean Trixie with the OpenFrame repository to test it, and publishes a
 release. The version is year.month.N (`package/version.sh`).
 
+## On-screen text
+
+Everything Sprite says on screen is in [src/text/en_gb.txt](src/text/en_gb.txt), one message a
+line (`key = text`), each with a note saying where it appears, so wording can be changed without
+touching the C. The build turns it into `build/gen/text.h` (`scripts/make-text.awk`), a
+`#define TX_<KEY> "text"` for each, so the code still gets string literals and the compiler
+checks every `printf`-style use against the message's placeholders (`-Werror=format`): a
+`%s` changed to `%d`, or one left out, stops the build. `scripts/check-text.sh` checks that every
+message is used. sprite-helper's reasons for refusing something (`helper.*`) are in the file too:
+the helper sends the key, and Sprite shows its text.
+
+Another language, or another English, is a file of its own beside it (`en_us.txt`, say) with
+only the messages it changes, built with `make TEXT_LANG=en_us`. Its placeholders must match
+en_gb's. Dates and the clock come from the system, not the file.
+
 ## What's new: notes for owners
 
 A commit that owners should hear about says so in a `News:` trailer, a plain sentence about

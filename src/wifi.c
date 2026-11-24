@@ -13,6 +13,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include <wayland-server-core.h>
+#define SPRITE_TEXT_HELPER // text_helper[], for helper_reason()
 #include "sprite.h"
 
 #define REPLY_MAX 16384
@@ -76,7 +77,7 @@ void helper_request(const char *text, void (*done)(char *reply, void *ctx), void
 
 // The reply's last line: "ok", or "error: <reason>". The lines before it are the answer.
 const char *helper_reply_status(char *reply) {
-	if (!reply) return "error: Sprite's helper isn't running";
+	if (!reply) return "error: helper.not_running";
 	size_t n = strlen(reply);
 	while (n && reply[n - 1] == '\n') reply[--n] = 0;
 	char *last = strrchr(reply, '\n');
@@ -85,6 +86,16 @@ const char *helper_reply_status(char *reply) {
 	snprintf(only, sizeof only, "%s", reply);
 	reply[0] = 0;
 	return only;
+}
+
+// A reply's "error: <reason>" as a sentence to show: a key (helper.name_length) as its text
+// in en_gb.txt, anything else as it is, less "error: ".
+const char *helper_reason(const char *st) {
+	const char *r = strncmp(st, "error: ", 7) ? st : st + 7;
+	if (!strncmp(r, "helper.", 7))
+		for (size_t i = 0; i < sizeof text_helper / sizeof text_helper[0]; i++)
+			if (!strcmp(r, text_helper[i].key)) return text_helper[i].text;
+	return r;
 }
 
 // wpa_supplicant writes SSIDs with \\, \", \e, \n, \r, \t and \xNN escapes: undo them.

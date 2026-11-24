@@ -188,7 +188,7 @@ struct sprite_app *apps_for_pid(pid_t pid) {
 	struct sprite_app *a = &apps[n_apps++];
 	memset(a, 0, sizeof *a);
 	snprintf(a->id, sizeof a->id, "pid-%d", pid);
-	snprintf(a->name, sizeof a->name, "Window %d", pid);
+	snprintf(a->name, sizeof a->name, TX_APP_WINDOW, pid);
 	a->hidden = true;
 	a->pid = pid;
 	a->pidfd = -1;
@@ -277,7 +277,7 @@ static void launched(char *reply, void *data) {
 	if (strcmp(st, "ok") || sscanf(reply, "pid %d", &pid) != 1 || pid <= 1) {
 		wlr_log(WLR_ERROR, "%s didn't start: %s", a->name, st);
 		char s[160];
-		snprintf(s, sizeof s, "%s couldn't be opened", a->name);
+		snprintf(s, sizeof s, TX_APP_COULDNT_OPEN, a->name);
 		shell_notice(s);
 		exited(a);
 		shell_apps_changed();
@@ -419,7 +419,7 @@ static void exited(struct sprite_app *a) {
 	if (!a->quick_exits || now - a->first_exit_ms > 60000) { a->quick_exits = 0; a->first_exit_ms = now; }
 	if (++a->quick_exits >= 3) {
 		char s[128];
-		snprintf(s, sizeof s, "%s keeps closing, so it won't be reopened for now", a->name);
+		snprintf(s, sizeof s, TX_APP_KEEPS_CLOSING, a->name);
 		sprite_hold_for(NULL);
 		shell_notice(s);
 		wlr_log(WLR_ERROR, "%s exited 3 times in a minute; not reopening", a->name);

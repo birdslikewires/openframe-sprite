@@ -1,0 +1,554 @@
+# Sprite's on-screen text, in British English (en_gb).
+#
+# Each message is a line of its own:  key = text
+#   - The key is how Sprite's code finds the message: leave it as it is.
+#   - The text is everything after the first "=", less the spaces around it.
+#   - \n starts a new line within a message; it's the only use of a backslash.
+#   - %s, %d and the like are where Sprite puts something in (a name, a number). Keep each
+#     one, in the same order: the build checks them against the code and stops if they
+#     don't match. %% is a percent sign.
+#   - Lines starting with # are notes, and Sprite ignores them.
+#
+# Another language goes in a file of its own beside this one (en_us.txt, say), with only the
+# messages it changes; the rest come from here. Build with it as TEXT_LANG=en_us.
+#
+# Dates and the clock (Mon 24 Nov, 2:15 pm) come from the system, not this file. So do the
+# notes for updates, which come with each package.
+
+
+## Shared buttons and words
+# Used in many places: a change here changes them all.
+
+# The button that closes a message
+common.ok = OK
+# The button that backs out of a question
+common.cancel = Cancel
+# The button that closes a message about a network
+common.close = Close
+# The button that keeps a change
+common.save = Save
+# The button that tries something again
+common.try_again = Try again
+# A detail with nothing to show
+common.none = None
+# A status that couldn't be read
+common.cant_tell = Can't tell
+# Beside a heading: the backlight or the volume at nothing
+common.off = OFF
+# Beside a heading: the level now. %d is the level; %% is a percent sign
+common.now_percent = NOW %d%%
+
+## The bar and page titles
+
+# Settings, in the bar
+title.settings = Settings
+# The Wi-Fi pages, in the bar
+title.wifi = Wi-Fi
+# Ethernet's details, in the bar
+title.ethernet = Ethernet
+# An update's notes, in the bar
+title.whats_new = What's new
+# The back button from Settings
+back.home = Home
+# The back button to Settings
+back.settings = Settings
+# The back button to the Wi-Fi networks
+back.wifi = Wi-Fi
+
+## Apps
+
+# Toast as an app opens. %s is its name
+app.opening = Opening %s...
+# Toast as an app closes. %s is its name
+app.closing = Closing %s...
+# Toast when an app has closed. %s is its name
+app.closed = %s closed
+# Button on the touch-and-hold sheet
+app.open = Open
+# Button on the touch-and-hold sheet
+app.close = Close
+# Switch on the touch-and-hold sheet
+app.open_at_startup = Open at startup
+# Under that switch
+app.open_at_startup_note = Choose this app to launch automatically at startup.
+# Toast when an app won't start. %s is its name
+app.couldnt_open = %s couldn't be opened
+# Toast when an app keeps failing. %s is its name
+app.keeps_closing = %s keeps closing, so it won't be reopened for now
+# A window's title when it has none. %d is its number
+app.window = Window %d
+# Toast when an app's program wasn't there. %s is its name
+app.didnt_open = %s didn't open
+
+## Settings tabs
+
+tab.audio = Audio
+tab.display = Display
+tab.network = Network
+tab.updates = Updates
+tab.about = About
+tab.power = Power
+
+## Audio
+
+# Heading
+audio.head.output = OUTPUT
+# Heading
+audio.head.volume = VOLUME
+# The OpenFrame's own output, in the list
+audio.builtin = Speaker and headphones
+# Beside a DAC in the list
+audio.usb = USB
+# When there are none
+audio.no_cards = No sound cards
+# The button, and what it says as it plays
+audio.test = Test sound
+audio.test.left = Left...
+audio.test.right = Right...
+audio.test.both = Both...
+# Beside the button
+audio.test.note = Left, then right, then both
+# Toast when the test sound can't play in direct mode
+audio.test.busy = The DAC is busy: something else is playing to it
+# Toast when the test sound can't play
+audio.test.failed = The test sound couldn't play
+# The switch
+audio.direct = Direct to DAC
+# Note when asound.conf is the owner's own
+audio.note.by_hand = Sound is set up by hand on this OpenFrame (an asound.conf of its own), so it's left as it is.
+# Note under Direct to DAC, on
+audio.note.direct_on = The DAC gets the audio as it is: nothing mixed in, nothing resampled. Set the volume on your amplifier. One app can play at a time.
+# Note under Direct to DAC, off
+audio.note.direct_off = Turn this on to send the DAC the audio untouched, and set the volume on your amplifier.
+# Note when no DAC is plugged in
+audio.note.plug_in = Plug in a USB DAC and the sound goes there.
+# The switch
+audio.rate = Mix at 48 kHz
+# Under that switch
+audio.rate.note = Most music is made at 44.1 kHz, so that's what OpenFrame mixes at. Turn this on if you mostly watch video, which is usually 48 kHz.
+# Toast when the output changes. %s is its name
+audio.playing_through = Playing through %s
+# Title when the output couldn't be changed
+audio.not_changed = The sound output wasn't changed
+# A DAC's connection, in its section
+audio.dac.usb2 = USB 2.0 high speed (480 Mbit/s)
+audio.dac.usb1 = USB full speed (12 Mbit/s)
+audio.dac.usb3 = USB 3 (5 Gbit/s)
+# A DAC's section, a line of its own (starts with \n)
+audio.dac.async = \nAsynchronous: the DAC sets the clock
+# A DAC's section: its connection, the async line (if any), then "Takes" the bits and the lowest rate, " to " and the highest (if they differ), then "Now:" what it's playing
+audio.dac.lines = %s%s\nTakes %s, %s%s%s\nNow: %s
+# Between the lowest and highest rate
+audio.dac.to =  to 
+# What it takes. %d and %d are the bits
+audio.dac.bits_either = %d or %d-bit
+# Now, with the bits. %d is the bits, then the rate, then how
+audio.dac.now = %d-bit at %s, %s
+# How it plays, direct
+audio.dac.direct = direct to the DAC, unchanged
+audio.dac.not_playing = not playing
+# A rate such as 44.1 kHz. %.1f is the number
+audio.rate.khz_frac = %.1f kHz
+# A rate such as 48 kHz. %d is the number
+audio.rate.khz = %d kHz
+
+## Display
+
+# Heading
+display.head.brightness = BRIGHTNESS
+# The automatic brightness switch
+display.auto = Auto
+display.auto.note = Automatic brightness follows the room, between the two ends of the slider.
+# Switch
+display.dark_off = Screen off in the dark
+# Title when brightness couldn't be changed
+display.not_changed = Brightness not changed
+# Heading
+display.head.touch = TOUCH
+# Button
+display.calibrate = Calibrate touch
+# Button
+display.calibrate.reset = Reset
+# On the calibration screen. %d of %d crosses
+display.calibrate.tap = Tap the centre of the cross (%d of %d)
+# Title over the calibration's result
+display.calibrate.title = Touch calibration
+# Its result. Average then worst distance before, then with the new calibration
+display.calibrate.result = Touches were landing %.0f px from the crosses on average, %.0f at worst. With this calibration, %.0f px, %.0f at worst.
+# Button
+display.calibrate.again = Again
+# Button
+display.calibrate.save = Save
+# Title when a calibration doesn't look right
+display.calibrate.bad = That didn't look right
+display.calibrate.bad.note = One of the taps was probably off its cross. Nothing has changed.
+# Toast
+display.calibrate.saved = Touch calibration saved
+# Toast
+display.calibrate.was_reset = Touch calibration reset
+# Heading
+display.head.clock = CLOCK
+# Switch
+display.clock24 = 24-hour clock
+# Switch
+display.seconds = Show seconds
+
+## Network: Wi-Fi
+
+# Heading
+net.head.wifi = WI-FI
+# Heading
+net.head.ethernet = ETHERNET
+# Status. %s is the network
+wifi.connected_to = Connected to %s
+wifi.cant_connect_to = Can't connect to %s
+wifi.connecting_to = Connecting to %s...
+wifi.not_connected_to = Not connected to %s
+# Status, and in the welcome
+wifi.not_connected = Not connected
+# Button
+wifi.choose = Choose network
+# Button
+wifi.forget = Forget
+# Title. %s is the network
+wifi.couldnt_connect = Couldn't connect to %s
+wifi.couldnt_connect.note = The password may be wrong, or the network out of reach. The OpenFrame keeps trying while it's saved.
+# Title. %s is the network
+wifi.couldnt_join = Couldn't join %s
+# Title
+wifi.couldnt_forget = Couldn't forget the network
+# Toast. %s is the network
+wifi.forgot = Forgot %s
+# Title. %s is the network
+wifi.forget_ask = Forget %s?
+wifi.forget_ask.note = The OpenFrame won't join it again until it's chosen again.
+# Status. %s is why
+wifi.couldnt_look = Couldn't look for networks: %s
+# Status
+wifi.looking = Looking for networks...
+wifi.none_found = No networks found.
+# The network in use. %s is the address
+wifi.connected_address = Connected, with the address %s.
+# A network saved, not in use
+wifi.saved_note = Saved: the OpenFrame joins it whenever it's in reach.
+# Button
+wifi.change_password = Change password
+# Title. %s is the network
+wifi.cant_join = Can't join %s
+wifi.cant_join.note = It needs WEP or an enterprise login, which Settings can't set up. A network.yaml in the settings folder on OF-BOOT can.
+# Title. %s is the network
+wifi.join_open = Join %s?
+wifi.join_open.note = It's an open network: what's sent over it isn't encrypted.
+# Button
+wifi.join = Join
+# Beside a network in the list
+wifi.row.connected = Connected
+wifi.row.saved = Saved
+wifi.row.unsupported = Not supported
+# The last row of the list
+wifi.other = Other network...
+# Button
+wifi.look_again = Look again
+# Heading
+wifi.head.networks = NETWORKS
+# Button
+wifi.connect = Connect
+
+## Typing a name or password
+
+# Heading over the box
+entry.network_name = The network's name
+entry.ssh_password = A password for logging in
+entry.device_name = A name for this OpenFrame
+# %s is the network
+entry.password_for = Password for %s
+# Under the box
+entry.network_name.hint = Exactly as it's written, capitals and all
+entry.wifi_password.hint = 8 to 63 characters, or none for an open network
+entry.ssh_password.hint = For logging in as "of" over SSH: 8 to 64 characters
+entry.device_name.hint = Any name, such as Kitchen. None for openframe
+entry.password.hint = 8 to 63 characters
+# The keyboard's button
+entry.next = Next
+# The keyboard's button
+entry.set = Set
+
+## Network: details
+
+# Ethernet status
+net.cable.none = No cable connected
+net.cable.waiting = Connected, waiting for an address
+# %d is the speed
+net.cable.gbit = Connected at %d Gb/s
+# %d is the speed
+net.cable.mbit = Connected at %d Mb/s
+net.cable.connected = Connected
+# A detail
+net.address = Address
+# Where the address comes from. %s is the settings file
+net.fixed = %s (a fixed address)
+net.dhcp = The router (DHCP)
+# A detail
+net.set_by = Set by
+# A detail
+net.gateway = Gateway
+# A detail
+net.mac = MAC address
+# Heading
+net.head.dns = DNS
+# A detail
+net.servers = Servers
+# Heading
+net.head.this = THIS OPENFRAME
+# A detail
+net.name = Name
+
+## Remote access (SSH)
+
+# Heading
+ssh.head = REMOTE ACCESS
+# Status
+ssh.shared = Still the shared password
+# Status. %s is ", and keys" or nothing
+ssh.set = Password set%s
+ssh.and_keys = , and keys
+# Status
+ssh.keys_only = By key only (no password)
+# Status
+ssh.off = Off: set a password to log in
+# Button
+ssh.set_password = Set password
+# Button
+ssh.turn_off = Turn off
+# Title
+ssh.not_set = The password wasn't set
+# Toast
+ssh.was_set = Password set
+# Title
+ssh.still_on = Remote access is still on
+# Toast
+ssh.is_off = Remote access is off
+# Title
+ssh.off_ask = Turn off remote access?
+ssh.off_ask.note = The password for logging in is removed, along with any keys, and anyone logged in now is disconnected. Setting a password turns it on again.
+
+## Name
+
+# Heading
+name.head = NAME
+# Title
+name.not_changed = The name wasn't changed
+# Toast
+name.renamed = Renamed
+
+## Updates
+
+# Heading
+upd.head = UPDATES
+# Button
+upd.update_now = Update now
+# Button
+upd.restart_now = Restart now
+# Button
+upd.check_now = Check now
+# Status
+upd.checking = Checking for updates...
+upd.preparing = Getting ready to update...
+upd.downloading = Downloading updates...
+# Progress. %.1f of %.1f MB
+upd.mb_of = %.1f of %.1f MB
+# Progress. %ld of %ld KB
+upd.kb_of = %ld of %ld KB
+upd.finishing = Finishing up...
+# %s is what
+upd.installing_pkg = Installing %s...
+upd.installing_ready = Getting ready to install...
+upd.installing = Installing updates...
+# Progress. %d of %d
+upd.n_of = %d of %d
+# Status
+upd.restart_to_finish = Restart to finish updating
+# Status
+upd.failed = The last update didn't work
+# Status
+upd.one_waiting = 1 update waiting
+# Status. %d is how many
+upd.n_waiting = %d updates waiting
+# Status
+upd.up_to_date = Up to date
+# Status
+upd.not_checked = Not checked yet
+# Title
+upd.couldnt_start = Couldn't start
+# While an update's notes load
+upd.loading = Loading...
+# Notes for an update that has none
+upd.notes.default = Bug fixes and improvements.
+upd.notes.nothing = Nothing waiting now.
+# Heading in the list
+upd.head.firmware = FIRMWARE
+# A row in the list
+upd.firmware = Firmware
+# Beside the firmware
+upd.firmware.when = At the next restart
+upd.firmware.note = At the next restart, the OpenFrame updates its firmware. The screen shows the progress for a minute or two, then it restarts once more by itself. Don't switch it off while that happens.
+# Heading in the list
+upd.head.openframe = OPENFRAME
+# Heading in the list
+upd.head.apps = APPS
+# Heading in the list
+upd.head.debian = FROM DEBIAN
+# The Debian row
+upd.debian = Security and bug fixes
+# Beside it
+upd.packages.one = 1 package
+# Beside it. %d is how many
+upd.packages = %d packages
+# Beside a row. %s is the version
+upd.version = Version %s
+# Heading over an update's notes. %s the part, %s the version
+upd.notes.head = %s, VERSION %s
+# Parts of the OpenFrame, by package
+upd.part.sprite = Sprite
+upd.part.system = System
+upd.part.crystalhd = Crystal HD
+upd.part.resampler = Resampler
+upd.part.kernel = Kernel
+# Heading
+upd.head.schedule = SCHEDULE
+# A row, and the title of its question
+upd.time = Update time
+# Under it
+upd.time.note = The OpenFrame updates itself once a day at about this time, or soon after it starts if it was off then. If an update needs a restart, that happens then too.
+# In the question
+upd.time.ask = Updates install within half an hour of this time each day. If one needs a restart, the OpenFrame restarts then too, so pick a time nobody's watching.
+# Title
+upd.time.not_changed = The time wasn't changed
+# Title once Sprite has updated itself
+upd.sprite_updated = Sprite has been updated
+# Toast. %s is the version
+upd.sprite_is_now = Sprite is now %s
+# Under that title. %s is the version
+upd.sprite_restarts = Version %s. It restarts in a moment, and carries on where it was.
+upd.sprite_restarts.nover = It restarts in a moment, and carries on where it was.
+
+## About
+
+# Heading
+about.head = ABOUT
+# The details, a line each. Ethernet, Wi-Fi, memory free and total, storage free, hours and minutes up, kernel, Sprite and (if so) the test unit line
+about.summary = Ethernet: %s\nWi-Fi: %s\nMemory: %ld MB free of %ld MB\nStorage: %ld MB free\nUp: %dh %02dm\nKernel: %s\nSprite: %s%s
+# Wi-Fi in the details. %s the address, %s the signal
+about.wifi_signal = %s, signal %s
+about.no_address = connected, no address
+about.not_connected = not connected
+# The last line on a test unit (starts with \n)
+about.test_unit = \nTest unit: updates before they're released
+# What sprite-ping sends
+about.ping = Once an hour, this OpenFrame tells openbeak.net that it's running: its network (MAC) addresses, its model, the versions of its firmware and software, and how full its memory and storage are. Nothing else is sent. It helps us see how many OpenFrames are still running, and whether updates have reached them.
+# Heading
+erase.head = ERASE
+erase.note = Puts this OpenFrame back as it came, for its next owner. Its updates and touch calibration stay; everything else that's been set up on it goes.
+# Button, and in the question
+erase.button = Erase everything
+# Title
+erase.ask = Erase this OpenFrame?
+erase.ask.note = Network settings, passwords and keys, all apps, and their data will be removed.
+# Button
+erase.ask.button = Erase
+# Title, asked again
+erase.sure = Are you sure?
+erase.sure.note = Everything on this OpenFrame is erased. This can't be undone.
+# Title
+erase.erasing = Erasing...
+erase.erasing.note = This takes a few minutes. The OpenFrame restarts by itself when it's done. Don't switch it off.
+# Title
+erase.failed = It wasn't erased
+
+## Power
+
+# Heading
+power.head = POWER
+# Button
+power.restart = Restart
+# Button
+power.off = Switch off
+# Title
+power.restart_ask = Restart the OpenFrame?
+# Title
+power.off_ask = Switch off the OpenFrame?
+# With firmware to update
+power.restart_ask.firmware = It updates its firmware as it restarts: the screen shows the progress for a minute or two, then it restarts once more by itself. Don't switch it off while that happens.
+power.restart_ask.note = It will be back in about half a minute.
+# With firmware to update
+power.off_ask.firmware = After shutdown, turn it off at the plug. The firmware update waiting happens the next time it starts.
+power.off_ask.note = After shutdown, turn it off at the plug.
+# Title while an update installs
+power.updating = An update is being installed
+power.updating.restart = The OpenFrame can restart as soon as it's finished, usually within a few minutes.
+power.updating.off = The OpenFrame can switch off as soon as it's finished, usually within a few minutes.
+# Button
+power.restart_when_done = Restart when done
+# Button
+power.off_when_done = Switch off when done
+# Toast
+power.will_restart = It will restart once the update has finished
+# Toast
+power.will_off = It will switch off once the update has finished
+
+## Welcome
+# Shown the first time Sprite starts
+
+welcome.title = Welcome to your OpenFrame
+welcome.note = Tap an app on the home screen to open it, or touch and hold it for more. Settings are behind the gear at the top right.
+# A row
+welcome.wifi = Wi-Fi
+welcome.connected = Connected
+welcome.cable = Using the cable
+# A row
+welcome.password = Password for remote access
+welcome.optional = Optional
+# A row
+welcome.updates_at = Daily updates at
+welcome.updates_at.note = It restarts then if an update needs it: pick a time nobody's watching.
+# Button
+welcome.start = Start
+
+## Why something couldn't be done
+# sprite-helper's reasons, shown under the title of a message ("The password wasn't set", say).
+# Others, about apps and the like, come from the helper as they are.
+
+helper.boot_readonly = The settings on OF-BOOT can't be changed just now.
+helper.preparing_wifi = The Wi-Fi settings couldn't be prepared.
+helper.netplan = The network settings couldn't be applied.
+helper.no_wifi = No Wi-Fi.
+helper.wpa = Wi-Fi couldn't be started.
+helper.no_network_name = No network name.
+helper.network_name_length = The network name must be 1 to 32 characters.
+helper.control_chars = Control characters aren't allowed.
+helper.wifi_password_length = The password must be 8 to 63 characters.
+helper.no_password = No password.
+helper.ssh_password_length = The password must be 8 to 64 characters.
+helper.password_not_set = The password couldn't be set.
+helper.no_name = No name.
+helper.name_needs_update = This system can't be named until it's updated.
+helper.name_length = The name must be 64 characters or fewer.
+helper.preparing_name = The name couldn't be prepared.
+helper.name_not_applied = The name couldn't be applied.
+helper.audio_needs_update = This system can't choose its sound output until it's updated.
+helper.audio_not_changed = The sound output couldn't be changed.
+helper.password_not_removed = The password couldn't be removed.
+helper.preparing_ssh = The remote access settings couldn't be prepared.
+helper.no_updates = This system doesn't update itself.
+helper.update_not_started = The update didn't start.
+helper.check_not_started = The check didn't start.
+helper.update_time_needs_update = This system's updates can't be moved yet (its openframe-scripts is too old).
+helper.time_not_saved = The time couldn't be saved.
+helper.no_brightness = No brightness settings here.
+helper.brightness_needs_update = This system's brightness limits can't be changed yet (its openframe-scripts is too old).
+helper.brightness_not_saved = The brightness settings couldn't be saved.
+helper.erase_needs_update = This system can't be erased from here (its openframe-scripts is too old).
+helper.erase_not_started = The erase didn't start.
+helper.cant_wait = Couldn't wait for the update.
+# When Sprite can't reach its helper at all
+helper.not_running = Sprite's helper isn't running.

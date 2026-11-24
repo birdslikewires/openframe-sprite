@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 #include <wayland-server-core.h>
+#include "text.h" // the on-screen text, TX_*: generated from src/text/en_gb.txt (Makefile)
 
 #ifndef SPRITE_VERSION // the package build sets it (package/version.sh)
 #define SPRITE_VERSION "dev"
@@ -202,6 +203,7 @@ void sysinfo_helper(const char *line);
 // reply's last line, "ok" or "error: <reason>", and returns it.
 void helper_request(const char *text, void (*done)(char *reply, void *ctx), void *ctx);
 const char *helper_reply_status(char *reply);
+const char *helper_reason(const char *st);   // an error reply as a sentence to show (en_gb.txt)
 
 /* wifi.c: Wi-Fi through the helper, which owns settings/wifi.txt. Each call answers later,
    from the event loop; error is NULL on success, or the reason. */

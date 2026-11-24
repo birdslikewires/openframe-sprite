@@ -785,9 +785,9 @@ static void show_page(lv_obj_t *page) {
 	for (size_t i = 0; i < sizeof pages / sizeof pages[0]; i++)
 		if (pages[i]) lv_obj_add_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
 	lv_obj_remove_flag(page, LV_OBJ_FLAG_HIDDEN);
-	snprintf(page_title, sizeof page_title, "%s", page == page_settings ? "Settings" : page == page_netinfo ? (netinfo_kind == NETINFO_WIFI ? "Wi-Fi" : "Ethernet") :
-			  page == page_news ? "What's new" :
-			  page == page_wifi || page == page_entry ? "Wi-Fi" : "");
+	snprintf(page_title, sizeof page_title, "%s", page == page_settings ? TX_TITLE_SETTINGS : page == page_netinfo ? (netinfo_kind == NETINFO_WIFI ? TX_TITLE_WIFI : TX_TITLE_ETHERNET) :
+			  page == page_news ? TX_TITLE_WHATS_NEW :
+			  page == page_wifi || page == page_entry ? TX_TITLE_WIFI : "");
 	lv_label_set_text(bar_title, page_title);
 	update_dots();
 }
@@ -858,7 +858,7 @@ static void open_app(struct sprite_app *a) {
 	}
 	if (!a->pid && !a->pending) {
 		char s[96];
-		snprintf(s, sizeof s, "Opening %s...", a->name);
+		snprintf(s, sizeof s, TX_APP_OPENING, a->name);
 		show_toast(s, 20000);
 		opening = a;
 	}
@@ -1045,7 +1045,7 @@ static void sheet_close_app(lv_event_t *e) {
 	struct sprite_app *a = sheet_app;
 	sheet_dismiss();
 	char s[96];
-	snprintf(s, sizeof s, "Closing %s...", a->name);
+	snprintf(s, sizeof s, TX_APP_CLOSING, a->name);
 	show_toast(s, 4000);
 	sprite_close_app(a);
 }
@@ -1061,8 +1061,8 @@ static void open_sheet(struct sprite_app *a) {
 	lv_obj_t *card = dialog_open(NULL, a->name, NULL, true);
 	sheet = dialog_backdrop;
 	lv_obj_add_event_cb(sheet, sheet_gone, LV_EVENT_DELETE, NULL);
-	dialog_button(card, LV_SYMBOL_PLAY "  Open", BUTTON_MAIN, sheet_open, NULL);
-	if (a->pid || a->pending) dialog_button(card, LV_SYMBOL_CLOSE "  Close", BUTTON_DANGER, sheet_close_app, NULL);
+	dialog_button(card, LV_SYMBOL_PLAY "  " TX_APP_OPEN, BUTTON_MAIN, sheet_open, NULL);
+	if (a->pid || a->pending) dialog_button(card, LV_SYMBOL_CLOSE "  " TX_APP_CLOSE, BUTTON_DANGER, sheet_close_app, NULL);
 
 	lv_obj_t *srow = lv_obj_create(card);
 	lv_obj_remove_style_all(srow);
@@ -1075,10 +1075,10 @@ static void open_sheet(struct sprite_app *a) {
 	lv_obj_set_flex_flow(text, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_style_pad_row(text, HINT_GAP, 0);
 	lv_obj_t *l1 = lv_label_create(text);
-	lv_label_set_text(l1, "Open at startup");
+	lv_label_set_text(l1, TX_APP_OPEN_AT_STARTUP);
 	lv_obj_set_style_text_color(l1, lv_color_hex(C_TEXT), 0);
 	lv_obj_t *l2 = lv_label_create(text);
-	lv_label_set_text(l2, "Choose this app to launch automatically at startup.");
+	lv_label_set_text(l2, TX_APP_OPEN_AT_STARTUP_NOTE);
 	lv_label_set_long_mode(l2, LV_LABEL_LONG_WRAP);
 	lv_obj_set_width(l2, 300);
 	lv_obj_set_style_text_font(l2, &lv_font_montserrat_14, 0);
@@ -1583,7 +1583,7 @@ static void rebuild_grid(void *unused) {
 	go_to_page(cur_page, false);
 	if (opening && opening->pid == 0 && !opening->pending) { // it exited before showing a window
 		char s[96];
-		snprintf(s, sizeof s, "%s closed", opening->name);
+		snprintf(s, sizeof s, TX_APP_CLOSED, opening->name);
 		show_toast(s, 3000);
 		opening = NULL;
 	}
@@ -1678,8 +1678,8 @@ static void bl_limits_ask(void) { helper_request("backlight-settings\n", bl_limi
 static void bl_limits_saved(char *reply, void *data) {
 	const char *st = helper_reply_status(reply);
 	if (strcmp(st, "ok")) {
-		lv_obj_t *card = dialog_open(NULL, "Brightness not changed", reason_text(st), true);
-		dialog_button(card, "OK", BUTTON_MAIN, dialog_cancel, NULL);
+		lv_obj_t *card = dialog_open(NULL, TX_DISPLAY_NOT_CHANGED, reason_text(st), true);
+		dialog_button(card, TX_COMMON_OK, BUTTON_MAIN, dialog_cancel, NULL);
 		sysinfo_backlight_request("reload"); // the limits in the file, not the ones it was sent
 	}
 	bl_limits_ask(); // what's in the file now
@@ -1697,8 +1697,8 @@ static void bl_now_tick(lv_timer_t *t) {
 	if (!bl_now || !visible || !showing(page_settings) || settings_tab != TAB_DISPLAY) return;
 	int b = sysinfo_backlight();
 	char s[16] = "";
-	if (b == 0) snprintf(s, sizeof s, "OFF");
-	else if (b > 0) snprintf(s, sizeof s, "NOW %d%%", b);
+	if (b == 0) snprintf(s, sizeof s, TX_COMMON_OFF);
+	else if (b > 0) snprintf(s, sizeof s, TX_COMMON_NOW_PERCENT, b);
 	set_text(bl_now, s);
 }
 
@@ -1862,7 +1862,7 @@ static void dialog_cancel(lv_event_t *e) { dialog_close(); }
 // A helper's "error: reason" as a sentence to show on its own: a capital, and a full stop.
 static const char *reason_text(const char *st) {
 	static char buf[256];
-	const char *r = strncmp(st, "error: ", 7) ? st : st + 7;
+	const char *r = helper_reason(st);
 	snprintf(buf, sizeof buf, "%s", r);
 	size_t n = strlen(buf);
 	if (n) buf[0] = (char)toupper((unsigned char)buf[0]);
@@ -1876,30 +1876,29 @@ static void reset_started(char *reply, void *data) {
 	const char *st = helper_reply_status(reply);
 	if (!strcmp(st, "ok")) return; // it restarts when it's done; the dialog stays till then
 	dialog_close();
-	lv_obj_t *card = dialog_open(NULL, "It wasn't erased", reason_text(st), true);
-	dialog_button(card, "OK", BUTTON_MAIN, dialog_cancel, NULL);
+	lv_obj_t *card = dialog_open(NULL, TX_ERASE_FAILED, reason_text(st), true);
+	dialog_button(card, TX_COMMON_OK, BUTTON_MAIN, dialog_cancel, NULL);
 }
 
 static void reset_go(lv_event_t *e) {
 	dialog_close();
 	// nothing to press, and no tapping it away: the OpenFrame restarts when it's done
-	dialog_open(NULL, "Erasing...", "This takes a few minutes. The OpenFrame restarts by itself when it's done. "
-				      "Don't switch it off.", false);
+	dialog_open(NULL, TX_ERASE_ERASING, TX_ERASE_ERASING_NOTE, false);
 	helper_request("factory-reset\n", reset_started, NULL);
 }
 
 static void reset_sure(lv_event_t *e) {
 	dialog_close();
-	lv_obj_t *card = dialog_open(NULL, "Are you sure?", "Everything on this OpenFrame is erased. This can't be undone.", true);
-	dialog_button(card, LV_SYMBOL_TRASH "  Erase everything", BUTTON_DANGER, reset_go, NULL);
-	dialog_button(card, "Cancel", BUTTON_OTHER, dialog_cancel, NULL);
+	lv_obj_t *card = dialog_open(NULL, TX_ERASE_SURE, TX_ERASE_SURE_NOTE, true);
+	dialog_button(card, LV_SYMBOL_TRASH "  " TX_ERASE_BUTTON, BUTTON_DANGER, reset_go, NULL);
+	dialog_button(card, TX_COMMON_CANCEL, BUTTON_OTHER, dialog_cancel, NULL);
 }
 
 static void reset_ask(lv_event_t *e) {
-	lv_obj_t *card = dialog_open(NULL, "Erase this OpenFrame?",
-				     "Network settings, passwords and keys, all apps, and their data will be removed. ", true);
-	dialog_button(card, "Erase", BUTTON_DANGER, reset_sure, NULL);
-	dialog_button(card, "Cancel", BUTTON_OTHER, dialog_cancel, NULL);
+	lv_obj_t *card = dialog_open(NULL, TX_ERASE_ASK,
+				     TX_ERASE_ASK_NOTE, true);
+	dialog_button(card, TX_ERASE_ASK_BUTTON, BUTTON_DANGER, reset_sure, NULL);
+	dialog_button(card, TX_COMMON_CANCEL, BUTTON_OTHER, dialog_cancel, NULL);
 }
 
 static void after_update_cb(lv_event_t *e) {
@@ -1908,8 +1907,8 @@ static void after_update_cb(lv_event_t *e) {
 	char req[48];
 	snprintf(req, sizeof req, "after-update %s", what);
 	sysinfo_helper(req);
-	show_toast(!strcmp(what, "reboot") ? "It will restart once the update has finished"
-					   : "It will switch off once the update has finished", 4000);
+	show_toast(!strcmp(what, "reboot") ? TX_POWER_WILL_RESTART
+					   : TX_POWER_WILL_OFF, 4000);
 }
 
 static void power_clicked(lv_event_t *e) {
@@ -1917,25 +1916,24 @@ static void power_clicked(lv_event_t *e) {
 	enum upd_state us = update_state();
 	if (us == UPD_DOWNLOADING || us == UPD_INSTALLING) {
 		// Not halfway through installing something: once it's done.
-		lv_obj_t *card = dialog_open(NULL, "An update is being installed",
-					     reboot ? "The OpenFrame can restart as soon as it's finished, usually within a few minutes."
-						    : "The OpenFrame can switch off as soon as it's finished, usually within a few minutes.", true);
-		dialog_button(card, reboot ? LV_SYMBOL_REFRESH "  Restart when done" : LV_SYMBOL_POWER "  Switch off when done",
+		lv_obj_t *card = dialog_open(NULL, TX_POWER_UPDATING,
+					     reboot ? TX_POWER_UPDATING_RESTART
+						    : TX_POWER_UPDATING_OFF, true);
+		dialog_button(card, reboot ? LV_SYMBOL_REFRESH "  " TX_POWER_RESTART_WHEN_DONE : LV_SYMBOL_POWER "  " TX_POWER_OFF_WHEN_DONE,
 			      reboot ? BUTTON_MAIN : BUTTON_DANGER, after_update_cb, reboot ? "reboot" : "poweroff");
-		dialog_button(card, "Cancel", BUTTON_OTHER, dialog_cancel, NULL);
+		dialog_button(card, TX_COMMON_CANCEL, BUTTON_OTHER, dialog_cancel, NULL);
 		return;
 	}
 	// firmware to flash at this restart: say so, so nobody's alarmed
 	bool flash = firmware_at_restart();
-	lv_obj_t *card = dialog_open(NULL, reboot ? "Restart the OpenFrame?" : "Switch off the OpenFrame?",
-				     reboot ? (flash ? "It updates its firmware as it restarts: the screen shows the progress for a minute or "
-						       "two, then it restarts once more by itself. Don't switch it off while that happens."
-						     : "It will be back in about half a minute.")
-					    : flash ? "After shutdown, turn it off at the plug. The firmware update waiting happens the next time it starts."
-						    : "After shutdown, turn it off at the plug.", true);
-	dialog_button(card, reboot ? LV_SYMBOL_REFRESH "  Restart" : LV_SYMBOL_POWER "  Switch off",
+	lv_obj_t *card = dialog_open(NULL, reboot ? TX_POWER_RESTART_ASK : TX_POWER_OFF_ASK,
+				     reboot ? (flash ? TX_POWER_RESTART_ASK_FIRMWARE
+						     : TX_POWER_RESTART_ASK_NOTE)
+					    : flash ? TX_POWER_OFF_ASK_FIRMWARE
+						    : TX_POWER_OFF_ASK_NOTE, true);
+	dialog_button(card, reboot ? LV_SYMBOL_REFRESH "  " TX_POWER_RESTART : LV_SYMBOL_POWER "  " TX_POWER_OFF,
 		      reboot ? BUTTON_MAIN : BUTTON_DANGER, confirm_cb, reboot ? "reboot" : "poweroff");
-	dialog_button(card, "Cancel", BUTTON_OTHER, dialog_cancel, NULL);
+	dialog_button(card, TX_COMMON_CANCEL, BUTTON_OTHER, dialog_cancel, NULL);
 }
 
 // A list screen (Settings) is a column of headings and rows, ROW_GAP apart. Every row of
@@ -2021,7 +2019,7 @@ static void cal_save(lv_event_t *e) {
 	snprintf(v, sizeof v, "%.6f,%.6f,%.4f,%.6f,%.6f,%.4f", cal_new[0], cal_new[1], cal_new[2], cal_new[3], cal_new[4], cal_new[5]);
 	settings_set("calibration", v);
 	cal_close();
-	show_toast("Touch calibration saved", 3000);
+	show_toast(TX_DISPLAY_CALIBRATE_SAVED, 3000);
 }
 
 static void cal_result(void) {
@@ -2033,21 +2031,20 @@ static void cal_result(void) {
 	if (!cal_fit(cal_new)) after_worst = 1e9;
 	else cal_errors(cal_new, &after, &after_worst);
 	if (after_worst > 25) { // one tap well away from its cross, most likely
-		lv_obj_t *card = dialog_open(cal, "That didn't look right",
-					     "One of the taps was probably off its cross. Nothing has changed.", false);
-		dialog_button(card, LV_SYMBOL_REFRESH "  Again", BUTTON_MAIN, cal_start, NULL);
-		dialog_button(card, "Cancel", BUTTON_OTHER, cal_cancel, NULL);
+		lv_obj_t *card = dialog_open(cal, TX_DISPLAY_CALIBRATE_BAD,
+					     TX_DISPLAY_CALIBRATE_BAD_NOTE, false);
+		dialog_button(card, LV_SYMBOL_REFRESH "  " TX_DISPLAY_CALIBRATE_AGAIN, BUTTON_MAIN, cal_start, NULL);
+		dialog_button(card, TX_COMMON_CANCEL, BUTTON_OTHER, cal_cancel, NULL);
 		return;
 	}
 	// Try the new calibration straight away, so the buttons below are tapped with it.
 	sprite_set_calibration(cal_new);
 	char body[200];
-	snprintf(body, sizeof body, "Touches were landing %.0f px from the crosses on average, %.0f at worst. "
-		 "With this calibration, %.0f px, %.0f at worst.", before, before_worst, after, after_worst);
-	lv_obj_t *card = dialog_open(cal, "Touch calibration", body, false);
-	dialog_button(card, LV_SYMBOL_OK "  Save", BUTTON_MAIN, cal_save, NULL);
-	dialog_button(card, LV_SYMBOL_REFRESH "  Again", BUTTON_OTHER, cal_start, NULL);
-	dialog_button(card, "Cancel", BUTTON_OTHER, cal_cancel, NULL);
+	snprintf(body, sizeof body, TX_DISPLAY_CALIBRATE_RESULT, before, before_worst, after, after_worst);
+	lv_obj_t *card = dialog_open(cal, TX_DISPLAY_CALIBRATE_TITLE, body, false);
+	dialog_button(card, LV_SYMBOL_OK "  " TX_DISPLAY_CALIBRATE_SAVE, BUTTON_MAIN, cal_save, NULL);
+	dialog_button(card, LV_SYMBOL_REFRESH "  " TX_DISPLAY_CALIBRATE_AGAIN, BUTTON_OTHER, cal_start, NULL);
+	dialog_button(card, TX_COMMON_CANCEL, BUTTON_OTHER, cal_cancel, NULL);
 }
 
 static void cal_tap(double x, double y) {
@@ -2070,7 +2067,7 @@ static void cal_show_cross(void) {
 		else { lv_obj_set_size(bar, 2, 40); lv_obj_set_pos(bar, x - 1, y - 20); }
 	}
 	lv_obj_t *l = lv_label_create(cal);
-	lv_label_set_text_fmt(l, "Tap the centre of the cross (%d of %d)", cal_i + 1, CAL_N);
+	lv_label_set_text_fmt(l, TX_DISPLAY_CALIBRATE_TAP, cal_i + 1, CAL_N);
 	lv_obj_set_style_text_color(l, lv_color_hex(C_DIM), 0);
 	lv_obj_align(l, LV_ALIGN_CENTER, 0, cal_pts[cal_i][1] == 240 ? 60 : 0);
 }
@@ -2100,7 +2097,7 @@ static void cal_reset(lv_event_t *e) {
 	const double identity[6] = { 1, 0, 0, 0, 1, 0 };
 	sprite_set_calibration(identity);
 	settings_set("calibration", "");
-	show_toast("Touch calibration reset", 3000);
+	show_toast(TX_DISPLAY_CALIBRATE_WAS_RESET, 3000);
 }
 
 static void clock24_changed(lv_event_t *e) {
@@ -2184,11 +2181,11 @@ static void wifi_show_status(void) {
 	char t[200];
 	const char *st = s->state;
 	bool trying = st[0] && strcmp(st, "INACTIVE") && strcmp(st, "DISCONNECTED") && strcmp(st, "INTERFACE_DISABLED");
-	if (s->connected) snprintf(t, sizeof t, "Connected to %s", s->ssid);
-	else if (s->saved[0] && s->trouble) snprintf(t, sizeof t, "Can't connect to %s", s->saved);
-	else if (s->saved[0] && (trying || wifi_watch)) snprintf(t, sizeof t, "Connecting to %s...", s->saved);
-	else if (s->saved[0]) snprintf(t, sizeof t, "Not connected to %s", s->saved);
-	else snprintf(t, sizeof t, "Not connected");
+	if (s->connected) snprintf(t, sizeof t, TX_WIFI_CONNECTED_TO, s->ssid);
+	else if (s->saved[0] && s->trouble) snprintf(t, sizeof t, TX_WIFI_CANT_CONNECT_TO, s->saved);
+	else if (s->saved[0] && (trying || wifi_watch)) snprintf(t, sizeof t, TX_WIFI_CONNECTING_TO, s->saved);
+	else if (s->saved[0]) snprintf(t, sizeof t, TX_WIFI_NOT_CONNECTED_TO, s->saved);
+	else snprintf(t, sizeof t, TX_WIFI_NOT_CONNECTED);
 	set_text(wifi_status_label, t);
 	set_text(wifi_detail_label, s->connected ? s->address : "");
 	if (s->saved[0]) lv_obj_remove_flag(wifi_forget_btn, LV_OBJ_FLAG_HIDDEN);
@@ -2214,17 +2211,16 @@ static void wifi_watch_check(void) {
 	if (wifi_now.connected && !strcmp(wifi_now.ssid, wifi_target)) {
 		wifi_watch_stop();
 		char t[80];
-		snprintf(t, sizeof t, "Connected to %s", wifi_target);
+		snprintf(t, sizeof t, TX_WIFI_CONNECTED_TO, wifi_target);
 		show_toast(t, 3000);
 	} else if ((wifi_now.trouble && ms > WIFI_TROUBLE_AFTER_MS) || ms > WIFI_JOIN_WAIT_MS) {
 		wifi_watch_stop();
 		char t[80];
-		snprintf(t, sizeof t, "Couldn't connect to %s", wifi_target);
-		lv_obj_t *card = dialog_open(NULL, t, "The password may be wrong, or the network out of reach. "
-					    "The OpenFrame keeps trying while it's saved.", false);
-		dialog_button(card, "Try again", BUTTON_MAIN, wifi_try_again, NULL);
-		dialog_button(card, "Forget", BUTTON_DANGER, wifi_forget_now, NULL);
-		dialog_button(card, "Close", BUTTON_OTHER, dialog_cancel, NULL);
+		snprintf(t, sizeof t, TX_WIFI_COULDNT_CONNECT, wifi_target);
+		lv_obj_t *card = dialog_open(NULL, t, TX_WIFI_COULDNT_CONNECT_NOTE, false);
+		dialog_button(card, TX_COMMON_TRY_AGAIN, BUTTON_MAIN, wifi_try_again, NULL);
+		dialog_button(card, TX_WIFI_FORGET, BUTTON_DANGER, wifi_forget_now, NULL);
+		dialog_button(card, TX_COMMON_CLOSE, BUTTON_OTHER, dialog_cancel, NULL);
 	}
 	wifi_show_status();
 }
@@ -2250,9 +2246,9 @@ static void wifi_joined(const char *error, void *data) {
 	if (!error) return; // written: the watch follows it
 	wifi_watch_stop();
 	char t[80];
-	snprintf(t, sizeof t, "Couldn't join %s", wifi_target);
+	snprintf(t, sizeof t, TX_WIFI_COULDNT_JOIN, wifi_target);
 	lv_obj_t *card = dialog_open(NULL, t, reason_text(error), true);
-	dialog_button(card, "Close", BUTTON_OTHER, dialog_cancel, NULL);
+	dialog_button(card, TX_COMMON_CLOSE, BUTTON_OTHER, dialog_cancel, NULL);
 	wifi_refresh();
 }
 
@@ -2274,8 +2270,8 @@ static void wifi_join_now(const char *ssid, const char *password) {
 
 static void wifi_forgot(const char *error, void *data) {
 	if (error) {
-		lv_obj_t *card = dialog_open(NULL, "Couldn't forget the network", reason_text(error), true);
-		dialog_button(card, "Close", BUTTON_OTHER, dialog_cancel, NULL);
+		lv_obj_t *card = dialog_open(NULL, TX_WIFI_COULDNT_FORGET, reason_text(error), true);
+		dialog_button(card, TX_COMMON_CLOSE, BUTTON_OTHER, dialog_cancel, NULL);
 	}
 	wifi_refresh();
 }
@@ -2285,7 +2281,7 @@ static void wifi_forget_now(lv_event_t *e) {
 	wifi_watch_stop();
 	wifi_forget(wifi_forgot, NULL);
 	char t[sizeof wifi_now.saved + 16];
-	snprintf(t, sizeof t, "Forgot %s", wifi_now.saved[0] ? wifi_now.saved : wifi_target);
+	snprintf(t, sizeof t, TX_WIFI_FORGOT, wifi_now.saved[0] ? wifi_now.saved : wifi_target);
 	show_toast(t, 3000);
 	wifi_now.saved[0] = 0;
 	wifi_now.connected = wifi_now.trouble = false;
@@ -2295,10 +2291,10 @@ static void wifi_forget_now(lv_event_t *e) {
 
 static void wifi_forget_ask(lv_event_t *e) {
 	char t[sizeof wifi_now.saved + 16];
-	snprintf(t, sizeof t, "Forget %s?", wifi_now.saved);
-	lv_obj_t *card = dialog_open(NULL, t, "The OpenFrame won't join it again until it's chosen again.", true);
-	dialog_button(card, "Forget", BUTTON_DANGER, wifi_forget_now, NULL);
-	dialog_button(card, "Cancel", BUTTON_OTHER, dialog_cancel, NULL);
+	snprintf(t, sizeof t, TX_WIFI_FORGET_ASK, wifi_now.saved);
+	lv_obj_t *card = dialog_open(NULL, t, TX_WIFI_FORGET_ASK_NOTE, true);
+	dialog_button(card, TX_WIFI_FORGET, BUTTON_DANGER, wifi_forget_now, NULL);
+	dialog_button(card, TX_COMMON_CANCEL, BUTTON_OTHER, dialog_cancel, NULL);
 }
 
 static void wifi_scan_got(const struct wifi_net *nets, int n, const char *error, void *data) {
@@ -2310,7 +2306,7 @@ static void wifi_scan_got(const struct wifi_net *nets, int n, const char *error,
 	memcpy(wifi_nets, nets, wifi_n * sizeof nets[0]);
 	if (error) {
 		char t[160];
-		snprintf(t, sizeof t, "Couldn't look for networks: %s", !strncmp(error, "error: ", 7) ? error + 7 : error);
+		snprintf(t, sizeof t, TX_WIFI_COULDNT_LOOK, helper_reason(error));
 		lv_label_set_text(wifi_note, t);
 	}
 	wifi_listed[0][0] = 1; // whatever was drawn, draw it again
@@ -2321,7 +2317,7 @@ static void wifi_start_scan(void) {
 	if (wifi_scanning) return;
 	wifi_scanning = true;
 	lv_obj_add_state(wifi_rescan, LV_STATE_DISABLED);
-	lv_label_set_text(wifi_note, "Looking for networks...");
+	lv_label_set_text(wifi_note, TX_WIFI_LOOKING);
 	lv_obj_remove_flag(wifi_note, LV_OBJ_FLAG_HIDDEN);
 	wifi_scan(wifi_scan_got, NULL);
 }
@@ -2346,26 +2342,25 @@ static void wifi_row_clicked(lv_event_t *e) {
 	bool joined = wifi_now.connected && !strcmp(w->ssid, wifi_now.ssid);
 	if (joined || !strcmp(w->ssid, wifi_now.saved)) { // the one we have: change or forget it
 		char body[120];
-		if (joined) snprintf(body, sizeof body, "Connected, with the address %s.", wifi_now.address);
-		else snprintf(body, sizeof body, "Saved: the OpenFrame joins it whenever it's in reach.");
+		if (joined) snprintf(body, sizeof body, TX_WIFI_CONNECTED_ADDRESS, wifi_now.address);
+		else snprintf(body, sizeof body, TX_WIFI_SAVED_NOTE);
 		lv_obj_t *card = dialog_open(NULL, w->ssid, body, true);
-		if (w->secured) dialog_button(card, "Change password", BUTTON_MAIN, wifi_change_password, NULL);
-		dialog_button(card, "Forget", BUTTON_DANGER, wifi_forget_now, NULL);
-		dialog_button(card, "Cancel", BUTTON_OTHER, dialog_cancel, NULL);
+		if (w->secured) dialog_button(card, TX_WIFI_CHANGE_PASSWORD, BUTTON_MAIN, wifi_change_password, NULL);
+		dialog_button(card, TX_WIFI_FORGET, BUTTON_DANGER, wifi_forget_now, NULL);
+		dialog_button(card, TX_COMMON_CANCEL, BUTTON_OTHER, dialog_cancel, NULL);
 	} else if (!w->supported) {
 		char t[80];
-		snprintf(t, sizeof t, "Can't join %s", w->ssid);
-		lv_obj_t *card = dialog_open(NULL, t, "It needs WEP or an enterprise login, which Settings can't set up. "
-					    "A network.yaml in the settings folder on OF-BOOT can.", true);
-		dialog_button(card, "Close", BUTTON_OTHER, dialog_cancel, NULL);
+		snprintf(t, sizeof t, TX_WIFI_CANT_JOIN, w->ssid);
+		lv_obj_t *card = dialog_open(NULL, t, TX_WIFI_CANT_JOIN_NOTE, true);
+		dialog_button(card, TX_COMMON_CLOSE, BUTTON_OTHER, dialog_cancel, NULL);
 	} else if (w->secured) {
 		open_entry(ENTRY_PASSWORD, w->ssid);
 	} else {
 		char t[80];
-		snprintf(t, sizeof t, "Join %s?", w->ssid);
-		lv_obj_t *card = dialog_open(NULL, t, "It's an open network: what's sent over it isn't encrypted.", true);
-		dialog_button(card, "Join", BUTTON_MAIN, wifi_open_join, NULL);
-		dialog_button(card, "Cancel", BUTTON_OTHER, dialog_cancel, NULL);
+		snprintf(t, sizeof t, TX_WIFI_JOIN_OPEN, w->ssid);
+		lv_obj_t *card = dialog_open(NULL, t, TX_WIFI_JOIN_OPEN_NOTE, true);
+		dialog_button(card, TX_WIFI_JOIN, BUTTON_MAIN, wifi_open_join, NULL);
+		dialog_button(card, TX_COMMON_CANCEL, BUTTON_OTHER, dialog_cancel, NULL);
 	}
 }
 
@@ -2433,17 +2428,17 @@ static void wifi_build_list(void) {
 	if (!wifi_ever_scanned) return;
 	if (!wifi_scanning) {
 		if (wifi_n) lv_obj_add_flag(wifi_note, LV_OBJ_FLAG_HIDDEN);
-		else if (!strncmp(lv_label_get_text(wifi_note), "Looking", 7)) lv_label_set_text(wifi_note, "No networks found.");
+		else if (!strncmp(lv_label_get_text(wifi_note), "Looking", 7)) lv_label_set_text(wifi_note, TX_WIFI_NONE_FOUND);
 	}
 	for (int i = 0; i < wifi_n; i++) {
 		const struct wifi_net *w = &wifi_nets[i];
 		bool joined = wifi_now.connected && !strcmp(w->ssid, wifi_now.ssid);
 		bool saved = !joined && !strcmp(w->ssid, wifi_now.saved);
-		const char *note = joined ? "Connected" : saved ? "Saved" : !w->supported ? "Not supported" : NULL;
+		const char *note = joined ? TX_WIFI_ROW_CONNECTED : saved ? TX_WIFI_ROW_SAVED : !w->supported ? TX_WIFI_ROW_UNSUPPORTED : NULL;
 		wifi_row(i, &wifi_img[wifi_level(w->dbm)], NULL, w->ssid, w->secured, note,
 			 joined ? C_ACCENT : C_DIM, !w->supported);
 	}
-	wifi_row(-1, NULL, LV_SYMBOL_PLUS, "Other network...", false, NULL, 0, false);
+	wifi_row(-1, NULL, LV_SYMBOL_PLUS, TX_WIFI_OTHER, false, NULL, 0, false);
 }
 
 static void wifi_choose_clicked(lv_event_t *e) {
@@ -2462,9 +2457,9 @@ static void build_wifi(lv_obj_t *scr) {
 	page_wifi = list_page(scr);
 	lv_obj_t *br = button_row(page_wifi);
 	lv_obj_set_style_translate_x(br, BACK_X - CONTENT_X, 0); // the back button's place (BACK_X)
-	lv_obj_set_width(button(br, LV_SYMBOL_LEFT "  Settings", BUTTON_MAIN, wifi_back_clicked, NULL), BACK_W);
-	wifi_rescan = button(br, LV_SYMBOL_REFRESH "  Look again", BUTTON_OTHER, wifi_rescan_clicked, NULL);
-	section(page_wifi, "NETWORKS");
+	lv_obj_set_width(button(br, LV_SYMBOL_LEFT "  " TX_BACK_SETTINGS, BUTTON_MAIN, wifi_back_clicked, NULL), BACK_W);
+	wifi_rescan = button(br, LV_SYMBOL_REFRESH "  " TX_WIFI_LOOK_AGAIN, BUTTON_OTHER, wifi_rescan_clicked, NULL);
+	section(page_wifi, TX_WIFI_HEAD_NETWORKS);
 	wifi_note = lv_label_create(page_wifi);
 	lv_obj_set_style_text_color(wifi_note, lv_color_hex(C_DIM), 0);
 	lv_label_set_text(wifi_note, "");
@@ -2619,19 +2614,19 @@ static void open_entry(enum entry_mode mode, const char *ssid) {
 	entry_mode = mode;
 	snprintf(entry_ssid, sizeof entry_ssid, "%s", ssid);
 	char t[80];
-	if (mode == ENTRY_NAME) snprintf(t, sizeof t, "The network's name");
-	else if (mode == ENTRY_SSH) snprintf(t, sizeof t, "A password for logging in");
-	else if (mode == ENTRY_DEVNAME) snprintf(t, sizeof t, "A name for this OpenFrame");
-	else snprintf(t, sizeof t, "Password for %s", ssid);
+	if (mode == ENTRY_NAME) snprintf(t, sizeof t, TX_ENTRY_NETWORK_NAME);
+	else if (mode == ENTRY_SSH) snprintf(t, sizeof t, TX_ENTRY_SSH_PASSWORD);
+	else if (mode == ENTRY_DEVNAME) snprintf(t, sizeof t, TX_ENTRY_DEVICE_NAME);
+	else snprintf(t, sizeof t, TX_ENTRY_PASSWORD_FOR, ssid);
 	lv_label_set_text(entry_title, t);
-	lv_label_set_text(entry_hint, mode == ENTRY_NAME ? "Exactly as it's written, capitals and all"
-				      : mode == ENTRY_OPEN_PASSWORD ? "8 to 63 characters, or none for an open network"
-				      : mode == ENTRY_SSH ? "For logging in as \"of\" over SSH: 8 to 64 characters"
-				      : mode == ENTRY_DEVNAME ? "Any name, such as Kitchen. None for openframe"
-								    : "8 to 63 characters");
+	lv_label_set_text(entry_hint, mode == ENTRY_NAME ? TX_ENTRY_NETWORK_NAME_HINT
+				      : mode == ENTRY_OPEN_PASSWORD ? TX_ENTRY_WIFI_PASSWORD_HINT
+				      : mode == ENTRY_SSH ? TX_ENTRY_SSH_PASSWORD_HINT
+				      : mode == ENTRY_DEVNAME ? TX_ENTRY_DEVICE_NAME_HINT
+								    : TX_ENTRY_PASSWORD_HINT);
 	bool plain = mode == ENTRY_NAME || mode == ENTRY_DEVNAME; // what's typed is shown
-	lv_label_set_text(lv_obj_get_child(entry_go, 0), mode == ENTRY_NAME ? "Next" : mode == ENTRY_SSH ? "Set"
-							 : mode == ENTRY_DEVNAME ? "Save" : "Connect");
+	lv_label_set_text(lv_obj_get_child(entry_go, 0), mode == ENTRY_NAME ? TX_ENTRY_NEXT : mode == ENTRY_SSH ? TX_ENTRY_SET
+							 : mode == ENTRY_DEVNAME ? TX_COMMON_SAVE : TX_WIFI_CONNECT);
 	lv_textarea_set_max_length(entry_ta, mode == ENTRY_NAME ? WIFI_SSID_MAX : 64);
 	lv_textarea_set_password_mode(entry_ta, !plain);
 	if (plain) lv_obj_add_flag(entry_eye, LV_OBJ_FLAG_HIDDEN);
@@ -2642,14 +2637,14 @@ static void open_entry(enum entry_mode mode, const char *ssid) {
 	kb_layout();
 	// back to where it came from: Wi-Fi, or Settings for the login password
 	bool from_settings = mode == ENTRY_SSH || mode == ENTRY_DEVNAME;
-	const char *from = from_settings ? LV_SYMBOL_LEFT "  Settings" : LV_SYMBOL_LEFT "  Wi-Fi";
+	const char *from = from_settings ? LV_SYMBOL_LEFT "  " TX_BACK_SETTINGS : LV_SYMBOL_LEFT "  " TX_BACK_WIFI;
 	lv_label_set_text(lv_obj_get_child(entry_back_btn, 0), from);
 	lv_obj_set_width(entry_back_btn, BACK_W);
 	lv_obj_update_layout(entry_back_btn);
 	lv_obj_set_width(entry_title, SPRITE_W - CONTENT_X - BACK_X - lv_obj_get_width(entry_back_btn) - BUTTON_GAP);
 	lv_obj_align_to(entry_title, entry_back_btn, LV_ALIGN_OUT_RIGHT_MID, BUTTON_GAP, 0);
 	show_page(page_entry);
-	if (from_settings) lv_label_set_text(bar_title, "Settings");
+	if (from_settings) lv_label_set_text(bar_title, TX_TITLE_SETTINGS);
 	entry_clear();
 	if (mode == ENTRY_DEVNAME) lv_textarea_set_text(entry_ta, ssid); // the name it has, to change
 	entry_validate();
@@ -2664,7 +2659,7 @@ static void build_entry(lv_obj_t *scr) {
 	lv_obj_add_flag(page_entry, LV_OBJ_FLAG_HIDDEN);
 
 	// the top row: back, and what's wanted
-	lv_obj_t *back = entry_back_btn = button(page_entry, LV_SYMBOL_LEFT "  Wi-Fi", BUTTON_MAIN, entry_back, NULL);
+	lv_obj_t *back = entry_back_btn = button(page_entry, LV_SYMBOL_LEFT "  " TX_BACK_WIFI, BUTTON_MAIN, entry_back, NULL);
 	lv_obj_set_width(back, BACK_W);
 	lv_obj_set_pos(back, BACK_X, CONTENT_TOP);
 	lv_obj_update_layout(back);
@@ -2677,7 +2672,7 @@ static void build_entry(lv_obj_t *scr) {
 
 	// the field, the eye that shows what's typed, and the button that goes on
 	int fy = CONTENT_TOP + BUTTON_H + ROW_GAP + 4;
-	entry_go = button(page_entry, "Connect", BUTTON_MAIN, entry_go_clicked, NULL);
+	entry_go = button(page_entry, TX_WIFI_CONNECT, BUTTON_MAIN, entry_go_clicked, NULL);
 	lv_obj_update_layout(entry_go);
 	int gw = lv_obj_get_width(entry_go);
 	lv_obj_set_pos(entry_go, SPRITE_W - CONTENT_X - gw, fy);
@@ -2752,11 +2747,11 @@ static void eth_show(void) {
 	struct sprite_net n;
 	sysinfo_net(&n);
 	char t[64];
-	if (!n.eth_up) snprintf(t, sizeof t, "No cable connected");
-	else if (!n.eth_ip[0]) snprintf(t, sizeof t, "Connected, waiting for an address");
-	else if (n.eth_mbps >= 1000) snprintf(t, sizeof t, "Connected at %d Gb/s", n.eth_mbps / 1000);
-	else if (n.eth_mbps > 0) snprintf(t, sizeof t, "Connected at %d Mb/s", n.eth_mbps);
-	else snprintf(t, sizeof t, "Connected");
+	if (!n.eth_up) snprintf(t, sizeof t, TX_NET_CABLE_NONE);
+	else if (!n.eth_ip[0]) snprintf(t, sizeof t, TX_NET_CABLE_WAITING);
+	else if (n.eth_mbps >= 1000) snprintf(t, sizeof t, TX_NET_CABLE_GBIT, n.eth_mbps / 1000);
+	else if (n.eth_mbps > 0) snprintf(t, sizeof t, TX_NET_CABLE_MBIT, n.eth_mbps);
+	else snprintf(t, sizeof t, TX_NET_CABLE_CONNECTED);
 	set_text(eth_status_label, t);
 	set_text(eth_detail_label, n.eth_up ? n.eth_ip : "");
 }
@@ -2842,15 +2837,15 @@ static void info_row(lv_obj_t *parent, const char *name, const char *value) {
 static void netif_rows(lv_obj_t *p, const struct sprite_netif *nif, const char *file) {
 	char t[96];
 	if (nif->ip[0]) snprintf(t, sizeof t, "%s", nif->ip);
-	else snprintf(t, sizeof t, "None");
-	info_row(p, "Address", t);
+	else snprintf(t, sizeof t, TX_COMMON_NONE);
+	info_row(p, TX_NET_ADDRESS, t);
 	if (nif->ip[0]) {
-		if (nif->fixed) snprintf(t, sizeof t, "%s (a fixed address)", file);
-		else snprintf(t, sizeof t, "The router (DHCP)");
-		info_row(p, "Set by", t);
-		info_row(p, "Gateway", nif->gateway[0] ? nif->gateway : "None");
+		if (nif->fixed) snprintf(t, sizeof t, TX_NET_FIXED, file);
+		else snprintf(t, sizeof t, TX_NET_DHCP);
+		info_row(p, TX_NET_SET_BY, t);
+		info_row(p, TX_NET_GATEWAY, nif->gateway[0] ? nif->gateway : TX_COMMON_NONE);
 	}
-	if (nif->mac[0]) info_row(p, "MAC address", nif->mac);
+	if (nif->mac[0]) info_row(p, TX_NET_MAC, nif->mac);
 }
 
 // The page again, if anything on it has changed.
@@ -2877,13 +2872,13 @@ static void netinfo_show(void) {
 		lv_obj_set_width(l, LV_PCT(100));
 		lv_obj_set_style_text_color(l, lv_color_hex(C_WARN), 0);
 	}
-	section(p, wifi ? "WI-FI" : "ETHERNET");
+	section(p, wifi ? TX_NET_HEAD_WIFI : TX_NET_HEAD_ETHERNET);
 	netif_rows(p, wifi ? &ni.wifi : &ni.eth, wifi ? "wifi.txt" : "ethernet.txt");
-	section(p, "DNS");
-	if (!ni.n_dns) info_row(p, "Servers", "None");
-	for (int i = 0; i < ni.n_dns; i++) info_row(p, i ? "" : "Servers", ni.dns[i]);
-	section(p, "THIS OPENFRAME");
-	info_row(p, "Name", ni.host[0] ? ni.host : "None");
+	section(p, TX_NET_HEAD_DNS);
+	if (!ni.n_dns) info_row(p, TX_NET_SERVERS, TX_COMMON_NONE);
+	for (int i = 0; i < ni.n_dns; i++) info_row(p, i ? "" : TX_NET_SERVERS, ni.dns[i]);
+	section(p, TX_NET_HEAD_THIS);
+	info_row(p, TX_NET_NAME, ni.host[0] ? ni.host : TX_COMMON_NONE);
 }
 
 static void netinfo_open(lv_event_t *e) {
@@ -2903,7 +2898,7 @@ static void build_netinfo(lv_obj_t *scr) {
 	page_netinfo = list_page(scr);
 	lv_obj_t *br = button_row(page_netinfo);
 	lv_obj_set_style_translate_x(br, BACK_X - CONTENT_X, 0); // the back button's place (BACK_X)
-	lv_obj_set_width(button(br, LV_SYMBOL_LEFT "  Settings", BUTTON_MAIN, netinfo_back, NULL), BACK_W);
+	lv_obj_set_width(button(br, LV_SYMBOL_LEFT "  " TX_BACK_SETTINGS, BUTTON_MAIN, netinfo_back, NULL), BACK_W);
 	netinfo_body = lv_obj_create(page_netinfo);
 	lv_obj_remove_style_all(netinfo_body);
 	lv_obj_set_size(netinfo_body, LV_PCT(100), LV_SIZE_CONTENT);
@@ -2915,7 +2910,7 @@ static void build_netinfo(lv_obj_t *scr) {
 static void ssh_status_done(char *reply, void *data) {
 	const char *st = helper_reply_status(reply);
 	if (!ssh_status_label) return;
-	if (strcmp(st, "ok")) { set_text(ssh_status_label, "Can't tell"); return; }
+	if (strcmp(st, "ok")) { set_text(ssh_status_label, TX_COMMON_CANT_TELL); return; }
 	char pw[16] = "", *save = NULL;
 	int keys = 0;
 	for (char *l = strtok_r(reply, "\n", &save); l; l = strtok_r(NULL, "\n", &save)) {
@@ -2923,10 +2918,10 @@ static void ssh_status_done(char *reply, void *data) {
 		else if (!strncmp(l, "keys=", 5)) keys = atoi(l + 5);
 	}
 	char t[96];
-	if (!strcmp(pw, "shared")) snprintf(t, sizeof t, "Still the shared password");
-	else if (!strcmp(pw, "set")) snprintf(t, sizeof t, "Password set%s", keys ? ", and keys" : "");
-	else if (keys) snprintf(t, sizeof t, "By key only (no password)");
-	else snprintf(t, sizeof t, "Off: set a password to log in");
+	if (!strcmp(pw, "shared")) snprintf(t, sizeof t, TX_SSH_SHARED);
+	else if (!strcmp(pw, "set")) snprintf(t, sizeof t, TX_SSH_SET, keys ? TX_SSH_AND_KEYS : "");
+	else if (keys) snprintf(t, sizeof t, TX_SSH_KEYS_ONLY);
+	else snprintf(t, sizeof t, TX_SSH_OFF);
 	set_text(ssh_status_label, t);
 	lv_obj_set_style_text_color(ssh_status_label, lv_color_hex(!strcmp(pw, "shared") ? C_WARN : C_TEXT), 0);
 	struct sprite_net n;
@@ -2945,11 +2940,11 @@ static void ssh_refresh(void) {
 static void ssh_set_done(char *reply, void *data) {
 	const char *st = helper_reply_status(reply);
 	if (strcmp(st, "ok")) {
-		lv_obj_t *card = dialog_open(NULL, "The password wasn't set", reason_text(st), true);
-		dialog_button(card, "OK", BUTTON_MAIN, dialog_cancel, NULL);
+		lv_obj_t *card = dialog_open(NULL, TX_SSH_NOT_SET, reason_text(st), true);
+		dialog_button(card, TX_COMMON_OK, BUTTON_MAIN, dialog_cancel, NULL);
 		return;
 	}
-	show_toast("Password set", 2500);
+	show_toast(TX_SSH_WAS_SET, 2500);
 	ssh_refresh();
 }
 
@@ -2966,9 +2961,9 @@ static void ssh_set_clicked(lv_event_t *e) { open_entry(ENTRY_SSH, ""); }
 static void ssh_off_done(char *reply, void *data) {
 	const char *st = helper_reply_status(reply);
 	if (strcmp(st, "ok")) {
-		lv_obj_t *card = dialog_open(NULL, "Remote access is still on", reason_text(st), true);
-		dialog_button(card, "OK", BUTTON_MAIN, dialog_cancel, NULL);
-	} else show_toast("Remote access is off", 2500);
+		lv_obj_t *card = dialog_open(NULL, TX_SSH_STILL_ON, reason_text(st), true);
+		dialog_button(card, TX_COMMON_OK, BUTTON_MAIN, dialog_cancel, NULL);
+	} else show_toast(TX_SSH_IS_OFF, 2500);
 	ssh_refresh();
 }
 
@@ -2994,15 +2989,15 @@ static lv_obj_t *aud_dac_head, *aud_dac_label; // a USB DAC's section: its name;
 // The OpenFrame's own card by what it is to an owner; a DAC by the full name it gives (its
 // maker's too: "Audient iD4", where ALSA's short name is "iD4").
 static const char *aud_card_name(const struct aud_card *c) {
-	if (!strcmp(c->kind, "builtin")) return "Speaker and headphones";
+	if (!strcmp(c->kind, "builtin")) return TX_AUDIO_BUILTIN;
 	static struct audio_dac d;
 	return audio_dac_info(c->id, &d) && d.name[0] ? d.name : c->name;
 }
 
 static void aud_now_show(int v) {
 	char t[16] = "";
-	if (v == 0) snprintf(t, sizeof t, "OFF");
-	else if (v > 0) snprintf(t, sizeof t, "NOW %d%%", v);
+	if (v == 0) snprintf(t, sizeof t, TX_COMMON_OFF);
+	else if (v > 0) snprintf(t, sizeof t, TX_COMMON_NOW_PERCENT, v);
 	set_text(aud_now, t);
 }
 
@@ -3011,8 +3006,8 @@ static void aud_choose(lv_event_t *e);
 // A rate as people say it: 44.1 kHz, 96 kHz (a USB DAC's momentary rate, near enough).
 static void rate_text(int r, char *o, size_t n) {
 	r = (r + 50) / 100 * 100;
-	if (r % 1000) snprintf(o, n, "%.1f kHz", r / 1000.0);
-	else snprintf(o, n, "%d kHz", r / 1000);
+	if (r % 1000) snprintf(o, n, TX_AUDIO_RATE_KHZ_FRAC, r / 1000.0);
+	else snprintf(o, n, TX_AUDIO_RATE_KHZ, r / 1000);
 }
 
 // The DAC in use: how it's connected, what it takes, and what it's playing now, as the kernel
@@ -3028,30 +3023,30 @@ static void aud_dac_show(void) {
 	snprintf(head, sizeof head, "%s", d.name);
 	for (char *c = head; *c; c++) *c = (char)toupper((unsigned char)*c); // as the other headings
 	set_text(aud_dac_head, head);
-	const char *sp = !strcmp(d.speed, "high speed") ? "USB 2.0 high speed (480 Mbit/s)"
-		       : !strcmp(d.speed, "full speed") ? "USB full speed (12 Mbit/s)"
-		       : !strcmp(d.speed, "super speed") ? "USB 3 (5 Gbit/s)" : d.speed;
+	const char *sp = !strcmp(d.speed, "high speed") ? TX_AUDIO_DAC_USB2
+		       : !strcmp(d.speed, "full speed") ? TX_AUDIO_DAC_USB1
+		       : !strcmp(d.speed, "super speed") ? TX_AUDIO_DAC_USB3 : d.speed;
 	char lo[16], hi[16], bits[24], now[80], t[360];
 	rate_text(d.rate_min, lo, sizeof lo);
 	rate_text(d.rate_max, hi, sizeof hi);
 	if (d.bits_min == d.bits_max) snprintf(bits, sizeof bits, "%d-bit", d.bits_max);
-	else snprintf(bits, sizeof bits, "%d or %d-bit", d.bits_min, d.bits_max);
+	else snprintf(bits, sizeof bits, TX_AUDIO_DAC_BITS_EITHER, d.bits_min, d.bits_max);
 	// what it's playing: as it was opened (hw_params), or on an older kernel, as stream0 has it
 	bool playing = d.hw_known ? d.hw_rate > 0 : d.running && d.run_rate > 0;
 	int now_bits = d.hw_known ? d.hw_bits : d.run_bits, now_rate = d.hw_known ? d.hw_rate : d.run_rate;
-	const char *way = aud_direct ? "direct to the DAC, unchanged" : "mixed";
+	const char *way = aud_direct ? TX_AUDIO_DAC_DIRECT : "mixed";
 	if (playing) {
 		char r[16];
 		rate_text(now_rate, r, sizeof r);
-		if (now_bits) snprintf(now, sizeof now, "%d-bit at %s, %s", now_bits, r, way);
+		if (now_bits) snprintf(now, sizeof now, TX_AUDIO_DAC_NOW, now_bits, r, way);
 		else snprintf(now, sizeof now, "%s, %s", r, way);
-	} else snprintf(now, sizeof now, "not playing");
+	} else snprintf(now, sizeof now, TX_AUDIO_DAC_NOT_PLAYING);
 	// "44.1 to 96 kHz": the unit once
 	char *k = strstr(lo, " kHz");
 	if (k && d.rate_max != d.rate_min) *k = 0;
-	snprintf(t, sizeof t, "%s%s\nTakes %s, %s%s%s\nNow: %s", sp,
-		 d.async ? "\nAsynchronous: the DAC sets the clock" : "", bits, lo,
-		 d.rate_max != d.rate_min ? " to " : "", d.rate_max != d.rate_min ? hi : "", now);
+	snprintf(t, sizeof t, TX_AUDIO_DAC_LINES, sp,
+		 d.async ? TX_AUDIO_DAC_ASYNC : "", bits, lo,
+		 d.rate_max != d.rate_min ? TX_AUDIO_DAC_TO : "", d.rate_max != d.rate_min ? hi : "", now);
 	set_text(aud_dac_label, t);
 }
 
@@ -3086,13 +3081,13 @@ static void aud_show(void) {
 		lv_obj_set_style_text_color(n, lv_color_hex(C_TEXT), 0);
 		lv_obj_t *k = lv_label_create(r);
 		bool on = !strcmp(c->id, aud_out);
-		lv_label_set_text(k, on ? LV_SYMBOL_OK : (!strcmp(c->kind, "usb") ? "USB" : ""));
+		lv_label_set_text(k, on ? LV_SYMBOL_OK : (!strcmp(c->kind, "usb") ? TX_AUDIO_USB : ""));
 		lv_obj_set_style_text_color(k, lv_color_hex(on ? C_ACCENT : C_DIM), 0);
 		if (!on) lv_obj_set_style_text_font(k, &lv_font_montserrat_16, 0);
 	}
 	if (!aud_n) {
 		lv_obj_t *n = lv_label_create(aud_list);
-		lv_label_set_text(n, aud_known ? "No sound cards" : "");
+		lv_label_set_text(n, aud_known ? TX_AUDIO_NO_CARDS : "");
 		lv_obj_set_style_text_color(n, lv_color_hex(C_DIM), 0);
 	}
 	bool usb = !strcmp(aud_kind, "usb"), vol = aud_managed && aud_n && !aud_direct && aud_mixer[0], any_dac = false;
@@ -3109,12 +3104,10 @@ static void aud_show(void) {
 	lv_obj_t *sw = lv_obj_get_child(aud_direct_row, 1);
 	if (aud_direct) lv_obj_add_state(sw, LV_STATE_CHECKED);
 	else lv_obj_remove_state(sw, LV_STATE_CHECKED);
-	const char *note = !aud_managed ? "Sound is set up by hand on this OpenFrame (an asound.conf of its own), so it's "
-					  "left as it is."
-			   : usb && aud_direct ? "The DAC gets the audio as it is: nothing mixed in, nothing resampled. Set the "
-						 "volume on your amplifier. One app can play at a time."
-			   : usb ? "Turn this on to send the DAC the audio untouched, and set the volume on your amplifier."
-			   : aud_n && !any_dac ? "Plug in a USB DAC and the sound goes there." : "";
+	const char *note = !aud_managed ? TX_AUDIO_NOTE_BY_HAND
+			   : usb && aud_direct ? TX_AUDIO_NOTE_DIRECT_ON
+			   : usb ? TX_AUDIO_NOTE_DIRECT_OFF
+			   : aud_n && !any_dac ? TX_AUDIO_NOTE_PLUG_IN : "";
 	set_text(aud_note, note);
 	show_if(aud_note, note[0]);
 	// The mixer's rate: only while the audio's mixed (Direct to DAC sends it at its own), and
@@ -3173,7 +3166,7 @@ static void aud_status_done(char *reply, void *data) {
 		for (int i = 0; i < aud_n; i++)
 			if (!strcmp(aud_cards[i].id, aud_out)) {
 				char t[120];
-				snprintf(t, sizeof t, "Playing through %s", aud_card_name(&aud_cards[i]));
+				snprintf(t, sizeof t, TX_AUDIO_PLAYING_THROUGH, aud_card_name(&aud_cards[i]));
 				show_toast(t, 3500);
 			}
 	aud_show();
@@ -3184,8 +3177,8 @@ static void aud_refresh(void) { helper_request("audio-status\n", aud_status_done
 static void aud_set_done(char *reply, void *data) {
 	const char *st = helper_reply_status(reply);
 	if (strcmp(st, "ok")) {
-		lv_obj_t *card = dialog_open(NULL, "The sound output wasn't changed", reason_text(st), true);
-		dialog_button(card, "OK", BUTTON_MAIN, dialog_cancel, NULL);
+		lv_obj_t *card = dialog_open(NULL, TX_AUDIO_NOT_CHANGED, reason_text(st), true);
+		dialog_button(card, TX_COMMON_OK, BUTTON_MAIN, dialog_cancel, NULL);
 	}
 	aud_refresh();
 }
@@ -3235,15 +3228,15 @@ static lv_obj_t *aud_test_btn;
 static lv_timer_t *aud_test_timer;
 static void aud_test_tick(lv_timer_t *t) {
 	int s = audio_test_state();
-	static const char *says[] = { LV_SYMBOL_AUDIO "  Test sound", LV_SYMBOL_AUDIO "  Left...", LV_SYMBOL_AUDIO "  Right...",
-				      LV_SYMBOL_AUDIO "  Both..." };
+	static const char *says[] = { LV_SYMBOL_AUDIO "  " TX_AUDIO_TEST, LV_SYMBOL_AUDIO "  " TX_AUDIO_TEST_LEFT, LV_SYMBOL_AUDIO "  " TX_AUDIO_TEST_RIGHT,
+				      LV_SYMBOL_AUDIO "  " TX_AUDIO_TEST_BOTH };
 	set_text(lv_obj_get_child(aud_test_btn, 0), says[s > 0 ? s : 0]);
 	if (s > 0) return;
 	lv_timer_delete(aud_test_timer);
 	aud_test_timer = NULL;
 	if (s < 0) {
 		audio_test_seen();
-		show_toast(aud_direct ? "The DAC is busy: something else is playing to it" : "The test sound couldn't play", 3500);
+		show_toast(aud_direct ? TX_AUDIO_TEST_BUSY : TX_AUDIO_TEST_FAILED, 3500);
 	}
 }
 static void aud_test_clicked(lv_event_t *e) {
@@ -3294,9 +3287,9 @@ static void name_refresh(void) {
 static void name_set_done(char *reply, void *data) {
 	const char *st = helper_reply_status(reply);
 	if (strcmp(st, "ok")) {
-		lv_obj_t *card = dialog_open(NULL, "The name wasn't changed", reason_text(st), true);
-		dialog_button(card, "OK", BUTTON_MAIN, dialog_cancel, NULL);
-	} else show_toast("Renamed", 2500);
+		lv_obj_t *card = dialog_open(NULL, TX_NAME_NOT_CHANGED, reason_text(st), true);
+		dialog_button(card, TX_COMMON_OK, BUTTON_MAIN, dialog_cancel, NULL);
+	} else show_toast(TX_NAME_RENAMED, 2500);
 	name_refresh();
 }
 
@@ -3318,11 +3311,10 @@ static void name_clicked(lv_event_t *e) {
 }
 
 static void ssh_off_clicked(lv_event_t *e) {
-	lv_obj_t *card = dialog_open(NULL, "Turn off remote access?",
-				     "The password for logging in is removed, along with any keys, and anyone logged in "
-				     "now is disconnected. Setting a password turns it on again.", true);
-	dialog_button(card, "Turn off", BUTTON_DANGER, ssh_off_go, NULL);
-	dialog_button(card, "Cancel", BUTTON_OTHER, dialog_cancel, NULL);
+	lv_obj_t *card = dialog_open(NULL, TX_SSH_OFF_ASK,
+				     TX_SSH_OFF_ASK_NOTE, true);
+	dialog_button(card, TX_SSH_TURN_OFF, BUTTON_DANGER, ssh_off_go, NULL);
+	dialog_button(card, TX_COMMON_CANCEL, BUTTON_OTHER, dialog_cancel, NULL);
 }
 
 /* ---- updates: the Updates tab (sprite-helper's update-* requests, of-update) ---- */
@@ -3338,11 +3330,11 @@ static char upd_listed[2048]; // what the list shows now, to redraw it only when
 
 // A part of the OpenFrame tier, by what it is, for its small print.
 static const char *upd_part(const char *pkg) {
-	if (!strcmp(pkg, "openframe-sprite")) return "Sprite";
-	if (!strcmp(pkg, "openframe-scripts")) return "System";
-	if (!strcmp(pkg, "openframe-crystalhd")) return "Crystal HD";
-	if (!strcmp(pkg, "openframe-resampler")) return "Resampler";
-	if (!strncmp(pkg, "linux-image-", 12)) return "Kernel";
+	if (!strcmp(pkg, "openframe-sprite")) return TX_UPD_PART_SPRITE;
+	if (!strcmp(pkg, "openframe-scripts")) return TX_UPD_PART_SYSTEM;
+	if (!strcmp(pkg, "openframe-crystalhd")) return TX_UPD_PART_CRYSTALHD;
+	if (!strcmp(pkg, "openframe-resampler")) return TX_UPD_PART_RESAMPLER;
+	if (!strncmp(pkg, "linux-image-", 12)) return TX_UPD_PART_KERNEL;
 	return pkg;
 }
 
@@ -3391,7 +3383,7 @@ static void news_done(char *reply, void *data) {
 	lv_obj_clean(news_body);
 	if (strcmp(st, "ok")) {
 		lv_obj_t *l = lv_label_create(news_body);
-		lv_label_set_text(l, strncmp(st, "error: ", 7) ? "Can't tell" : st + 7);
+		lv_label_set_text(l, strncmp(st, "error: ", 7) ? TX_COMMON_CANT_TELL : st + 7);
 		return;
 	}
 	static char lines[256][200];
@@ -3407,10 +3399,10 @@ static void news_done(char *reply, void *data) {
 		if (!strncmp(pkg, "linux-image-openframe-", 22)) continue; // the kernel's metapackage
 		any = true;
 		char head[128], up[64];
-		const char *name = strcmp(tier, "openframe") ? (strcmp(tier, "firmware") ? (strncmp(pkg, "ofapp-", 6) ? pkg : pkg + 6) : "Firmware") : upd_part(pkg);
+		const char *name = strcmp(tier, "openframe") ? (strcmp(tier, "firmware") ? (strncmp(pkg, "ofapp-", 6) ? pkg : pkg + 6) : TX_UPD_FIRMWARE) : upd_part(pkg);
 		snprintf(up, sizeof up, "%s", name);
 		for (char *c = up; *c; c++) *c = (char)toupper((unsigned char)*c);
-		snprintf(head, sizeof head, "%s, VERSION %s", up, no_epoch(ver));
+		snprintf(head, sizeof head, TX_UPD_NOTES_HEAD, up, no_epoch(ver));
 		section(news_body, head);
 		// its notes: news=<pkg>\t<version>\t<note>, newest first
 		int notes = 0;
@@ -3430,13 +3422,13 @@ static void news_done(char *reply, void *data) {
 		}
 		if (!notes) {
 			lv_obj_t *l = lv_label_create(news_body);
-			lv_label_set_text(l, "Bug fixes and improvements.");
+			lv_label_set_text(l, TX_UPD_NOTES_DEFAULT);
 			lv_obj_set_style_text_color(l, lv_color_hex(C_TEXT), 0);
 		}
 	}
 	if (!any) {
 		lv_obj_t *l = lv_label_create(news_body);
-		lv_label_set_text(l, "Nothing waiting now.");
+		lv_label_set_text(l, TX_UPD_NOTES_NOTHING);
 		lv_obj_set_style_text_color(l, lv_color_hex(C_DIM), 0);
 	}
 }
@@ -3445,7 +3437,7 @@ static void news_open(lv_event_t *e) {
 	snprintf(news_which, sizeof news_which, "%s", (const char *)lv_event_get_user_data(e));
 	lv_obj_clean(news_body);
 	lv_obj_t *l = lv_label_create(news_body);
-	lv_label_set_text(l, "Loading...");
+	lv_label_set_text(l, TX_UPD_LOADING);
 	lv_obj_set_style_text_color(l, lv_color_hex(C_DIM), 0);
 	show_page(page_news);
 	lv_obj_scroll_to_y(page_news, 0, LV_ANIM_OFF);
@@ -3461,7 +3453,7 @@ static void build_news(lv_obj_t *scr) {
 	page_news = list_page(scr);
 	lv_obj_t *br = button_row(page_news);
 	lv_obj_set_style_translate_x(br, BACK_X - CONTENT_X, 0); // the back button's place (BACK_X)
-	lv_obj_set_width(button(br, LV_SYMBOL_LEFT "  Settings", BUTTON_MAIN, news_back, NULL), BACK_W);
+	lv_obj_set_width(button(br, LV_SYMBOL_LEFT "  " TX_BACK_SETTINGS, BUTTON_MAIN, news_back, NULL), BACK_W);
 	news_body = lv_obj_create(page_news);
 	lv_obj_remove_style_all(news_body);
 	lv_obj_set_size(news_body, LV_PCT(100), LV_SIZE_CONTENT);
@@ -3522,19 +3514,18 @@ static void upd_show_list(char items[][96], int n, bool firmware_pending) {
 	bool fw_shown = false;
 	for (int i = 0; i < m; i++) {
 		if (strcmp(it[i].tier, "firmware")) continue;
-		section(upd_list, "FIRMWARE");
-		snprintf(t, sizeof t, "Version %s", no_epoch(it[i].ver));
+		section(upd_list, TX_UPD_HEAD_FIRMWARE);
+		snprintf(t, sizeof t, TX_UPD_VERSION, no_epoch(it[i].ver));
 		row_pressable(upd_row(t, "", false), news_open, "firmware"); // flashed at the restart, so never ticked here
 		fw_shown = true;
 	}
 	if (firmware_pending && !fw_shown) {
-		section(upd_list, "FIRMWARE");
-		upd_row("At the next restart", "", false);
+		section(upd_list, TX_UPD_HEAD_FIRMWARE);
+		upd_row(TX_UPD_FIRMWARE_WHEN, "", false);
 		fw_shown = true;
 	}
 	if (fw_shown)
-		upd_small("At the next restart, the OpenFrame updates its firmware. The screen shows the progress for "
-			  "a minute or two, then it restarts once more by itself. Don't switch it off while that happens.");
+		upd_small(TX_UPD_FIRMWARE_NOTE);
 	// the OpenFrame's own: a row a part (Sprite, System, Kernel...), its version at the right
 	// and its notes behind the chevron
 	static char part_pkgs[8][64]; // what their rows open (the list is redrawn, these stay)
@@ -3542,7 +3533,7 @@ static void upd_show_list(char items[][96], int n, bool firmware_pending) {
 	for (int i = 0; i < m && n_parts < 8; i++) {
 		if (strcmp(it[i].tier, "openframe")) continue;
 		if (!strncmp(it[i].pkg, "linux-image-openframe-", 22)) continue; // the kernel's metapackage
-		if (!n_parts) section(upd_list, "OPENFRAME");
+		if (!n_parts) section(upd_list, TX_UPD_HEAD_OPENFRAME);
 		snprintf(part_pkgs[n_parts], sizeof part_pkgs[0], "%.63s", it[i].pkg);
 		row_pressable(upd_row(upd_part(it[i].pkg), no_epoch(it[i].ver), it[i].done), news_open, part_pkgs[n_parts++]);
 	}
@@ -3552,7 +3543,7 @@ static void upd_show_list(char items[][96], int n, bool firmware_pending) {
 	int n_app_pkgs = 0;
 	for (int i = 0; i < m; i++) {
 		if (strcmp(it[i].tier, "apps")) continue;
-		if (!apps) { section(upd_list, "APPS"); apps = true; }
+		if (!apps) { section(upd_list, TX_UPD_HEAD_APPS); apps = true; }
 		if (n_app_pkgs >= 32) continue;
 		snprintf(app_pkgs[n_app_pkgs], sizeof app_pkgs[0], "%.63s", it[i].pkg);
 		row_pressable(upd_row(strncmp(it[i].pkg, "ofapp-", 6) ? it[i].pkg : it[i].pkg + 6, no_epoch(it[i].ver), it[i].done),
@@ -3569,9 +3560,9 @@ static void upd_show_list(char items[][96], int n, bool firmware_pending) {
 		snprintf(names + at, sizeof names - at, "%s%.63s", at ? ", " : "", it[i].pkg);
 	}
 	if (n_deb) {
-		section(upd_list, "FROM DEBIAN");
-		snprintf(t, sizeof t, n_deb == 1 ? "1 package" : "%d packages", n_deb);
-		upd_row("Security and bug fixes", t, deb_done == n_deb);
+		section(upd_list, TX_UPD_HEAD_DEBIAN);
+		snprintf(t, sizeof t, n_deb == 1 ? TX_UPD_PACKAGES_ONE : TX_UPD_PACKAGES, n_deb);
+		upd_row(TX_UPD_DEBIAN, t, deb_done == n_deb);
 		upd_small(names);
 	}
 	lv_obj_t *first = lv_obj_get_child(upd_list, 0); // (none if nothing listed has a row)
@@ -3628,8 +3619,8 @@ static void upd_hour_set(int h) {
 static void upd_time_done(char *reply, void *data) {
 	const char *st = helper_reply_status(reply);
 	if (strcmp(st, "ok")) {
-		lv_obj_t *card = dialog_open(NULL, "The time wasn't changed", reason_text(st), true);
-		dialog_button(card, "OK", BUTTON_MAIN, dialog_cancel, NULL);
+		lv_obj_t *card = dialog_open(NULL, TX_UPD_TIME_NOT_CHANGED, reason_text(st), true);
+		dialog_button(card, TX_COMMON_OK, BUTTON_MAIN, dialog_cancel, NULL);
 	}
 }
 
@@ -3673,13 +3664,12 @@ static void upd_time_save(lv_event_t *e) {
 }
 
 static void upd_time_clicked(lv_event_t *e) {
-	lv_obj_t *card = dialog_open(NULL, "Update time",
-				     "Updates install within half an hour of this time each day. If one needs a "
-				     "restart, the OpenFrame restarts then too, so pick a time nobody's watching.", true);
+	lv_obj_t *card = dialog_open(NULL, TX_UPD_TIME,
+				     TX_UPD_TIME_ASK, true);
 	lv_obj_t *st = time_stepper(card);
 	lv_obj_set_width(st, LV_PCT(100));
-	dialog_button(card, "Save", BUTTON_MAIN, upd_time_save, NULL);
-	dialog_button(card, "Cancel", BUTTON_OTHER, dialog_cancel, NULL);
+	dialog_button(card, TX_COMMON_SAVE, BUTTON_MAIN, upd_time_save, NULL);
+	dialog_button(card, TX_COMMON_CANCEL, BUTTON_OTHER, dialog_cancel, NULL);
 }
 
 // The progress bar: a percentage, or a segment sliding along it while there's nothing to measure.
@@ -3724,7 +3714,7 @@ static void upd_status_done(char *reply, void *data) {
 	const char *st = helper_reply_status(reply);
 	if (!upd_status_label) return;
 	if (strcmp(st, "ok")) {
-		set_text(upd_status_label, strncmp(st, "error: ", 7) ? "Can't tell" : st + 7);
+		set_text(upd_status_label, strncmp(st, "error: ", 7) ? TX_COMMON_CANT_TELL : st + 7);
 		set_text(upd_detail_label, "");
 		show_if(upd_now_btn, false);
 		show_if(upd_restart_btn, false);
@@ -3777,46 +3767,46 @@ static void upd_status_done(char *reply, void *data) {
 	// The bar: a percentage while there's something to measure; UPD_SLIDING while it's busy
 	// with nothing to measure yet (looking, planning, a download not begun); UPD_NO_BAR idle.
 	int progress = UPD_NO_BAR;
-	if (!strcmp(state, "checking")) { snprintf(t, sizeof t, "Checking for updates..."); progress = UPD_SLIDING; }
-	else if (!strcmp(state, "preparing")) { snprintf(t, sizeof t, "Getting ready to update..."); progress = UPD_SLIDING; }
+	if (!strcmp(state, "checking")) { snprintf(t, sizeof t, TX_UPD_CHECKING); progress = UPD_SLIDING; }
+	else if (!strcmp(state, "preparing")) { snprintf(t, sizeof t, TX_UPD_PREPARING); progress = UPD_SLIDING; }
 	else if (!strcmp(state, "downloading")) {
-		snprintf(t, sizeof t, "Downloading updates...");
+		snprintf(t, sizeof t, TX_UPD_DOWNLOADING);
 		progress = UPD_SLIDING;
 		if (size > 0 && got > 0) {
 			progress = (int)((long long)got * 100 / size); // (long is 32-bit here: past 21 MB it overflowed)
-			if (size >= 1024 * 1024) snprintf(d, sizeof d, "%.1f of %.1f MB", got / 1048576.0, size / 1048576.0);
-			else snprintf(d, sizeof d, "%ld of %ld KB", got / 1024, size / 1024);
+			if (size >= 1024 * 1024) snprintf(d, sizeof d, TX_UPD_MB_OF, got / 1048576.0, size / 1048576.0);
+			else snprintf(d, sizeof d, TX_UPD_KB_OF, got / 1024, size / 1024);
 		}
 	} else if (!strcmp(state, "installing") && n_items > 0 && n_done == n_items) {
 		// all in: unattended-upgrades tidies up for a few seconds more (what it left behind)
-		snprintf(t, sizeof t, "Finishing up...");
+		snprintf(t, sizeof t, TX_UPD_FINISHING);
 		progress = 100;
 	} else if (!strcmp(state, "installing")) {
 		// what's going in, by name; before the first, unattended-upgrades works out the order
 		if (now_pkg[0]) {
 			const char *name = !strncmp(now_pkg, "openframe-", 10) || !strncmp(now_pkg, "linux-image-", 12) ? upd_part(now_pkg)
 					   : !strncmp(now_pkg, "ofapp-", 6) ? now_pkg + 6 : now_pkg;
-			snprintf(t, sizeof t, "Installing %s...", name);
-		} else if (!n_done) snprintf(t, sizeof t, "Getting ready to install...");
-		else snprintf(t, sizeof t, "Installing updates...");
+			snprintf(t, sizeof t, TX_UPD_INSTALLING_PKG, name);
+		} else if (!n_done) snprintf(t, sizeof t, TX_UPD_INSTALLING_READY);
+		else snprintf(t, sizeof t, TX_UPD_INSTALLING);
 		progress = UPD_SLIDING;
 		if (n_items > 0) {
 			// an unpacked one, not yet configured, is half in: so even one update moves
 			int p = (n_done * 2 + n_partial) * 50 / n_items;
 			if (p > 0) progress = p;
 			int rows_in, rows = upd_rows(items, n_items, &rows_in);
-			if (rows > 0) snprintf(d, sizeof d, "%d of %d", rows_in, rows); // as the list shows them
+			if (rows > 0) snprintf(d, sizeof d, TX_UPD_N_OF, rows_in, rows); // as the list shows them
 		}
 	}
-	else if (needs_restart) { snprintf(t, sizeof t, "Restart to finish updating"); colour = C_WARN; }
-	else if (failed) { snprintf(t, sizeof t, "The last update didn't work"); colour = C_WARN; }
+	else if (needs_restart) { snprintf(t, sizeof t, TX_UPD_RESTART_TO_FINISH); colour = C_WARN; }
+	else if (failed) { snprintf(t, sizeof t, TX_UPD_FAILED); colour = C_WARN; }
 	else if (pending > 0) {
 		int rows = n_items ? upd_rows(items, n_items, NULL) : pending; // (an older of-update: no items)
 		if (rows < 1) rows = pending;
-		snprintf(t, sizeof t, rows == 1 ? "1 update waiting" : "%d updates waiting", rows);
+		snprintf(t, sizeof t, rows == 1 ? TX_UPD_ONE_WAITING : TX_UPD_N_WAITING, rows);
 	}
-	else if (last || checked) snprintf(t, sizeof t, "Up to date");
-	else snprintf(t, sizeof t, "Not checked yet");
+	else if (last || checked) snprintf(t, sizeof t, TX_UPD_UP_TO_DATE);
+	else snprintf(t, sizeof t, TX_UPD_NOT_CHECKED);
 	if (idle) {
 		long when = failed ? checked : last > checked ? last : checked;
 		if (when) { upd_when(when, w, sizeof w); snprintf(d, sizeof d, "%s %s", failed || last < checked ? "checked" : "updated", w); }
@@ -3842,7 +3832,7 @@ static void upd_status_done(char *reply, void *data) {
 	time_t now = time(NULL);
 	if (idle && checked && now - checked > 6 * 3600 && now - auto_asked > 600 && settings_tab == TAB_UPDATES && showing(page_settings)) {
 		auto_asked = now;
-		set_text(upd_status_label, "Checking for updates...");
+		set_text(upd_status_label, TX_UPD_CHECKING);
 		set_text(upd_detail_label, "");
 		upd_busy(true);
 		upd_requested = now;
@@ -3855,7 +3845,7 @@ static void upd_status_done(char *reply, void *data) {
 	// too, as when an earlier update was left half done (of-update finishes it), so it can
 	// always be put right from here, without a command line.
 	show_if(upd_now_btn, (pending > 0 || failed) && !needs_restart);
-	set_text(lv_obj_get_child(upd_now_btn, 0), failed ? LV_SYMBOL_REFRESH "  Try again" : LV_SYMBOL_DOWNLOAD "  Update now");
+	set_text(lv_obj_get_child(upd_now_btn, 0), failed ? LV_SYMBOL_REFRESH "  " TX_COMMON_TRY_AGAIN : LV_SYMBOL_DOWNLOAD "  " TX_UPD_UPDATE_NOW);
 	show_if(upd_restart_btn, needs_restart);
 	show_if(upd_check_btn, true);
 }
@@ -3870,15 +3860,15 @@ static void upd_started(char *reply, void *data) {
 	const char *st = helper_reply_status(reply);
 	if (strcmp(st, "ok")) {
 		upd_requested = 0; // it won't start: back to the buttons
-		lv_obj_t *card = dialog_open(NULL, "Couldn't start", reason_text(st), true);
-		dialog_button(card, "OK", BUTTON_MAIN, dialog_cancel, NULL);
+		lv_obj_t *card = dialog_open(NULL, TX_UPD_COULDNT_START, reason_text(st), true);
+		dialog_button(card, TX_COMMON_OK, BUTTON_MAIN, dialog_cancel, NULL);
 	}
 	upd_refresh();
 	update_net(NULL); // the bar's spinner now, not at its next look
 }
 
 static void upd_check_clicked(lv_event_t *e) {
-	set_text(upd_status_label, "Checking for updates...");
+	set_text(upd_status_label, TX_UPD_CHECKING);
 	set_text(upd_detail_label, "");
 	upd_busy(true);
 	upd_bar_show(UPD_SLIDING);
@@ -3887,7 +3877,7 @@ static void upd_check_clicked(lv_event_t *e) {
 }
 
 static void upd_now_clicked(lv_event_t *e) {
-	set_text(upd_status_label, "Checking for updates...");
+	set_text(upd_status_label, TX_UPD_CHECKING);
 	set_text(upd_detail_label, "");
 	upd_busy(true);
 	upd_bar_show(UPD_SLIDING);
@@ -3983,14 +3973,14 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_pad_ver(rail, CONTENT_TOP, 0);
 	lv_obj_set_style_pad_row(rail, 4, 0);
 	lv_obj_remove_flag(rail, LV_OBJ_FLAG_SCROLLABLE);
-	lv_obj_t *home = button(rail, LV_SYMBOL_LEFT "  Home", BUTTON_MAIN, back_clicked, NULL);
+	lv_obj_t *home = button(rail, LV_SYMBOL_LEFT "  " TX_BACK_HOME, BUTTON_MAIN, back_clicked, NULL);
 	lv_obj_set_width(home, BACK_W); // the tabs' width: its arrow and colour set it apart
 	lv_obj_set_style_margin_bottom(home, HEADING_SPACE, 0);
 	// The tabs for settings, in alphabetical order; then, under a line, About and Power, which
 	// aren't settings so much as the unit itself (alphabetical too).
-	settings_tab_new(rail, TAB_AUDIO, UI_ICON_VOLUME_2, "Audio");
-	settings_tab_new(rail, TAB_DISPLAY, UI_ICON_SUN, "Display");
-	lv_obj_t *nt = settings_tab_new(rail, TAB_NETWORK, UI_ICON_WIFI, "Network");
+	settings_tab_new(rail, TAB_AUDIO, UI_ICON_VOLUME_2, TX_TAB_AUDIO);
+	settings_tab_new(rail, TAB_DISPLAY, UI_ICON_SUN, TX_TAB_DISPLAY);
+	lv_obj_t *nt = settings_tab_new(rail, TAB_NETWORK, UI_ICON_WIFI, TX_TAB_NETWORK);
 	net_tab_dot = lv_obj_create(nt); // there while the network settings have a problem
 	lv_obj_remove_style_all(net_tab_dot);
 	lv_obj_add_flag(net_tab_dot, LV_OBJ_FLAG_IGNORE_LAYOUT); // at the end, taking no room from the name
@@ -4001,7 +3991,7 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_bg_opa(net_tab_dot, LV_OPA_COVER, 0);
 	lv_obj_remove_flag(net_tab_dot, LV_OBJ_FLAG_CLICKABLE);
 	lv_obj_add_flag(net_tab_dot, LV_OBJ_FLAG_HIDDEN);
-	settings_tab_new(rail, TAB_UPDATES, UI_ICON_REFRESH_CW, "Updates");
+	settings_tab_new(rail, TAB_UPDATES, UI_ICON_REFRESH_CW, TX_TAB_UPDATES);
 	lv_obj_t *rule = lv_obj_create(rail); // a hairline, inset as the tabs' glyphs are
 	lv_obj_remove_style_all(rule);
 	lv_obj_set_size(rule, BACK_W - 2 * 14, 1);
@@ -4009,8 +3999,8 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_margin_ver(rule, 4, 0);
 	lv_obj_set_style_bg_color(rule, lv_color_white(), 0);
 	lv_obj_set_style_bg_opa(rule, LV_OPA_10, 0);
-	settings_tab_new(rail, TAB_ABOUT, UI_ICON_INFO, "About");
-	settings_tab_new(rail, TAB_POWER, UI_ICON_POWER, "Power");
+	settings_tab_new(rail, TAB_ABOUT, UI_ICON_INFO, TX_TAB_ABOUT);
+	settings_tab_new(rail, TAB_POWER, UI_ICON_POWER, TX_TAB_POWER);
 
 	// Network: Wi-Fi (on units with a card) and remote access
 	lv_obj_t *pn = settings_panel_new(TAB_NETWORK);
@@ -4022,7 +4012,7 @@ static void build_settings(lv_obj_t *scr) {
 	struct sprite_net net;
 	sysinfo_net(&net);
 	if (net.wifi_present) {
-		section(pn, "WI-FI");
+		section(pn, TX_NET_HEAD_WIFI);
 		lv_obj_t *r = lv_obj_create(pn);
 		lv_obj_remove_style_all(r);
 		lv_obj_set_size(r, LV_PCT(100), ROW_H);
@@ -4031,7 +4021,7 @@ static void build_settings(lv_obj_t *scr) {
 		lv_obj_set_style_pad_column(r, 20, 0);
 		lv_obj_remove_flag(r, LV_OBJ_FLAG_SCROLLABLE);
 		wifi_status_label = lv_label_create(r);
-		lv_label_set_text(wifi_status_label, "Not connected");
+		lv_label_set_text(wifi_status_label, TX_WIFI_NOT_CONNECTED);
 		lv_label_set_long_mode(wifi_status_label, LV_LABEL_LONG_DOT);
 		lv_obj_set_flex_grow(wifi_status_label, 1);
 		lv_obj_set_height(wifi_status_label, lv_font_get_line_height(lv_obj_get_style_text_font(wifi_status_label, 0))); // one line
@@ -4041,12 +4031,12 @@ static void build_settings(lv_obj_t *scr) {
 		lv_obj_set_style_text_color(wifi_detail_label, lv_color_hex(C_DIM), 0);
 		net_row_pressable(r, NETINFO_WIFI);
 		lv_obj_t *br = button_row(pn);
-		button(br, LV_SYMBOL_WIFI "  Choose network", BUTTON_MAIN, wifi_choose_clicked, NULL);
-		wifi_forget_btn = button(br, "Forget", BUTTON_OTHER, wifi_forget_ask, NULL);
+		button(br, LV_SYMBOL_WIFI "  " TX_WIFI_CHOOSE, BUTTON_MAIN, wifi_choose_clicked, NULL);
+		wifi_forget_btn = button(br, TX_WIFI_FORGET, BUTTON_OTHER, wifi_forget_ask, NULL);
 		lv_obj_add_flag(wifi_forget_btn, LV_OBJ_FLAG_HIDDEN);
 	}
 	if (net.eth_present) {
-		section(pn, "ETHERNET");
+		section(pn, TX_NET_HEAD_ETHERNET);
 		lv_obj_t *er = lv_obj_create(pn);
 		lv_obj_remove_style_all(er);
 		lv_obj_set_size(er, LV_PCT(100), ROW_H);
@@ -4067,7 +4057,7 @@ static void build_settings(lv_obj_t *scr) {
 	}
 	// Logging in over SSH as "of": images give it no password (every unit used to have the
 	// same one), so this is where an owner sets one, through the helper.
-	section(pn, "REMOTE ACCESS");
+	section(pn, TX_SSH_HEAD);
 	lv_obj_t *sr = lv_obj_create(pn);
 	lv_obj_remove_style_all(sr);
 	lv_obj_set_size(sr, LV_PCT(100), ROW_H);
@@ -4085,13 +4075,13 @@ static void build_settings(lv_obj_t *scr) {
 	lv_label_set_text(ssh_detail_label, "");
 	lv_obj_set_style_text_color(ssh_detail_label, lv_color_hex(C_DIM), 0);
 	lv_obj_t *srow = button_row(pn);
-	button(srow, LV_SYMBOL_KEYBOARD "  Set password", BUTTON_MAIN, ssh_set_clicked, NULL);
-	ssh_off_button = button(srow, "Turn off", BUTTON_OTHER, ssh_off_clicked, NULL);
+	button(srow, LV_SYMBOL_KEYBOARD "  " TX_SSH_SET_PASSWORD, BUTTON_MAIN, ssh_set_clicked, NULL);
+	ssh_off_button = button(srow, TX_SSH_TURN_OFF, BUTTON_OTHER, ssh_off_clicked, NULL);
 	lv_obj_add_flag(ssh_off_button, LV_OBJ_FLAG_HIDDEN);
 
 	// Audio: where the sound goes, how loud, and for a DAC whether the OpenFrame sets that
 	lv_obj_t *pa_ = settings_panel_new(TAB_AUDIO);
-	section(pa_, "OUTPUT");
+	section(pa_, TX_AUDIO_HEAD_OUTPUT);
 	aud_list = lv_obj_create(pa_);
 	lv_obj_remove_style_all(aud_list);
 	// Its rows' press highlight reaches past the text either side, as a list row's does: the
@@ -4113,7 +4103,7 @@ static void build_settings(lv_obj_t *scr) {
 	lv_timer_create(aud_dac_tick, 1000, NULL);
 	// on: the audio straight to the DAC as it is (of-audio direct=yes), the OpenFrame's volume
 	// control out of its way
-	aud_direct_row = switch_row(pa_, "Direct to DAC", false, aud_direct_changed);
+	aud_direct_row = switch_row(pa_, TX_AUDIO_DIRECT, false, aud_direct_changed);
 	lv_obj_set_style_pad_right(aud_direct_row, BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0); // as Display's switches
 	aud_note = lv_label_create(pa_);
 	lv_label_set_text(aud_note, "");
@@ -4121,11 +4111,10 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_text_font(aud_note, &lv_font_montserrat_16, 0);
 	lv_obj_set_style_text_color(aud_note, lv_color_hex(C_DIM), 0);
 	// The mixer's rate (of-audio's mixer_rate), while the audio's mixed
-	aud_rate_row = switch_row(pa_, "Mix at 48 kHz", false, aud_rate_changed);
+	aud_rate_row = switch_row(pa_, TX_AUDIO_RATE, false, aud_rate_changed);
 	lv_obj_set_style_pad_right(aud_rate_row, BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0);
 	aud_rate_note = lv_label_create(pa_);
-	lv_label_set_text(aud_rate_note, "Most music is made at 44.1 kHz, so that's what OpenFrame mixes at. Turn this on if you "
-					 "mostly watch video, which is usually 48 kHz.");
+	lv_label_set_text(aud_rate_note, TX_AUDIO_RATE_NOTE);
 	lv_obj_set_width(aud_rate_note, LV_PCT(100));
 	lv_obj_set_style_text_font(aud_rate_note, &lv_font_montserrat_16, 0);
 	lv_obj_set_style_text_color(aud_rate_note, lv_color_hex(C_DIM), 0);
@@ -4137,7 +4126,7 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_remove_flag(aud_vol_head, LV_OBJ_FLAG_SCROLLABLE);
 	lv_obj_set_style_margin_top(aud_vol_head, HEADING_SPACE, 0);
 	lv_obj_set_style_pad_right(aud_vol_head, BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0);
-	lv_obj_set_style_margin_top(section(aud_vol_head, "VOLUME"), 0, 0);
+	lv_obj_set_style_margin_top(section(aud_vol_head, TX_AUDIO_HEAD_VOLUME), 0, 0);
 	aud_now = section(aud_vol_head, "");
 	lv_obj_set_style_margin_top(aud_now, 0, 0);
 	aud_slider_row = lv_obj_create(pa_);
@@ -4160,9 +4149,9 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_add_event_cb(aud_slider, aud_released, LV_EVENT_INDEV_RESET, NULL);
 	lv_obj_t *test_row = button_row(pa_);
 	lv_obj_set_flex_align(test_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-	aud_test_btn = button(test_row, LV_SYMBOL_AUDIO "  Test sound", BUTTON_OTHER, aud_test_clicked, NULL);
+	aud_test_btn = button(test_row, LV_SYMBOL_AUDIO "  " TX_AUDIO_TEST, BUTTON_OTHER, aud_test_clicked, NULL);
 	lv_obj_t *th = lv_label_create(test_row);
-	lv_label_set_text(th, "Left, then right, then both");
+	lv_label_set_text(th, TX_AUDIO_TEST_NOTE);
 	lv_obj_set_style_text_font(th, &lv_font_montserrat_16, 0);
 	lv_obj_set_style_text_color(th, lv_color_hex(C_DIM), 0);
 	// Then the DAC's switch and the note, and last the DAC's own section: the volume straight
@@ -4191,7 +4180,7 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_flex_flow(bh, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(bh, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_remove_flag(bh, LV_OBJ_FLAG_SCROLLABLE);
-	lv_obj_t *bt = section(bh, "BRIGHTNESS");
+	lv_obj_t *bt = section(bh, TX_DISPLAY_HEAD_BRIGHTNESS);
 	lv_obj_set_style_margin_top(bt, 0, 0);
 	lv_obj_set_style_margin_top(bh, HEADING_SPACE, 0);
 	bl_now = section(bh, "");
@@ -4218,38 +4207,38 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_add_event_cb(bl_slider, bl_pressed, LV_EVENT_PRESSED, NULL);
 	lv_obj_add_event_cb(bl_slider, bl_dragged, LV_EVENT_VALUE_CHANGED, NULL);
 	lv_obj_t *al = lv_label_create(row);
-	lv_label_set_text(al, "Auto");
+	lv_label_set_text(al, TX_DISPLAY_AUTO);
 	lv_obj_set_style_text_font(al, &lv_font_montserrat_20, 0);
 	lv_obj_set_style_text_color(al, lv_color_hex(C_TEXT), 0);
 	bl_auto = lv_switch_create(row);
 	lv_obj_set_size(bl_auto, 72, 38);
 	lv_obj_add_event_cb(bl_auto, bl_auto_changed, LV_EVENT_VALUE_CHANGED, NULL);
 	bl_hint = lv_label_create(pd);
-	lv_label_set_text(bl_hint, "Automatic brightness follows the room, between the two ends of the slider.");
+	lv_label_set_text(bl_hint, TX_DISPLAY_AUTO_NOTE);
 	lv_obj_set_width(bl_hint, LV_PCT(100));
 	lv_obj_set_style_margin_top(bl_hint, -HINT_GAP, 0);
 	lv_obj_set_style_text_font(bl_hint, &lv_font_montserrat_16, 0);
 	lv_obj_set_style_text_color(bl_hint, lv_color_hex(C_DIM), 0);
 	lv_obj_add_flag(bl_hint, LV_OBJ_FLAG_HIDDEN);
-	bl_off_row = switch_row(pd, "Screen off in the dark", true, bl_off_changed);
+	bl_off_row = switch_row(pd, TX_DISPLAY_DARK_OFF, true, bl_off_changed);
 	lv_obj_set_style_pad_right(bl_off_row, BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0); // its switch under Auto's (that row's inset for the knob)
 	lv_obj_add_flag(bl_off_row, LV_OBJ_FLAG_HIDDEN);
-	section(pd, "TOUCH");
+	section(pd, TX_DISPLAY_HEAD_TOUCH);
 	lv_obj_t *trow = button_row(pd);
-	button(trow, LV_SYMBOL_EDIT "  Calibrate touch", BUTTON_MAIN, cal_start, NULL);
-	button(trow, LV_SYMBOL_REFRESH "  Reset", BUTTON_OTHER, cal_reset, NULL);
+	button(trow, LV_SYMBOL_EDIT "  " TX_DISPLAY_CALIBRATE, BUTTON_MAIN, cal_start, NULL);
+	button(trow, LV_SYMBOL_REFRESH "  " TX_DISPLAY_CALIBRATE_RESET, BUTTON_OTHER, cal_reset, NULL);
 
 	// Time: the clock's format (and, later, the time zone)
 	// The clock, at the end of Display (Time had a tab of its own, until Audio needed it)
 	lv_obj_t *pt = tab_panel[TAB_DISPLAY];
-	section(pt, "CLOCK");
+	section(pt, TX_DISPLAY_HEAD_CLOCK);
 	// their switches under Auto's, as the screen-off one is
-	lv_obj_set_style_pad_right(switch_row(pt, "24-hour clock", clock_24, clock24_changed), BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0);
-	lv_obj_set_style_pad_right(switch_row(pt, "Show seconds", clock_secs, seconds_changed), BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0);
+	lv_obj_set_style_pad_right(switch_row(pt, TX_DISPLAY_CLOCK24, clock_24, clock24_changed), BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0);
+	lv_obj_set_style_pad_right(switch_row(pt, TX_DISPLAY_SECONDS, clock_secs, seconds_changed), BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0);
 
 	// Updates: what of-update's doing, and asking for a look, or for the updates, now
 	lv_obj_t *pu = settings_panel_new(TAB_UPDATES);
-	section(pu, "UPDATES");
+	section(pu, TX_UPD_HEAD);
 	lv_obj_t *ur = lv_obj_create(pu);
 	lv_obj_remove_style_all(ur);
 	lv_obj_set_size(ur, LV_PCT(100), ROW_H);
@@ -4281,9 +4270,9 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_text_color(upd_note_label, lv_color_hex(C_WARN), 0);
 	lv_obj_add_flag(upd_note_label, LV_OBJ_FLAG_HIDDEN);
 	lv_obj_t *ub = upd_buttons = button_row(pu);
-	upd_now_btn = button(ub, LV_SYMBOL_DOWNLOAD "  Update now", BUTTON_MAIN, upd_now_clicked, NULL);
-	upd_restart_btn = button(ub, LV_SYMBOL_REFRESH "  Restart now", BUTTON_MAIN, power_clicked, "reboot");
-	upd_check_btn = button(ub, LV_SYMBOL_REFRESH "  Check now", BUTTON_OTHER, upd_check_clicked, NULL);
+	upd_now_btn = button(ub, LV_SYMBOL_DOWNLOAD "  " TX_UPD_UPDATE_NOW, BUTTON_MAIN, upd_now_clicked, NULL);
+	upd_restart_btn = button(ub, LV_SYMBOL_REFRESH "  " TX_UPD_RESTART_NOW, BUTTON_MAIN, power_clicked, "reboot");
+	upd_check_btn = button(ub, LV_SYMBOL_REFRESH "  " TX_UPD_CHECK_NOW, BUTTON_OTHER, upd_check_clicked, NULL);
 	lv_obj_add_flag(upd_now_btn, LV_OBJ_FLAG_HIDDEN);
 	lv_obj_add_flag(upd_restart_btn, LV_OBJ_FLAG_HIDDEN);
 	upd_list = lv_obj_create(pu); // what's waiting (upd_show_list)
@@ -4301,7 +4290,7 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_margin_right(upd_list, -LIST_ROW_PAD, 0);
 	lv_obj_set_style_pad_hor(upd_list, LIST_ROW_PAD, 0);
 	lv_obj_add_flag(upd_list, LV_OBJ_FLAG_HIDDEN);
-	section(pu, "SCHEDULE");
+	section(pu, TX_UPD_HEAD_SCHEDULE);
 	lv_obj_t *tr = lv_obj_create(pu); // the update time, opening upd_time_clicked's picker
 	lv_obj_remove_style_all(tr);
 	lv_obj_set_flex_flow(tr, LV_FLEX_FLOW_ROW);
@@ -4309,7 +4298,7 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_pad_column(tr, 20, 0);
 	lv_obj_remove_flag(tr, LV_OBJ_FLAG_SCROLLABLE);
 	lv_obj_t *tn = lv_label_create(tr);
-	lv_label_set_text(tn, "Update time");
+	lv_label_set_text(tn, TX_UPD_TIME);
 	lv_obj_set_style_text_color(tn, lv_color_hex(C_TEXT), 0);
 	lv_obj_set_flex_grow(tn, 1);
 	upd_time_label = lv_label_create(tr);
@@ -4318,8 +4307,7 @@ static void build_settings(lv_obj_t *scr) {
 	upd_hour_set(upd_hour);
 	row_pressable(tr, upd_time_clicked, NULL);
 	lv_obj_t *uh = lv_label_create(pu);
-	lv_label_set_text(uh, "The OpenFrame updates itself once a day at about this time, or soon after it "
-			      "starts if it was off then. If an update needs a restart, that happens then too.");
+	lv_label_set_text(uh, TX_UPD_TIME_NOTE);
 	lv_obj_set_width(uh, LV_PCT(100));
 	lv_obj_set_style_margin_top(uh, HINT_GAP, 0);
 	lv_obj_set_style_text_font(uh, &lv_font_montserrat_16, 0);
@@ -4328,7 +4316,7 @@ static void build_settings(lv_obj_t *scr) {
 	// About
 	lv_obj_t *pa = settings_panel_new(TAB_ABOUT);
 	// Its name (name.txt), and the hostname made from it
-	section(pa, "NAME");
+	section(pa, TX_NAME_HEAD);
 	lv_obj_t *nr = lv_obj_create(pa);
 	lv_obj_remove_style_all(nr);
 	lv_obj_set_flex_flow(nr, LV_FLEX_FLOW_ROW);
@@ -4347,38 +4335,34 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_text_font(name_host_label, &lv_font_montserrat_16, 0);
 	row_pressable(nr, name_clicked, NULL);
 	name_refresh();
-	section(pa, "ABOUT");
+	section(pa, TX_ABOUT_HEAD);
 	about_label = lv_label_create(pa);
 	lv_obj_set_style_text_font(about_label, &lv_font_montserrat_20, 0);
 	lv_obj_set_style_text_color(about_label, lv_color_hex(C_TEXT), 0);
 	lv_obj_set_style_text_line_space(about_label, 4, 0);
 	// What sprite-ping sends (system/sprite-ping): said where an owner can find it.
 	lv_obj_t *tl = lv_label_create(pa);
-	lv_label_set_text(tl, "Once an hour, this OpenFrame tells openbeak.net that it's running: its network (MAC) "
-			      "addresses, its model, the versions of its firmware and software, and how full its memory "
-			      "and storage are. Nothing else is sent. It helps us see how many OpenFrames are still "
-			      "running, and whether updates have reached them.");
+	lv_label_set_text(tl, TX_ABOUT_PING);
 	lv_obj_set_width(tl, LV_PCT(100));
 	lv_obj_set_style_margin_top(tl, HEADING_SPACE, 0);
 	lv_obj_set_style_text_font(tl, &lv_font_montserrat_16, 0);
 	lv_obj_set_style_text_color(tl, lv_color_hex(C_DIM), 0);
 	// Erasing it for its next owner (openframe-scripts' of-reset), asked twice
-	section(pa, "ERASE");
+	section(pa, TX_ERASE_HEAD);
 	lv_obj_t *el = lv_label_create(pa);
-	lv_label_set_text(el, "Puts this OpenFrame back as it came, for its next owner. Its updates and touch "
-			      "calibration stay; everything else that's been set up on it goes.");
+	lv_label_set_text(el, TX_ERASE_NOTE);
 	lv_obj_set_width(el, LV_PCT(100));
 	lv_obj_set_style_text_font(el, &lv_font_montserrat_16, 0);
 	lv_obj_set_style_text_color(el, lv_color_hex(C_DIM), 0);
 	lv_obj_t *erow = button_row(pa);
-	button(erow, LV_SYMBOL_TRASH "  Erase everything", BUTTON_DANGER, reset_ask, NULL);
+	button(erow, LV_SYMBOL_TRASH "  " TX_ERASE_BUTTON, BUTTON_DANGER, reset_ask, NULL);
 
 	// Power
 	lv_obj_t *pp = settings_panel_new(TAB_POWER);
-	section(pp, "POWER");
+	section(pp, TX_POWER_HEAD);
 	lv_obj_t *prow = button_row(pp);
-	button(prow, LV_SYMBOL_REFRESH "  Restart", BUTTON_OTHER, power_clicked, "reboot");
-	button(prow, LV_SYMBOL_POWER "  Switch off", BUTTON_DANGER, power_clicked, "poweroff");
+	button(prow, LV_SYMBOL_REFRESH "  " TX_POWER_RESTART, BUTTON_OTHER, power_clicked, "reboot");
+	button(prow, LV_SYMBOL_POWER "  " TX_POWER_OFF, BUTTON_DANGER, power_clicked, "poweroff");
 
 	// the first heading of each panel sits at its top, not a heading's space below it
 	for (int t = 0; t < N_TABS; t++) lv_obj_set_style_margin_top(lv_obj_get_child(tab_panel[t], 0), 0, 0);
@@ -4486,26 +4470,25 @@ static lv_obj_t *welcome_row(lv_obj_t *card, const char *name, const char *value
 
 static void welcome_show(lv_timer_t *t) {
 	if (dialog_backdrop || !showing(page_home)) return; // something else is in front: next start
-	lv_obj_t *card = dialog_open(NULL, "Welcome to your OpenFrame",
-				     "Tap an app on the home screen to open it, or touch and hold it for more. "
-				     "Settings are behind the gear at the top right.", false);
+	lv_obj_t *card = dialog_open(NULL, TX_WELCOME_TITLE,
+				     TX_WELCOME_NOTE, false);
 	lv_obj_set_width(card, PANEL_TEXT_W + 2 * DIALOG_PAD);
 	lv_obj_set_style_pad_row(card, 10, 0);
 	lv_obj_set_style_text_font(lv_obj_get_child(card, 1), &lv_font_montserrat_16, 0);
 	struct sprite_net n;
 	sysinfo_net(&n);
-	welcome_row(card, "Wi-Fi", n.wifi_up ? "Connected" : n.eth_up ? "Using the cable" : "Not connected", welcome_wifi);
-	welcome_row(card, "Password for remote access", "Optional", welcome_password);
-	lv_obj_t *ur = welcome_row(card, "Daily updates at", NULL, NULL);
+	welcome_row(card, TX_WELCOME_WIFI, n.wifi_up ? TX_WELCOME_CONNECTED : n.eth_up ? TX_WELCOME_CABLE : TX_WIFI_NOT_CONNECTED, welcome_wifi);
+	welcome_row(card, TX_WELCOME_PASSWORD, TX_WELCOME_OPTIONAL, welcome_password);
+	lv_obj_t *ur = welcome_row(card, TX_WELCOME_UPDATES_AT, NULL, NULL);
 	time_stepper(ur);
 	lv_obj_t *h = lv_label_create(card);
-	lv_label_set_text(h, "It restarts then if an update needs it: pick a time nobody's watching.");
+	lv_label_set_text(h, TX_WELCOME_UPDATES_AT_NOTE);
 	lv_label_set_long_mode(h, LV_LABEL_LONG_WRAP);
 	lv_obj_set_width(h, LV_PCT(100));
 	lv_obj_set_style_text_font(h, &lv_font_montserrat_16, 0);
 	lv_obj_set_style_text_color(h, lv_color_hex(C_DIM), 0);
 	lv_obj_set_style_margin_bottom(h, 8, 0);
-	dialog_button(card, "Start", BUTTON_MAIN, welcome_start, NULL);
+	dialog_button(card, TX_WELCOME_START, BUTTON_MAIN, welcome_start, NULL);
 }
 
 /* ---- updating Sprite itself: its package's postinst says so (/run/sprite-updating, with the
@@ -4530,9 +4513,9 @@ static void updating_check(void) {
 	}
 	char body[160];
 	// (the version first: LVGL breaks lines at full stops, and would split it)
-	if (ver[0]) snprintf(body, sizeof body, "Version %s. It restarts in a moment, and carries on where it was.", ver);
-	else snprintf(body, sizeof body, "It restarts in a moment, and carries on where it was.");
-	dialog_open(NULL, "Sprite has been updated", body, false);
+	if (ver[0]) snprintf(body, sizeof body, TX_UPD_SPRITE_RESTARTS, ver);
+	else snprintf(body, sizeof body, TX_UPD_SPRITE_RESTARTS_NOVER);
+	dialog_open(NULL, TX_UPD_SPRITE_UPDATED, body, false);
 	sprite_lvgl_kick();
 }
 
@@ -4551,7 +4534,7 @@ static void updating_resume(void) {
 		show_page(page_settings);
 	}
 	char t[80];
-	snprintf(t, sizeof t, strcmp(ver, "-") && ver[0] ? "Sprite is now %s" : "Sprite has been updated", ver);
+	snprintf(t, sizeof t, strcmp(ver, "-") && ver[0] ? TX_UPD_SPRITE_IS_NOW : TX_UPD_SPRITE_UPDATED, ver);
 	show_toast(t, 5000);
 }
 
