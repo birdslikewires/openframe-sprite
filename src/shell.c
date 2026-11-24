@@ -47,6 +47,7 @@
 #define BACK_W (RAIL_W - 2 * BACK_X) // 176: the width of Settings' tabs
 #define NET_ICON 20                                         // the network icons in the bar
 #define GEAR_W 40                                           // the Settings gear's touch area (and each bar icon's space)
+#define BAR_EDGE 2                                          // the gear in from the bar's right end, and the clock from its left
 // The home grid: 6 columns by 3 rows of apps, as OpenPeak's own home screen had. Each app has a
 // cell (the whole cell takes the touch) with an icon and a label of up to two lines below it.
 #define GRID_COLS 6
@@ -647,7 +648,7 @@ static void update_net(lv_timer_t *t) {
 	lv_obj_t *edge = shown ? net_box : NULL; // what the next thing leftwards goes against
 	if (aud_box && !lv_obj_has_flag(aud_box, LV_OBJ_FLAG_HIDDEN)) {
 		if (edge) lv_obj_align_to(aud_box, edge, LV_ALIGN_OUT_LEFT_MID, 0, 0);
-		else lv_obj_align(aud_box, LV_ALIGN_RIGHT_MID, -GEAR_W, 0);
+		else lv_obj_align(aud_box, LV_ALIGN_RIGHT_MID, -GEAR_W - BAR_EDGE, 0);
 		lv_obj_update_layout(aud_box);
 		edge = aud_box;
 	}
@@ -665,7 +666,7 @@ static void update_net(lv_timer_t *t) {
 		if (restart) lv_image_set_src(sign, &restart_img[firmware_at_restart()]);
 		show_if(lv_obj_get_child(upd_box, 1), updating); // the spinner
 		if (edge) lv_obj_align_to(upd_box, edge, LV_ALIGN_OUT_LEFT_MID, 0, 0);
-		else lv_obj_align(upd_box, LV_ALIGN_RIGHT_MID, -GEAR_W, 0);
+		else lv_obj_align(upd_box, LV_ALIGN_RIGHT_MID, -GEAR_W - BAR_EDGE, 0);
 		lv_obj_remove_flag(upd_box, LV_OBJ_FLAG_HIDDEN);
 	} else {
 		lv_obj_add_flag(upd_box, LV_OBJ_FLAG_HIDDEN);
@@ -691,7 +692,7 @@ static void build_bar(lv_obj_t *scr) {
 
 	// Everything in the bar is centred on its midline. Left: the time and date, as far in from
 	// the left edge as the gear's glyph is from the right.
-	int inset = (GEAR_W - text_w(LV_SYMBOL_SETTINGS, &lv_font_montserrat_20)) / 2;
+	int inset = (GEAR_W - text_w(LV_SYMBOL_SETTINGS, &lv_font_montserrat_20)) / 2 + BAR_EDGE;
 	lv_obj_t *left = bar_left = lv_obj_create(bar);
 	lv_obj_remove_style_all(left);
 	lv_obj_set_size(left, LV_SIZE_CONTENT, BAR_H);
@@ -737,11 +738,11 @@ static void build_bar(lv_obj_t *scr) {
 	lv_obj_add_flag(dots, LV_OBJ_FLAG_CLICKABLE);
 	lv_obj_add_event_cb(dots, dots_clicked, LV_EVENT_CLICKED, NULL);
 
-	// Right: Settings, a gear hard against the top and right edges, the bar's height to touch
+	// Right: Settings, a gear against the top, BAR_EDGE in from the right, the bar's height to touch
 	gear = lv_obj_create(bar);
 	lv_obj_remove_style_all(gear);
 	lv_obj_set_size(gear, GEAR_W, BAR_H);
-	lv_obj_align(gear, LV_ALIGN_TOP_RIGHT, 0, 0);
+	lv_obj_align(gear, LV_ALIGN_TOP_RIGHT, -BAR_EDGE, 0);
 	lv_obj_add_flag(gear, LV_OBJ_FLAG_CLICKABLE);
 	lv_obj_set_style_bg_color(gear, lv_color_white(), LV_STATE_PRESSED);
 	lv_obj_set_style_bg_opa(gear, LV_OPA_20, LV_STATE_PRESSED);
@@ -765,7 +766,7 @@ static void build_bar(lv_obj_t *scr) {
 	lv_obj_set_flex_align(net, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_style_pad_column(net, NET_GAP, 0);
 	lv_obj_set_style_pad_hor(net, NET_PAD, 0);
-	lv_obj_align(net, LV_ALIGN_RIGHT_MID, -GEAR_W, 0);
+	lv_obj_align(net, LV_ALIGN_RIGHT_MID, -GEAR_W - BAR_EDGE, 0);
 	lv_obj_remove_flag(net, LV_OBJ_FLAG_SCROLLABLE);
 	lv_obj_add_flag(net, LV_OBJ_FLAG_CLICKABLE);
 	lv_obj_set_style_bg_color(net, lv_color_white(), LV_STATE_PRESSED);
