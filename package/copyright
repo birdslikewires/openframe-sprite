@@ -14,5 +14,11 @@ Shipped with it, under /opt/sprite, built from Debian Trixie's sources without M
 Built into sprite:
   LVGL 9.3 (MIT), https://lvgl.io
   Lucide 0.460 (ISC), https://lucide.dev: the tile icons, as glyphs in a font
+  In LVGL's built-in fonts, which Sprite's text and symbols are drawn in:
+    Montserrat (SIL Open Font License 1.1), Copyright 2011 The Montserrat Project Authors,
+    https://github.com/JulietaUla/Montserrat
+    Font Awesome Free 5, Copyright Fonticons, Inc., https://fontawesome.com: its font under
+    the SIL Open Font License 1.1, its icons under Creative Commons Attribution 4.0
+    (https://creativecommons.org/licenses/by/4.0/)
 
 Their licences follow.
