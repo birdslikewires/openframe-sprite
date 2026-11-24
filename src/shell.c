@@ -51,6 +51,7 @@
 #define BACK_W (RAIL_W - 2 * BACK_X) // 176: the width of Settings' tabs
 #define NET_ICON 20                                         // the network icons in the bar
 #define GEAR_W 40                                           // the Settings gear's touch area (and each bar icon's space)
+#define CLOCK_PAD 8                                         // the clock's touch target, either side of it
 #define BAR_EDGE 2                                          // the gear in from the bar's right end, and the clock from its left
 // The home grid: 6 columns by 3 rows of apps, as OpenPeak's own home screen had. Each app has a
 // cell (the whole cell takes the touch) with an icon and a label of up to two lines below it.
@@ -678,6 +679,7 @@ static void update_net(lv_timer_t *t) {
 }
 
 static void gear_clicked(lv_event_t *e);
+static void clock_clicked(lv_event_t *e);
 static void dots_clicked(lv_event_t *e);
 static void net_clicked(lv_event_t *e);
 static void upd_box_clicked(lv_event_t *e);
@@ -697,15 +699,29 @@ static void build_bar(lv_obj_t *scr) {
 	// Everything in the bar is centred on its midline. Left: the time and date, as far in from
 	// the left edge as the gear's glyph is from the right.
 	int inset = (GEAR_W - text_w(LV_SYMBOL_SETTINGS, &lv_font_montserrat_20)) / 2 + BAR_EDGE;
+	// The clock is a touch target the bar's height (Settings at Display), CLOCK_PAD wider each
+	// side for its pressed light; the group is that much further left, and the date that much
+	// closer, so the time and date sit where they would without it. The date does nothing.
 	lv_obj_t *left = bar_left = lv_obj_create(bar);
 	lv_obj_remove_style_all(left);
 	lv_obj_set_size(left, LV_SIZE_CONTENT, BAR_H);
 	lv_obj_set_flex_flow(left, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(left, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-	lv_obj_set_style_pad_column(left, 10, 0);
-	lv_obj_align(left, LV_ALIGN_LEFT_MID, inset, 0);
+	lv_obj_set_style_pad_column(left, 10 - CLOCK_PAD, 0);
+	lv_obj_align(left, LV_ALIGN_LEFT_MID, inset - CLOCK_PAD, 0);
 	lv_obj_remove_flag(left, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-	bar_clock = lv_label_create(left);
+	lv_obj_t *cbox = lv_obj_create(left);
+	lv_obj_remove_style_all(cbox);
+	lv_obj_set_size(cbox, LV_SIZE_CONTENT, BAR_H);
+	lv_obj_set_style_pad_hor(cbox, CLOCK_PAD, 0);
+	lv_obj_add_flag(cbox, LV_OBJ_FLAG_CLICKABLE);
+	lv_obj_remove_flag(cbox, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_set_style_bg_color(cbox, lv_color_white(), LV_STATE_PRESSED);
+	lv_obj_set_style_bg_opa(cbox, LV_OPA_20, LV_STATE_PRESSED);
+	rounded(cbox);
+	lv_obj_add_event_cb(cbox, clock_clicked, LV_EVENT_CLICKED, NULL);
+	bar_clock = lv_label_create(cbox);
+	lv_obj_align(bar_clock, LV_ALIGN_LEFT_MID, 0, 0);
 	lv_obj_set_style_text_font(bar_clock, &lv_font_montserrat_20, 0);
 	lv_obj_set_style_text_color(bar_clock, lv_color_hex(C_TEXT), 0);
 	lv_label_set_long_mode(bar_clock, LV_LABEL_LONG_CLIP);
@@ -992,6 +1008,9 @@ static void bar_icon_tab(int t) {
 	show_page(page_settings);
 	refresh_settings(NULL);
 }
+
+// The clock: Settings at Display (where its format is set).
+static void clock_clicked(lv_event_t *e) { bar_icon_tab(TAB_DISPLAY); }
 
 // The network icons (and the warning): Settings at Network.
 static void net_clicked(lv_event_t *e) { bar_icon_tab(TAB_NETWORK); }
