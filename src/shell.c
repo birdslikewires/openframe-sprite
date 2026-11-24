@@ -32,7 +32,11 @@
 #define BL_SLIDER_H 24    // the brightness slider's bar
 #define BAR_VOL_H 16      // the volume slider the bar's speaker opens, in the bar
 #define BAR_VOL_MS 2000   // and how long it stays once it's let go
-#define BAR_VOL_ROOM (BAR_VOL_H / 2 + SLIDER_KNOB_PAD + SLIDER_KNOB_GROW + 2) // room for its knob, held
+// Room for a slider's knob, held, past either end of a slider h high: half its height, what
+// the knob reaches past it, what it grows by held, and 2 to spare. In the padding of what holds
+// it: a slider's margin in a flex row wasn't kept, and the held knob was clipped.
+#define SLIDER_ROOM(h) ((h) / 2 + SLIDER_KNOB_PAD + SLIDER_KNOB_GROW + 2)
+#define BAR_VOL_ROOM SLIDER_ROOM(BAR_VOL_H)
 #define RADIUS_RATIO (18.0 / 88.0)
 // Where content starts on every screen, below the status bar: the home grid's first icon and
 // Settings' first control sit at the same point, (CONTENT_X, BAR_H + CONTENT_TOP), and the
@@ -1753,10 +1757,10 @@ static void bl_mode_show(bool autobl) {
 		lv_slider_set_value(bl_slider, bl_max, LV_ANIM_OFF); // the right first: the left can't pass it
 		lv_slider_set_start_value(bl_slider, bl_min, LV_ANIM_OFF);
 	} else if (!autobl && range) {
-		lv_slider_set_range(bl_slider, 5, 100);
+		lv_slider_set_range(bl_slider, 1, 100);
 		lv_slider_set_mode(bl_slider, LV_SLIDER_MODE_NORMAL);
 		int b = sysinfo_backlight();
-		lv_slider_set_value(bl_slider, b >= 5 ? b : 5, LV_ANIM_OFF);
+		lv_slider_set_value(bl_slider, b >= 1 ? b : 1, LV_ANIM_OFF);
 	}
 	show_if(bl_hint, autobl);
 	show_if(bl_off_row, autobl);
@@ -4320,7 +4324,7 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_flex_flow(aud_slider_row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(aud_slider_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	// room for the knob, held (grown) too, at both ends: nothing beside it, as brightness has
-	lv_obj_set_style_pad_hor(aud_slider_row, BL_SLIDER_H / 2 + SLIDER_KNOB_PAD + SLIDER_KNOB_GROW, 0);
+	lv_obj_set_style_pad_hor(aud_slider_row, SLIDER_ROOM(BL_SLIDER_H), 0);
 	lv_obj_remove_flag(aud_slider_row, LV_OBJ_FLAG_SCROLLABLE);
 	aud_slider = lv_slider_create(aud_slider_row);
 	lv_obj_set_height(aud_slider, BL_SLIDER_H);
@@ -4378,13 +4382,14 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_style_pad_column(row, 24, 0);
-	// room for the slider's knob at either end: half the bar's height, and what it reaches past
-	lv_obj_set_style_pad_hor(row, BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0);
+	// room for the slider's knob, held, at the left end (its right end has the gap to Auto),
+	// and the row's right end in line with the switches below
+	lv_obj_set_style_pad_left(row, SLIDER_ROOM(BL_SLIDER_H), 0);
+	lv_obj_set_style_pad_right(row, BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0);
 	bl_slider = lv_slider_create(row);
 	lv_obj_set_height(bl_slider, BL_SLIDER_H);
-	lv_obj_set_style_margin_left(bl_slider, SLIDER_KNOB_GROW, 0); // the held knob at the left end, unclipped
 	lv_obj_set_flex_grow(bl_slider, 1);
-	lv_slider_set_range(bl_slider, 5, 100);
+	lv_slider_set_range(bl_slider, 1, 100);
 	lv_obj_set_ext_click_area(bl_slider, 20); // easier to grab with a finger
 	lv_obj_add_event_cb(bl_slider, bl_released, LV_EVENT_RELEASED, NULL);
 	lv_obj_add_event_cb(bl_slider, bl_released, LV_EVENT_PRESS_LOST, NULL);

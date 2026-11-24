@@ -346,7 +346,7 @@ int sysinfo_backlight(void) {
 	if (read_int(path, 0) != 0) return 0; // its power off: the screen's off, whatever the level
 	// The lowest level above off (1 of 32 on the OpenFrame) is as dim as it goes: 1%, as
 	// of-backlight's 1% is, not 3%, so nobody thinks it could go a little lower (automatic
-	// brightness in the dark, without the screen going off: the manual slider stops at 5%)
+	// brightness in the dark, without the screen going off, or the slider at its left end)
 	if (cur == 1) return 1;
 	return (cur * 100 + max / 2) / max;
 }
