@@ -30,6 +30,9 @@
 #define SLIDER_KNOB_PAD 4 // how far a slider's knob reaches past the bar, all round
 #define SLIDER_KNOB_GROW 3 // and how much more while it's held
 #define BL_SLIDER_H 24    // the brightness slider's bar
+#define BAR_VOL_H 16      // the volume slider the bar's speaker opens, in the bar
+#define BAR_VOL_MS 2000   // and how long it stays once it's let go
+#define BAR_VOL_ROOM (BAR_VOL_H / 2 + SLIDER_KNOB_PAD + SLIDER_KNOB_GROW + 2) // room for its knob, held
 #define RADIUS_RATIO (18.0 / 88.0)
 // Where content starts on every screen, below the status bar: the home grid's first icon and
 // Settings' first control sit at the same point, (CONTENT_X, BAR_H + CONTENT_TOP), and the
@@ -78,6 +81,7 @@ static lv_indev_t *indev;
 static int ptr_x, ptr_y;
 static bool ptr_pressed;
 static lv_obj_t *bar_clock, *bar_date, *bar_title, *net_eth, *net_wifi, *net_warn, *net_box, *net_tab_dot, *upd_box;
+static lv_obj_t *bar_left, *aud_box, *bar_vol, *bar_vol_slider; // the bar's speaker, and its volume slider
 static lv_obj_t *page_home, *pager, *strip, *page_settings, *page_wifi, *page_entry, *page_netinfo, *page_news, *toast;
 enum { NETINFO_ETH, NETINFO_WIFI };
 static int netinfo_kind; // the interface page_netinfo is about: the row tapped
@@ -94,6 +98,8 @@ static int settings_tab;
 static int settings_tab_first = -1; // the top of the rail: where the gear opens Settings
 static void settings_show_tab(int t);
 static void aud_refresh(void);
+static void bar_aud_update(void);
+static void bar_aud_icon(int v);
 
 // Paging: the pages sit side by side on a strip, which follows a sideways drag and then
 // slides to a page. A touch becomes a page drag once it has moved PAGE_DRAG_START sideways
@@ -404,8 +410,8 @@ static void clock_settings_changed(void) {
 /* ---- network icons: drawn once, anti-aliased, as alpha masks the text colour fills ---- */
 
 static uint8_t eth_px[NET_ICON * NET_ICON], wifi_px[5][NET_ICON * NET_ICON], lock_px[NET_ICON * NET_ICON];
-static uint8_t warn_px[NET_ICON * NET_ICON], restart_px[2][NET_ICON * NET_ICON];
-static lv_image_dsc_t eth_img, wifi_img[5], lock_img, warn_img, restart_img[2];
+static uint8_t warn_px[NET_ICON * NET_ICON], restart_px[2][NET_ICON * NET_ICON], speaker_px[3][NET_ICON * NET_ICON];
+static lv_image_dsc_t eth_img, wifi_img[5], lock_img, warn_img, restart_img[2], speaker_img[3];
 
 static bool in_rect(double x, double y, double x0, double y0, double x1, double y1) {
 	return x >= x0 && x < x1 && y >= y0 && y < y1;
@@ -427,6 +433,17 @@ static int wifi_part(double x, double y) {
 	if (r >= 5.2 && r <= 7.3) return 2;
 	if (r >= 9.0 && r <= 11.1) return 3;
 	if (r >= 12.8 && r <= 14.9) return 4;
+	return 0;
+}
+
+// The sound (the bar's speaker): a box and its cone (1), then two waves beside it (2, 3)
+static int speaker_part(double x, double y) {
+	if (in_rect(x, y, 2, 7.5, 6, 12.5)) return 1;
+	if (x >= 6 && x <= 10.5 && fabs(y - 10) <= 2.5 + (x - 6) * (4.5 / 4.5)) return 1; // the cone
+	double dx = x - 10.5, dy = y - 10, r = sqrt(dx * dx + dy * dy);
+	if (dx <= 0 || fabs(dy) > dx * 1.2) return 0; // within about 50 degrees of straight out
+	if (r >= 3.4 && r <= 5.2) return 2;
+	if (r >= 6.9 && r <= 8.7) return 3;
 	return 0;
 }
 
@@ -497,6 +514,20 @@ static void draw_icon(uint8_t *px, int lit, bool wifi) {
 		}
 }
 
+// The speaker, its first waves (0-2) bright and the rest faint (by the volume)
+static void draw_speaker(uint8_t *px, int waves) {
+	for (int y = 0; y < NET_ICON; y++)
+		for (int x = 0; x < NET_ICON; x++) {
+			double a = 0;
+			for (int sy = 0; sy < 4; sy++)
+				for (int sx = 0; sx < 4; sx++) {
+					int part = speaker_part(x + (sx + 0.5) / 4, y + (sy + 0.5) / 4);
+					if (part) a += part == 1 || part - 1 <= waves ? 1.0 : 0.3;
+				}
+			px[y * NET_ICON + x] = (uint8_t)(a / 16 * 255 + 0.5);
+		}
+}
+
 static void make_img(lv_image_dsc_t *d, uint8_t *px) {
 	memset(d, 0, sizeof *d);
 	d->header.magic = LV_IMAGE_HEADER_MAGIC;
@@ -522,6 +553,10 @@ static void make_net_icons(void) {
 	for (int i = 0; i < 2; i++) { // restart; restart flashing firmware
 		draw_icon(restart_px[i], -3 - i, false);
 		make_img(&restart_img[i], restart_px[i]);
+	}
+	for (int i = 0; i < 3; i++) { // the speaker: no waves lit (silent), one, both
+		draw_speaker(speaker_px[i], i);
+		make_img(&speaker_img[i], speaker_px[i]);
 	}
 }
 
@@ -604,6 +639,15 @@ static void update_net(lv_timer_t *t) {
 	} else {
 		lv_obj_add_flag(net_box, LV_OBJ_FLAG_HIDDEN);
 	}
+	// The speaker (bar_aud_update shows it), left of the network icons, or against the gear
+	lv_obj_update_layout(net_box);
+	lv_obj_t *edge = shown ? net_box : NULL; // what the next thing leftwards goes against
+	if (aud_box && !lv_obj_has_flag(aud_box, LV_OBJ_FLAG_HIDDEN)) {
+		if (edge) lv_obj_align_to(aud_box, edge, LV_ALIGN_OUT_LEFT_MID, 0, 0);
+		else lv_obj_align(aud_box, LV_ALIGN_RIGHT_MID, -GEAR_W, 0);
+		lv_obj_update_layout(aud_box);
+		edge = aud_box;
+	}
 	// While updates are checked for, downloaded or installed: a spinner left of the network
 	// icons (opening Settings at Updates), so nobody's surprised it's busy, or switches it off
 	// without thinking.
@@ -617,8 +661,7 @@ static void update_net(lv_timer_t *t) {
 		show_if(sign, restart); // the restart sign, with "!" when the restart flashes firmware
 		if (restart) lv_image_set_src(sign, &restart_img[firmware_at_restart()]);
 		show_if(lv_obj_get_child(upd_box, 1), updating); // the spinner
-		lv_obj_update_layout(net_box);
-		if (shown) lv_obj_align_to(upd_box, net_box, LV_ALIGN_OUT_LEFT_MID, 0, 0);
+		if (edge) lv_obj_align_to(upd_box, edge, LV_ALIGN_OUT_LEFT_MID, 0, 0);
 		else lv_obj_align(upd_box, LV_ALIGN_RIGHT_MID, -GEAR_W, 0);
 		lv_obj_remove_flag(upd_box, LV_OBJ_FLAG_HIDDEN);
 	} else {
@@ -630,6 +673,10 @@ static void gear_clicked(lv_event_t *e);
 static void dots_clicked(lv_event_t *e);
 static void net_clicked(lv_event_t *e);
 static void upd_box_clicked(lv_event_t *e);
+static void aud_box_clicked(lv_event_t *e);
+static void bar_vol_slid(lv_event_t *e);
+static void bar_vol_pressed(lv_event_t *e);
+static void bar_vol_released(lv_event_t *e);
 
 static void build_bar(lv_obj_t *scr) {
 	lv_obj_t *bar = lv_obj_create(scr);
@@ -642,7 +689,7 @@ static void build_bar(lv_obj_t *scr) {
 	// Everything in the bar is centred on its midline. Left: the time and date, as far in from
 	// the left edge as the gear's glyph is from the right.
 	int inset = (GEAR_W - text_w(LV_SYMBOL_SETTINGS, &lv_font_montserrat_20)) / 2;
-	lv_obj_t *left = lv_obj_create(bar);
+	lv_obj_t *left = bar_left = lv_obj_create(bar);
 	lv_obj_remove_style_all(left);
 	lv_obj_set_size(left, LV_SIZE_CONTENT, BAR_H);
 	lv_obj_set_flex_flow(left, LV_FLEX_FLOW_ROW);
@@ -758,6 +805,45 @@ static void build_bar(lv_obj_t *scr) {
 	lv_spinner_set_anim_params(usp, 1000, 270);
 	lv_obj_set_size(usp, NET_ICON, NET_ICON);
 	lv_obj_center(usp);
+
+	// The speaker, as tall a target as the bar, put in place by update_net and shown by
+	// bar_aud_update (once there's a sound card). Its waves light by the volume.
+	aud_box = lv_obj_create(bar);
+	lv_obj_remove_style_all(aud_box);
+	lv_obj_set_size(aud_box, NET_ICON + 2 * NET_PAD, BAR_H);
+	lv_obj_add_flag(aud_box, LV_OBJ_FLAG_CLICKABLE);
+	lv_obj_remove_flag(aud_box, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_set_style_bg_color(aud_box, lv_color_white(), LV_STATE_PRESSED);
+	lv_obj_set_style_bg_opa(aud_box, LV_OPA_20, LV_STATE_PRESSED);
+	rounded(aud_box);
+	lv_obj_add_event_cb(aud_box, aud_box_clicked, LV_EVENT_CLICKED, NULL);
+	lv_obj_t *al = lv_image_create(aud_box);
+	lv_image_set_src(al, &speaker_img[2]);
+	lv_obj_set_style_image_recolor(al, lv_color_hex(C_TEXT), 0);
+	lv_obj_set_style_image_recolor_opa(al, LV_OPA_COVER, 0);
+	lv_obj_center(al);
+	lv_obj_add_flag(aud_box, LV_OBJ_FLAG_HIDDEN);
+
+	// The volume slider the speaker opens (while the OpenFrame sets the volume): in the bar
+	// itself, over its title and page dots, so it shows over an app that keeps the bar too
+	// (only the bar's strip of the shell shows then). Put in place as it opens (bar_vol_show).
+	bar_vol = lv_obj_create(bar);
+	lv_obj_remove_style_all(bar_vol);
+	lv_obj_set_height(bar_vol, BAR_H);
+	lv_obj_set_style_bg_color(bar_vol, lv_color_hex(C_BAR), 0);
+	lv_obj_set_style_bg_opa(bar_vol, LV_OPA_COVER, 0);
+	lv_obj_remove_flag(bar_vol, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_add_flag(bar_vol, LV_OBJ_FLAG_CLICKABLE); // (a tap beside the slider goes no further)
+	bar_vol_slider = lv_slider_create(bar_vol);
+	lv_obj_set_height(bar_vol_slider, BAR_VOL_H); // (its width, as it opens: bar_vol_show)
+	lv_slider_set_range(bar_vol_slider, 0, 100);
+	lv_obj_set_ext_click_area(bar_vol_slider, 10);
+	lv_obj_add_event_cb(bar_vol_slider, bar_vol_slid, LV_EVENT_VALUE_CHANGED, NULL);
+	lv_obj_add_event_cb(bar_vol_slider, bar_vol_pressed, LV_EVENT_PRESSED, NULL);
+	lv_obj_add_event_cb(bar_vol_slider, bar_vol_released, LV_EVENT_RELEASED, NULL);
+	lv_obj_add_event_cb(bar_vol_slider, bar_vol_released, LV_EVENT_PRESS_LOST, NULL);
+	lv_obj_add_event_cb(bar_vol_slider, bar_vol_released, LV_EVENT_INDEV_RESET, NULL);
+	lv_obj_add_flag(bar_vol, LV_OBJ_FLAG_HIDDEN);
 	lv_obj_remove_flag(usp, LV_OBJ_FLAG_CLICKABLE);
 	lv_obj_set_style_arc_width(usp, 3, 0);
 	lv_obj_set_style_arc_width(usp, 3, LV_PART_INDICATOR);
@@ -3170,6 +3256,7 @@ static void aud_status_done(char *reply, void *data) {
 				show_toast(t, 3500);
 			}
 	aud_show();
+	bar_aud_update();
 }
 
 static void aud_refresh(void) { helper_request("audio-status\n", aud_status_done, NULL); }
@@ -3205,7 +3292,7 @@ static void aud_rate_changed(lv_event_t *e) {
 // for the next start once it's let go.
 static void aud_slid(lv_event_t *e) {
 	int v = (int)lv_slider_get_value(aud_slider);
-	if (audio_set_volume(aud_out, aud_mixer, v)) aud_now_show(v);
+	if (audio_set_volume(aud_out, aud_mixer, v)) { aud_now_show(v); bar_aud_icon(v); }
 }
 
 // Kept for the next start once the slider's been left AUD_STORE_MS (a root process each time:
@@ -3222,6 +3309,84 @@ static void aud_released(lv_event_t *e) {
 	aud_store_timer = timer_once(aud_store, AUD_STORE_MS);
 }
 static void aud_pressed(lv_event_t *e) { timer_cancel(&aud_store_timer); }
+
+/* ---- the bar's speaker: the volume there, or Settings at Audio ---- */
+
+static lv_timer_t *bar_vol_timer;
+
+// Whether the OpenFrame sets the volume (mixed, with a volume control): then the speaker
+// opens its slider. Otherwise (Direct to DAC, someone's own asound.conf) it opens Settings at
+// Audio.
+static bool aud_can_slide(void) { return aud_known && aud_managed && aud_n && !aud_direct && aud_mixer[0]; }
+
+static void bar_vol_hide(void) {
+	timer_cancel(&bar_vol_timer);
+	if (bar_vol) lv_obj_add_flag(bar_vol, LV_OBJ_FLAG_HIDDEN);
+}
+static void bar_vol_timeout(lv_timer_t *t) { bar_vol_timer = NULL; bar_vol_hide(); }
+static void bar_vol_later(void) {
+	timer_cancel(&bar_vol_timer);
+	bar_vol_timer = timer_once(bar_vol_timeout, BAR_VOL_MS);
+}
+
+// The speaker's waves: by the volume v while the OpenFrame sets it (none at 0, one under
+// half, both from half), both otherwise (-1)
+static void bar_aud_icon(int v) {
+	if (!aud_box) return;
+	int waves = v < 0 ? 2 : v == 0 ? 0 : v < 50 ? 1 : 2;
+	lv_image_set_src(lv_obj_get_child(aud_box, 0), &speaker_img[waves]);
+}
+
+// After audio-status: the speaker shows while there's a sound card
+static void bar_aud_update(void) {
+	if (!aud_box) return;
+	bool show = aud_known && aud_n > 0, was = !lv_obj_has_flag(aud_box, LV_OBJ_FLAG_HIDDEN);
+	if (show) bar_aud_icon(aud_can_slide() ? audio_volume(aud_out, aud_mixer) : -1);
+	show_if(aud_box, show);
+	if (show != was) update_net(NULL); // (it lays out the bar's right-hand icons)
+	if (!aud_can_slide()) bar_vol_hide();
+}
+
+// The slider, from beyond the clock and date up to the speaker, at the volume now
+static void bar_vol_show(void) {
+	int v = audio_volume(aud_out, aud_mixer);
+	if (v >= 0) lv_slider_set_value(bar_vol_slider, v, LV_ANIM_OFF);
+	lv_obj_update_layout(lv_obj_get_parent(bar_vol));
+	int x0 = lv_obj_get_x(bar_left) + lv_obj_get_width(bar_left) + 16, x1 = lv_obj_get_x(aud_box) - 4;
+	lv_obj_set_pos(bar_vol, x0, 0);
+	lv_obj_set_width(bar_vol, x1 - x0);
+	// the slider in the middle, with room either side for its knob held (BAR_VOL_ROOM): sized
+	// here, not by a flex row, whose margins left the held knob clipped at the right end
+	lv_obj_set_width(bar_vol_slider, x1 - x0 - 2 * BAR_VOL_ROOM);
+	lv_obj_center(bar_vol_slider);
+	lv_obj_remove_flag(bar_vol, LV_OBJ_FLAG_HIDDEN);
+	lv_obj_move_foreground(bar_vol);
+	bar_vol_later();
+}
+
+static void aud_box_clicked(lv_event_t *e) {
+	if (aud_can_slide()) {
+		if (lv_obj_has_flag(bar_vol, LV_OBJ_FLAG_HIDDEN)) bar_vol_show();
+		else bar_vol_hide();
+		return;
+	}
+	bar_vol_hide();
+	bar_leave_app();
+	settings_show_tab(TAB_AUDIO);
+	show_page(page_settings);
+	refresh_settings(NULL);
+}
+
+// As Settings' slider does, which follows it (and kept for the next start the same way)
+static void bar_vol_slid(lv_event_t *e) {
+	int v = (int)lv_slider_get_value(bar_vol_slider);
+	if (!audio_set_volume(aud_out, aud_mixer, v)) return;
+	bar_aud_icon(v);
+	if (aud_slider) lv_slider_set_value(aud_slider, v, LV_ANIM_OFF);
+	aud_now_show(v);
+}
+static void bar_vol_pressed(lv_event_t *e) { timer_cancel(&bar_vol_timer); aud_pressed(e); }
+static void bar_vol_released(lv_event_t *e) { aud_released(e); bar_vol_later(); }
 
 // The test sound (audio.c): its button says what's playing while it plays.
 static lv_obj_t *aud_test_btn;
@@ -4383,6 +4548,16 @@ static bool slider_held;
 static void slider_held_cb(lv_event_t *e) { slider_held = lv_event_get_user_data(e) != NULL; }
 uint32_t shell_release_hold_ms(void) { return slider_held ? SPRITE_SLIDER_HOLD_MS : SPRITE_DEBOUNCE_MS; }
 
+// A slider's extra drawing room (beyond its edges) as big as its knob held: LVGL works it out
+// from the knob as it is, at rest, and a held knob, SLIDER_KNOB_GROW bigger all round, was
+// clipped at the ends.
+static void slider_ext_cb(lv_event_t *e) {
+	lv_obj_t *o = lv_event_get_target(e);
+	int32_t *ext = lv_event_get_param(e);
+	int32_t knob = LV_MIN(lv_obj_get_width(o), lv_obj_get_height(o)) / 2 + SLIDER_KNOB_PAD + SLIDER_KNOB_GROW + 2;
+	if (*ext < knob) *ext = knob;
+}
+
 static void theme_apply(lv_theme_t *th, lv_obj_t *obj) {
 	if (lv_obj_check_type(obj, &lv_button_class) || lv_obj_check_type(obj, &lv_msgbox_class))
 		lv_obj_add_event_cb(obj, radius_on_size, LV_EVENT_SIZE_CHANGED, NULL);
@@ -4395,6 +4570,7 @@ static void theme_apply(lv_theme_t *th, lv_obj_t *obj) {
 		// and when a drag that starts on it is taken as a scroll (drag_input's lv_indev_reset:
 		// LVGL sends only this then, no release), or it stayed held: taps 0.4 s late after
 		lv_obj_add_event_cb(obj, slider_held_cb, LV_EVENT_INDEV_RESET, NULL);
+		lv_obj_add_event_cb(obj, slider_ext_cb, LV_EVENT_REFR_EXT_DRAW_SIZE, NULL);
 		static lv_style_t knob;
 		if (!knob.prop_cnt) {
 			lv_style_init(&knob);
