@@ -4218,8 +4218,9 @@ static lv_obj_t *settings_panel_new(int t) {
 }
 
 /* ---- the screensaver and display sleep: after a while untouched, the screensaver
-   (screensaver.c), then the screen off (of-backlight sleep); a touch ends either and goes no
-   further (main.c) ---- */
+   (screensaver.c), then the screen off (of-backlight sleep); a touch lights the screen again
+   (at the screensaver, if it went off from it) or ends the screensaver, and goes no further
+   (main.c) ---- */
 
 static const int idle_steps[] = { 0, 1, 2, 5, 10, 15, 30, 60 }; // minutes; 0: never
 static int ss_min = 5, sleep_min;
@@ -4281,11 +4282,13 @@ static void idle_tick(lv_timer_t *t) {
 	}
 }
 
+// A touch on the dark screen: it lights again at what it went off from. The screensaver, if
+// it was up (the touch is a glance at the clock: another ends it), its app started again
+// (stopped as the screen went off); else whatever was showing.
 void shell_wake(void) {
 	sleeping = false;
 	sysinfo_backlight_request("wake");
-	sprite_saver_end(); // awake, and at whatever was under it
-	screensaver_stop();
+	if (screensaver_active()) sprite_saver_start(saver_app());
 	sprite_request_frame();
 }
 
@@ -4330,6 +4333,9 @@ static void idle_build(lv_obj_t *parent) {
 		lv_obj_set_width(button(st, LV_SYMBOL_PLUS, BUTTON_OTHER, idle_step, (void *)(intptr_t)(k * 2 + 1)), BUTTON_H + 8);
 	}
 	lv_timer_create(idle_tick, 1000, NULL);
+	// A Sprite started while of-backlight holds the screen off (the one before it ended
+	// asleep) wouldn't know to wake it: so it's woken now (nothing, if it isn't asleep)
+	sysinfo_backlight_request("wake");
 }
 
 // Which screensaver: the flip clock or an app that's one (kind=screensaver), a list with the

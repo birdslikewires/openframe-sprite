@@ -90,7 +90,8 @@ allow=network
   Settings, Display (where it then appears, alongside the built-in flip clock), and runs
   over everything once the OpenFrame's been left untouched for "Screensaver after", until a
   touch, which goes no further. The flip clock covers the screen while it starts, and if it
-  quits. It's stopped when the screen goes off
+  quits. It's stopped when the screen goes off, and started again when a touch lights it
+  (the screen wakes at the screensaver; another touch ends it)
 - `allow=`: what the app may have beyond the display, separated by spaces: `network`,
   `sound` (to play) and `microphone` (to record as well); without it, an app has none of them
 
