@@ -4288,6 +4288,17 @@ static void idle_step(lv_event_t *e) {
 // is up. Asleep only if of-backlight's service takes it: without one the screen stays on, and
 // a touch isn't swallowed.
 static void idle_tick(lv_timer_t *t) {
+	// Asleep: asked again each minute (of-backlight takes a repeat as nothing), so a service
+	// that's been restarted awake, or missed it, has the screen off again
+	static uint32_t asked;
+	if (sleeping) {
+		if (lv_tick_elaps(asked) >= 60000) {
+			asked = lv_tick_get();
+			sysinfo_backlight_request("sleep");
+		}
+		return;
+	}
+	asked = lv_tick_get();
 	if (cal || sprite_sleep_inhibited()) return;
 	uint64_t idle = sprite_idle_ms();
 	if (ss_min && !sleeping && !screensaver_active() && idle >= (uint64_t)ss_min * 60000) {
@@ -4356,9 +4367,15 @@ static void idle_build(lv_obj_t *parent) {
 		lv_obj_set_width(button(st, LV_SYMBOL_PLUS, BUTTON_OTHER, idle_step, (void *)(intptr_t)(k * 2 + 1)), BUTTON_H + 8);
 	}
 	lv_timer_create(idle_tick, 1000, NULL);
-	// A Sprite started while of-backlight holds the screen off (the one before it ended
-	// asleep) wouldn't know to wake it: so it's woken now (nothing, if it isn't asleep)
-	sysinfo_backlight_request("wake");
+	// Started while of-backlight holds the screen off (an update restarting Sprite at night):
+	// asleep too, so the screen stays off till a touch. Otherwise it's woken, in case an older
+	// of-backlight, which leaves no mark, holds it off (nothing, if it isn't asleep).
+	if (access("/run/of-backlight/asleep", F_OK) == 0) {
+		sleeping = true;
+		sprite_set_asleep(true);
+	} else {
+		sysinfo_backlight_request("wake");
+	}
 }
 
 // Which screensaver: the flip clock or an app that's one (kind=screensaver), a list with the
