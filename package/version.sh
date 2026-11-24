@@ -12,7 +12,10 @@ paths=(src apps/settings.app build package system settings Makefile scripts/fetc
 EPOCH=""
 # With --news: the owners' notes instead, from the "News:" lines of the commits that made
 # each version, newest first, a line each: the version, a tab, the note. A commit may carry
-# several; most carry none ("Bug fixes and improvements", as Sprite puts it).
+# several; most carry none ("Bug fixes and improvements", as Sprite puts it). A note missed
+# can't be added to a pushed commit: it goes on a later one, which must change one of the
+# paths above (a commit that doesn't makes no version, and its notes aren't read). Owners
+# see every note between their version and the new one, so it still reaches them.
 if [ "${NEWS:-}" ]; then
 	TZ=UTC git log --reverse --format='%H %cd' --date=format-local:%y.%m -- "${paths[@]}" |
 		awk '{ n[$2]++; m = $2; sub(/\..*/, "", m); mm = substr($2, 4) + 0; print $1, m "." mm "." n[$2] }' |
