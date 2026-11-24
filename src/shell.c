@@ -4391,18 +4391,17 @@ static void build_settings(lv_obj_t *scr) {
 	bl_off_row = switch_row(pd, STR_DISPLAY_DARK_OFF, true, bl_off_changed);
 	lv_obj_set_style_pad_right(bl_off_row, BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0); // its switch under Auto's (that row's inset for the knob)
 	lv_obj_add_flag(bl_off_row, LV_OBJ_FLAG_HIDDEN);
+	// The clock's format (and, later, the time zone): after brightness, before touch (Time had
+	// a tab of its own, until Audio needed it)
+	section(pd, STR_DISPLAY_HEAD_CLOCK);
+	// their switches under Auto's, as the screen-off one is
+	lv_obj_set_style_pad_right(switch_row(pd, STR_DISPLAY_CLOCK24, clock_24, clock24_changed), BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0);
+	lv_obj_set_style_pad_right(switch_row(pd, STR_DISPLAY_SECONDS, clock_secs, seconds_changed), BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0);
+
 	section(pd, STR_DISPLAY_HEAD_TOUCH);
 	lv_obj_t *trow = button_row(pd);
 	button(trow, LV_SYMBOL_EDIT "  " STR_DISPLAY_CALIBRATE, BUTTON_MAIN, cal_start, NULL);
 	button(trow, LV_SYMBOL_REFRESH "  " STR_DISPLAY_CALIBRATE_RESET, BUTTON_OTHER, cal_reset, NULL);
-
-	// Time: the clock's format (and, later, the time zone)
-	// The clock, at the end of Display (Time had a tab of its own, until Audio needed it)
-	lv_obj_t *pt = tab_panel[TAB_DISPLAY];
-	section(pt, STR_DISPLAY_HEAD_CLOCK);
-	// their switches under Auto's, as the screen-off one is
-	lv_obj_set_style_pad_right(switch_row(pt, STR_DISPLAY_CLOCK24, clock_24, clock24_changed), BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0);
-	lv_obj_set_style_pad_right(switch_row(pt, STR_DISPLAY_SECONDS, clock_secs, seconds_changed), BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0);
 
 	// Updates: what of-update's doing, and asking for a look, or for the updates, now
 	lv_obj_t *pu = settings_panel_new(TAB_UPDATES);

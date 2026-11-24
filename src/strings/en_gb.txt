@@ -164,6 +164,13 @@ display.dark_off = Screen off in the dark
 # Title when brightness couldn't be changed
 display.not_changed = Brightness not changed
 # Heading
+display.head.clock = CLOCK
+# Switch
+display.clock24 = 24-hour clock
+# Switch
+display.seconds = Show seconds
+
+# Heading
 display.head.touch = TOUCH
 # Button
 display.calibrate = Calibrate touch
@@ -186,13 +193,6 @@ display.calibrate.bad.note = One of the taps was probably off its cross. Nothing
 display.calibrate.saved = Touch calibration saved
 # Toast
 display.calibrate.was_reset = Touch calibration reset
-# Heading
-display.head.clock = CLOCK
-# Switch
-display.clock24 = 24-hour clock
-# Switch
-display.seconds = Show seconds
-
 ## Network: Wi-Fi
 
 # Heading
