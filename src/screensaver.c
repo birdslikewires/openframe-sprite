@@ -79,7 +79,7 @@ static void flap_new(struct flap *f, lv_obj_t *parent, int x) {
 	lv_obj_set_style_shadow_width(c, 28, 0);
 	lv_obj_set_style_shadow_offset_y(c, 10, 0);
 	lv_obj_set_style_shadow_color(c, lv_color_black(), 0);
-	lv_obj_set_style_shadow_opa(c, LV_OPA_60, 0);
+	lv_obj_set_style_shadow_opa(c, LV_OPA_40, 0);
 	lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 	for (int i = 0; i < N_HALVES; i++) f->half[i] = half_new(c, i == HALF_TOP_NEW || i == HALF_FLAP_TOP, &f->label[i]);
 	lv_obj_add_flag(f->half[HALF_FLAP_TOP], LV_OBJ_FLAG_HIDDEN);
