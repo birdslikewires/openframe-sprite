@@ -17,7 +17,7 @@ make -j"$(nproc)" VERSION="$version" > /dev/null
 
 work=$(mktemp -d)
 pkg=$work/pkg
-install -d "$pkg/DEBIAN" "$pkg$P/bin" "$pkg$P/libexec" "$pkg$P/lib/$multiarch" "$pkg$P/share/sprite/apps" \
+install -d "$pkg/DEBIAN" "$pkg$P/bin" "$pkg$P/libexec" "$pkg$P/lib/$multiarch" "$pkg$P/share/sprite/apps" "$pkg/usr/share/sprite/apps" \
   "$pkg/usr/lib/systemd/system" "$pkg/usr/share/doc/$PKGNAME"
 
 install -m 755 out/sprite "$pkg$P/bin/sprite"

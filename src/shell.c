@@ -1595,7 +1595,7 @@ static void layout_write(void) {
 	if (rename(tmp, path) != 0) fprintf(stderr, "sprite: can't replace %s: %s\n", path, strerror(errno));
 }
 
-static bool on_grid(const struct sprite_app *a) { return !a->hidden && !a->builtin && !a->saver; } // Settings is the gear
+static bool on_grid(const struct sprite_app *a) { return !a->hidden && !a->gone && !a->builtin && !a->saver; } // Settings is the gear
 
 // Fills slots[] from the layout, then the rest in name order; returns the number of pages used.
 static int layout_assign(void) {
@@ -1766,6 +1766,7 @@ static void tile_follow(int x, int y) {
 
 static void rebuild_grid(void *unused) {
 	rebuild_pending = false;
+	if (sheet_app && sheet_app->gone) sheet_dismiss(); // its app was removed while its sheet was open
 	if (drag == DRAG_TILE) return; // the lifted tile is still in it: the drop rebuilds
 	lv_obj_clean(strip);
 	n_pages = layout_assign();
@@ -4252,7 +4253,7 @@ static lv_obj_t *saver_head, *saver_list;
 static struct sprite_app *saver_app(void) {
 	for (int i = 0; saver_id[0] && i < apps_count(); i++) {
 		struct sprite_app *a = apps_get(i);
-		if (a->saver && !strcmp(a->id, saver_id)) return a;
+		if (a->saver && !a->gone && !strcmp(a->id, saver_id)) return a;
 	}
 	return NULL;
 }
@@ -4415,13 +4416,13 @@ static void saver_show(void) {
 	lv_obj_clean(saver_list);
 	struct sprite_app *chosen = saver_app();
 	int n = 0;
-	for (int i = 0; i < apps_count(); i++) n += apps_get(i)->saver;
+	for (int i = 0; i < apps_count(); i++) n += apps_get(i)->saver && !apps_get(i)->gone;
 	show_if(saver_head, n);
 	show_if(saver_list, n);
 	if (!n) return;
 	saver_row(NULL, !chosen);
 	for (int i = 0; i < apps_count(); i++)
-		if (apps_get(i)->saver) saver_row(apps_get(i), apps_get(i) == chosen);
+		if (apps_get(i)->saver && !apps_get(i)->gone) saver_row(apps_get(i), apps_get(i) == chosen);
 }
 
 static void saver_build(lv_obj_t *parent) {

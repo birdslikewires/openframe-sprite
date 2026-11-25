@@ -2,95 +2,41 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 ## sprite-helper v26.11.28 (22nd November 2026)
-##  Does the few things sprite (which runs as its own user, sprite) can't do itself. systemd
-##  starts one of these per connection to /run/sprite-helper.sock, with the connection
-##  as stdin and stdout. It reads one request, answers "ok" or "error: <reason>", and
-##  exits. A reason an owner may see is a key (helper.name_length, say), which Sprite shows
-##  as its text in src/strings/en_gb.txt; the rest (about apps, or requests Sprite never makes)
-##  are plain text. Requests:
+##  Does the few things sprite (which runs as its own user, sprite) can't do itself. systemd starts one of these per connection to /run/sprite-helper.sock, with the connection as stdin and stdout. It reads one request, answers "ok" or "error: <reason>", and exits. A reason an owner may see is a key (helper.name_length, say), which Sprite shows as its text in src/strings/en_gb.txt; the rest (about apps, or requests Sprite never makes) are plain text. Requests:
 ##
-##    set <key> <value>     set a setting in settings/interface.txt (an empty value clears it):
-##                            startup (an app name), calibration (six numbers), clock
-##                            (24h or 12h), seconds (yes or no), screensaver and sleep
-##                            (minutes) or saver (a screensaver app's id)
+##    set <key> <value>     set a setting in settings/interface.txt (an empty value clears it): startup (an app name), calibration (six numbers), clock (24h or 12h), seconds (yes or no), screensaver and sleep (minutes) or saver (a screensaver app's id)
 ##    reboot                restart the OpenFrame
 ##    poweroff              switch it off
-##    wifi-scan             look for Wi-Fi networks: wpa_cli's scan results, one network a
-##                            line (bssid, frequency, signal dBm, flags, SSID, tab-separated,
-##                            the SSID escaped as wpa_cli escapes it), then "ok"
-##    wifi-status           the Wi-Fi state, as key=value lines, then "ok": interface, saved
-##                            (the network named in settings/wifi.txt), wpa_state, ssid (the
-##                            one joined, escaped), address, and trouble=yes when
-##                            wpa_supplicant has given up on the network for now (most often
-##                            a wrong password). Never the password.
-##    wifi-join             join a network: the request line, then a line with its name (SSID)
-##                            and a line with its password (empty for an open network). They go
-##                            into settings/wifi.txt, as name= and password=, and of-netplan
-##                            applies them, as it would at boot. Answers once they're written.
+##    wifi-scan             look for Wi-Fi networks: wpa_cli's scan results, one network a line (bssid, frequency, signal dBm, flags, SSID, tab-separated, the SSID escaped as wpa_cli escapes it), then "ok"
+##    wifi-status           the Wi-Fi state, as key=value lines, then "ok": interface, saved (the network named in settings/wifi.txt), wpa_state, ssid (the one joined, escaped), address, and trouble=yes when wpa_supplicant has given up on the network for now (most often a wrong password). Never the password.
+##    wifi-join             join a network: the request line, then a line with its name (SSID) and a line with its password (empty for an open network). They go into settings/wifi.txt, as name= and password=, and of-netplan applies them, as it would at boot. Answers once they're written.
 ##    wifi-forget           empty name= and password= in settings/wifi.txt, and apply that
-##    app-start <id> [:N]   start an app in a sandbox (see Apps below), with X display :N for
-##                            an X11 app: answers "pid <main pid>", then "ok"
+##    app-start <id> [:N]   start an app in a sandbox (see Apps below), with X display :N for an X11 app: answers "pid <main pid>", then "ok"
 ##    app-stop <id>         stop an app: SIGTERM to all its processes, SIGKILL 2 s later
-##    ssh-status            logging in as "of", as key=value lines, then "ok": password=none
-##                            (it has none: SSH needs a key, and sudo can't be used),
-##                            password=shared (still "joggler", which every unit used to
-##                            have) or password=set; and keys=<number of authorized keys>.
-##                            Never the password or its hash.
-##    ssh-password          set the password of "of": the request line, then a line with the
-##                            password (8 to 64 characters, no control characters), and start
-##                            the SSH server, which images keep off until someone can log in
-##    name-set              the OpenFrame's name: the request line, then a line with the name
-##                            (up to 64 characters, any but control characters; empty for
-##                            openframe), into settings/name.txt, which openframe-scripts'
-##                            name-settings then applies (the hostname made from it, and the
-##                            name kept as written)
-##    audio-status          where the sound goes, as openframe-scripts' of-audio status prints it
-##                            (the cards, the one in use, direct, its volume control), then "ok"
-##    audio-set             the request line, then a line with output=builtin or a DAC's
-##                            vid:pid, direct=yes|no and/or mixer_rate=44100|48000: of-audio set
+##    ssh-status            logging in as "of", as key=value lines, then "ok": password=none (it has none: SSH needs a key, and sudo can't be used), password=shared (still "joggler", which every unit used to have) or password=set; and keys=<number of authorized keys>. Never the password or its hash.
+##    ssh-password          set the password of "of": the request line, then a line with the password (8 to 64 characters, no control characters), and start the SSH server, which images keep off until someone can log in
+##    name-set              the OpenFrame's name: the request line, then a line with the name (up to 64 characters, any but control characters; empty for openframe), into settings/name.txt, which openframe-scripts' name-settings then applies (the hostname made from it, and the name kept as written)
+##    audio-status          where the sound goes, as openframe-scripts' of-audio status prints it (the cards, the one in use, direct, its volume control), then "ok"
+##    audio-set             the request line, then a line with output=builtin or a DAC's vid:pid, direct=yes|no and/or mixer_rate=44100|48000: of-audio set
 ##    audio-store           the mixers' levels kept for the next start (alsactl store)
-##    ssh-off               no way in over SSH: "of" loses its password and its keys, root its
-##                            keys, ssh.txt its key= lines (or they'd come back at the next
-##                            start), and the SSH server stops, ending every SSH session. A
-##                            password, here or in ssh.txt, turns it on again.
-##    update-status         the automatic updates (openframe-scripts' of-update), as its status
-##                            prints them, key=value lines, then "ok": state (idle, checking,
-##                            preparing, downloading, installing), last, result, message,
-##                            pending, checked, restart (yes when an update needs one), time
-##    update-check          look for updates now, without installing (answers at once; the
-##                            state says when it's done)
+##    ssh-off               no way in over SSH: "of" loses its password and its keys, root its keys, ssh.txt its key= lines (or they'd come back at the next start), and the SSH server stops, ending every SSH session. A password, here or in ssh.txt, turns it on again.
+##    update-status         the automatic updates (openframe-scripts' of-update), as its status prints them, key=value lines, then "ok": state (idle, checking, preparing, downloading, installing), last, result, message, pending, checked, restart (yes when an update needs one), time
+##    update-check          look for updates now, without installing (answers at once; the state says when it's done)
 ##    update-now            install what's waiting now, as the night would
-##    update-time <HH:00>   when the updates install (and restart, if one needs it), once a
-##                            day: of-update set-time, into OF-BOOT/settings/updates.txt
-##    backlight-settings    automatic brightness's limits (of-backlight settings: min=, max=,
-##                            off_below=), then "ok"
-##    backlight-set <min> <max> <off_below>
-##                            change them in OF-BOOT/settings/backlight.txt (of-backlight set)
-##    update-news           what's new in OpenBeak's waiting updates, as of-update news prints
-##                            it (part= and news= lines), then "ok"
+##    update-time <HH:00>   when the updates install (and restart, if one needs it), once a day: of-update set-time, into OF-BOOT/settings/updates.txt
+##    backlight-settings    automatic brightness's limits (of-backlight settings: min=, max=, off_below=), then "ok"
+##    backlight-set <min> <max> <off_below> change them in OF-BOOT/settings/backlight.txt (of-backlight set)
+##    update-news           what's new in OpenBeak's waiting updates, as of-update news prints it (part= and news= lines), then "ok"
 ##    after-update <what>   reboot or poweroff once the update being installed has finished
-##    splash-done           end the boot splash, leaving its picture on the screen, once
-##                            Sprite has drawn over it (plymouth quit --retain-splash)
-##    factory-reset         erase the OpenFrame for its next owner and restart it
-##                            (openframe-scripts' of-reset --yes), answering at once: it carries
-##                            on by itself, as a service of its own, while Sprite waits
+##    splash-done           end the boot splash, leaving its picture on the screen, once Sprite has drawn over it (plymouth quit --retain-splash)
+##    factory-reset         erase the OpenFrame for its next owner and restart it (openframe-scripts' of-reset --yes), answering at once: it carries on by itself, as a service of its own, while Sprite waits
+##    shop-refresh          the Shop's list of apps, fetched again from apps.openbeak.net
+##    shop-install <id>     install app <id> (its package, ofapp-<id>) from the Shop, answering once it's started: it carries on as the sprite-shop job, and says how it's going in /run/sprite-shop/status (see The Shop, below)
+##    shop-remove <id>      remove app <id>, what only it needed, and what it kept, the same way
 ##
-##  Wi-Fi is set up the OpenFrame way (see of-netplan): settings/wifi.txt on the boot volume,
-##  editable from any computer, turned into a netplan configuration. Only name= and
-##  password= are changed here: a fixed address in the file stays as it is.
+##  Wi-Fi is set up the OpenFrame way (see of-netplan): settings/wifi.txt on the boot volume, editable from any computer, turned into a netplan configuration. Only name= and password= are changed here: a fixed address in the file stays as it is.
 ##
-##  Apps: each runs as a transient systemd unit, sprite-app-<id>.service, under a user of
-##  its own (DynamicUser), in the sprite-apps group, which can reach sprite's display
-##  sockets and nothing else of sprite's. What it runs comes only from its manifest (in
-##  one of sprite's app directories, all root's), never from the request. It has no sudo,
-##  no capabilities, a read-only system, no /home or /boot (where wifi.txt is), its own
-##  /tmp, no other processes to see, and one directory of its own to keep things in
-##  (/var/lib/sprite-apps/<id>, kept between runs). The manifest's
-##  allow= line names what more it may have: network (otherwise it has none), sound (/dev/snd
-##  to play: the capture devices there as it starts are hidden) and microphone (those too).
-##  It has less of the CPU than sprite, and is held to 192 MB of memory, 64 MB of
-##  swap and 64 processes (with MEMCG and CGROUP_PIDS in the kernel), past which the kernel
-##  ends it, not something else. It's bound to sprite.service, so it stops when sprite does.
+##  Apps: each runs as a transient systemd unit, sprite-app-<id>.service, under a user of its own (DynamicUser), in the sprite-apps group, which can reach sprite's display sockets and nothing else of sprite's. What it runs comes only from its manifest (in one of sprite's app directories, all root's), never from the request. It has no sudo, no capabilities, a read-only system, no /home or /boot (where wifi.txt is), its own /tmp, no other processes to see, and one directory of its own to keep things in (/var/lib/sprite-apps/<id>, kept between runs). The manifest's allow= line names what more it may have: network (otherwise it has none), sound (/dev/snd to play: the capture devices there as it starts are hidden) and microphone (those too). It has less of the CPU than sprite, and is held to 192 MB of memory, 64 MB of swap and 64 processes (with MEMCG and CGROUP_PIDS in the kernel), past which the kernel ends it, not something else. It's bound to sprite.service, so it stops when sprite does.
 
 SETTINGS="/boot/settings/interface.txt"
 OLDSETTINGS="/boot/settings/sprite.txt"   # its name until 26.11.122 (the postinst moves it)
@@ -107,9 +53,7 @@ APPSOCKET="/run/sprite-apps/wayland-0" # sprite's Wayland socket for apps (group
 
 answer() { echo "$*"; exit 0; }
 
-# Replace $2 on the boot volume with the file $1. /boot is read-only (FAT, no journal):
-# open it with bootrw, and replace the file with a synced copy, so a power cut leaves the
-# old file or the new one.
+# Replace $2 on the boot volume with the file $1. /boot is read-only (FAT, no journal): open it with bootrw, and replace the file with a synced copy, so a power cut leaves the old file or the new one.
 boot_write() {
 	/usr/lib/openframe/bootrw open || answer "error: helper.boot_readonly"
 	mkdir -p "${2%/*}" && sync && cp "$1" "$2.new" && sync && mv -f "$2.new" "$2" && sync
@@ -127,8 +71,7 @@ wifi_if() {
 	return 1
 }
 
-# A value from settings/wifi.txt, read as of-netplan reads it: the last line for the key
-# (any case, spaces around it), trimmed, and one pair of matching quotes taken off.
+# A value from settings/wifi.txt, read as of-netplan reads it: the last line for the key (any case, spaces around it), trimmed, and one pair of matching quotes taken off.
 wifi_txt_get() {
 	[ -r "$WIFITXT" ] || return 0
 	K="$1" awk '
@@ -146,13 +89,10 @@ wifi_txt_get() {
 		END { printf "%s", last }' "$WIFITXT"
 }
 
-# Write name= and password= into settings/wifi.txt (from the template if there isn't one),
-# keeping every other line, and have of-netplan apply it. The values go in double quotes,
-# which of-netplan takes off, so spaces and quotes at either end are kept as they are.
+# Write name= and password= into settings/wifi.txt (from the template if there isn't one), keeping every other line, and have of-netplan apply it. The values go in double quotes, which of-netplan takes off, so spaces and quotes at either end are kept as they are.
 wifi_write() {
 	local NEW
-	# (the copy holds the password: nobody else's to read, even for a moment, and gone after;
-	# an EXIT trap ran after this function returned, with NEW out of scope, and left it in /tmp)
+	# (the copy holds the password: nobody else's to read, even for a moment, and gone after; an EXIT trap ran after this function returned, with NEW out of scope, and left it in /tmp)
 	umask 077
 	NEW=$(mktemp) || answer "error: no temporary file"
 	WIFI_TMP=$NEW
@@ -189,10 +129,7 @@ app_manifest() {
 	return 1
 }
 
-# A manifest's values, read as sprite reads them (key=value lines, the last one for a key,
-# # lines skipped, trailing spaces trimmed), into M_EXEC, M_BUILTIN, M_DISPLAY and M_ALLOW.
-# In bash alone: each process started costs time on the Atom, and this is on the way to
-# an app's window.
+# A manifest's values, read as sprite reads them (key=value lines, the last one for a key, # lines skipped, trailing spaces trimmed), into M_EXEC, M_BUILTIN, M_DISPLAY and M_ALLOW. In bash alone: each process started costs time on the Atom, and this is on the way to an app's window.
 app_read() {
 	local LINE K
 	M_EXEC="" M_BUILTIN="" M_DISPLAY="" M_ALLOW=""
@@ -273,17 +210,14 @@ app_start() {
 	fi
 	if [[ " $M_ALLOW " == *" sound "* || " $M_ALLOW " == *" microphone "* ]]; then
 		P+=(-p DevicePolicy=closed -p "DeviceAllow=char-alsa rw" -p SupplementaryGroups=audio)
-		# Playing only, without microphone: each card's capture devices hidden. ALSA numbers
-		# its devices as cards come, so these are the ones there as it starts (a microphone
-		# plugged in later is hidden from the app's next start).
+		# Playing only, without microphone: each card's capture devices hidden. ALSA numbers its devices as cards come, so these are the ones there as it starts (a microphone plugged in later is hidden from the app's next start).
 		if [[ " $M_ALLOW " != *" microphone "* ]]; then
 			for F in /dev/snd/pcmC*D*c; do [ -e "$F" ] && P+=(-p "InaccessiblePaths=-$F"); done
 		fi
 	else
 		P+=(-p PrivateDevices=yes)
 	fi
-	# Straight to systemd-run, which refuses if the unit is still there: only then is it
-	# worth asking systemd (about 0.1 s a time) whether it's running or stopping.
+	# Straight to systemd-run, which refuses if the unit is still there: only then is it worth asking systemd (about 0.1 s a time) whether it's running or stopping.
 	if ! systemd-run "${P[@]}" /bin/sh -c "$M_EXEC" >/dev/null 2>&1; then
 		app_settle "$ID" || answer "error: $ID is still stopping"
 		if [ "$(systemctl show -P ActiveState "$UNIT")" = active ] && PID=$(app_pid "$ID"); then
@@ -296,6 +230,106 @@ app_start() {
 	echo "pid $PID"
 	answer ok
 }
+
+# The Shop: apps from apps.openbeak.net, which apt can only take ofapp-* packages from (openframe-scripts' pin). An install or a removal is a job of its own, the sprite-shop unit, one at a time, so closing the Shop or restarting Sprite doesn't cut it off. It reports in /run/sprite-shop/status, which Sprite reads, as key=value lines: action (install or remove), id, state (running, done or failed), percent (of the whole job) and reason (when it failed, as the helper's replies give one). What apt printed is in /run/sprite-shop/log.
+SHOPDIR="/run/sprite-shop"
+APPSLIST="/etc/apt/sources.list.d/openframe-apps.list"
+
+shop_status() { # state percent [reason]
+	printf 'action=%s\nid=%s\nstate=%s\npercent=%s\nreason=%s\n' "$SHOP_ACTION" "$SHOP_ID" "$1" "$2" "${3:-}" > "$SHOPDIR/status.new" &&
+		mv -f "$SHOPDIR/status.new" "$SHOPDIR/status"
+}
+
+# apps.openbeak.net's list alone, which takes a second or two rather than the whole system's. The other lists are left as they are (List-Cleanup would otherwise delete them, as not in this source).
+shop_refresh() {
+	apt-get -q -o Dir::Etc::sourcelist="$APPSLIST" -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 update
+}
+
+# apt-get with its progress (APT::Status-Fd) as the status file's percent, from $1 to $2 of the whole job, the download the first half of that and dpkg the second. What it prints goes to the log. Answers apt-get's exit status.
+shop_apt() {
+	local FROM=$1 TO=$2 KIND P LAST=-1 NOW
+	shift 2
+	{ apt-get -q -y -o APT::Status-Fd=3 -o DPkg::Lock::Timeout=300 -o Dpkg::Use-Pty=0 "$@" 3>&1 >>"$SHOPDIR/log" 2>&1; } |
+		while IFS=: read -r KIND _ P _; do
+			P=${P%%.*}
+			[[ "$P" =~ ^[0-9]+$ ]] || continue
+			case "$KIND" in
+				dlstatus) NOW=$(( FROM + (TO - FROM) * P / 200 )) ;;
+				pmstatus) NOW=$(( FROM + (TO - FROM) * (100 + P) / 200 )) ;;
+				*) continue ;;
+			esac
+			(( NOW > LAST )) && { LAST=$NOW; shop_status running "$NOW"; }
+		done
+	return "${PIPESTATUS[0]}"
+}
+
+# Why apt failed, from its log, as a reason the Shop can show
+shop_reason() {
+	if grep -qE 'Temporary failure resolving|Could not resolve|Network is unreachable|Could not connect' "$SHOPDIR/log"; then
+		echo "error: helper.shop_offline"
+	elif grep -qE 'No space left on device|You don.t have enough free space' "$SHOPDIR/log"; then
+		echo "error: helper.shop_no_space"
+	elif grep -qE 'Unable to locate package|has no installation candidate' "$SHOPDIR/log"; then
+		echo "error: helper.shop_not_found"
+	else
+		echo "error: helper.shop_failed"
+	fi
+}
+
+shop_fail() { shop_status failed "${2:-0}" "$1"; exit 1; }
+
+# The job itself, run by systemd as sprite-shop: install or remove app <id>.
+shop_job() {
+	SHOP_ACTION=$1 SHOP_ID=$2
+	local PKG="ofapp-$2" SIM BEFORE AFTER LEFT
+	[[ "$SHOP_ID" =~ ^[a-z0-9][a-z0-9-]{0,39}$ ]] || exit 1
+	export DEBIAN_FRONTEND=noninteractive LC_ALL=C
+	: > "$SHOPDIR/log"
+	shop_status running 0
+	case "$SHOP_ACTION" in
+		install)
+			# the newest version (if apps.openbeak.net can't be reached, the list already here will do)
+			shop_refresh >>"$SHOPDIR/log" 2>&1
+			shop_status running 5
+			# Nothing already installed may be taken away for it: an app's own packages are files only, but what it depends on comes from Debian, and could conflict with the system.
+			SIM=$(apt-get -s -q --no-install-recommends install "$PKG" 2>>"$SHOPDIR/log") || shop_fail "$(shop_reason)"
+			grep -q '^Remv ' <<< "$SIM" && shop_fail "error: helper.shop_would_remove"
+			shop_status running 10
+			if ! shop_apt 10 100 install --no-install-recommends "$PKG"; then
+				# Debian's lists can be behind what its mirrors have (they're updated overnight): newer ones, and once more
+				grep -qE '^(E|W): (Failed|Unable) to fetch' "$SHOPDIR/log" || shop_fail "$(shop_reason)"
+				apt-get -q -o DPkg::Lock::Timeout=300 update >>"$SHOPDIR/log" 2>&1
+				shop_apt 10 100 install --no-install-recommends "$PKG" || shop_fail "$(shop_reason)"
+			fi
+			;;
+		remove)
+			systemctl stop "sprite-app-$SHOP_ID.service" 2>/dev/null
+			shop_status running 5
+			# It alone goes (nothing depends on an app), then the packages only it needed, and not the ones already unneeded before it went, which aren't the Shop's business.
+			SIM=$(apt-get -s -q purge "$PKG" 2>>"$SHOPDIR/log") || shop_fail "$(shop_reason)"
+			LEFT=$(awk '/^(Remv|Purg) / { print $2 }' <<< "$SIM")
+			[ -z "$LEFT" ] || [ "$LEFT" = "$PKG" ] || shop_fail "error: helper.shop_takes_others"
+			shop_status running 10
+			BEFORE=$(apt-get -s -q autoremove 2>/dev/null | awk '/^Remv / { print $2 }' | sort)
+			shop_status running 20
+			shop_apt 20 80 purge "$PKG" || shop_fail "$(shop_reason)"
+			AFTER=$(apt-get -s -q autoremove 2>/dev/null | awk '/^Remv / { print $2 }' | sort)
+			LEFT=$(comm -13 <(echo "$BEFORE") <(echo "$AFTER"))
+			# (left installed if this fails: they do no harm)
+			[ -z "$LEFT" ] || shop_apt 80 95 purge $LEFT || true
+			# and what it kept, in the folder its sandbox gave it (DynamicUser's, under private/)
+			rm -rf --one-file-system -- "/var/lib/private/sprite-apps/$SHOP_ID"
+			rm -f -- "/var/lib/sprite-apps/$SHOP_ID"
+			;;
+		*) exit 1 ;;
+	esac
+	shop_status done 100
+}
+
+if [ "${1:-}" = --shop-job ]; then
+	shop_job "${2:-}" "${3:-}"
+	exit 0
+fi
 
 read -r -t 5 CMD ARG || [ -n "$CMD" ] || answer "error: no request"
 
@@ -340,8 +374,7 @@ case "$CMD" in
 		IF=$(wifi_if) || answer "error: helper.no_wifi"
 		CTRL="$WPACTRL"
 		if [ ! -S "$CTRL/$IF" ]; then
-			# No wpa_supplicant running for it (no network set up): start one of our own
-			# just for the scan. It puts the interface back down when it stops.
+			# No wpa_supplicant running for it (no network set up): start one of our own just for the scan. It puts the interface back down when it stops.
 			CTRL="$SCANCTRL"
 			CONF=$(mktemp) || answer "error: no temporary file"
 			printf 'ctrl_interface=%s\n' "$CTRL" > "$CONF"
@@ -381,9 +414,7 @@ case "$CMD" in
 		wifi_if >/dev/null || answer "error: helper.no_wifi"
 		IFS= read -r -t 5 NAME || answer "error: helper.no_network_name"
 		IFS= read -r -t 5 PASS || [ -n "$PASS" ] || PASS=""
-		# A name of 1-32 bytes and a password that of-netplan will take (8-63 characters,
-		# or 64 hex digits, or none for an open network), neither with control characters,
-		# which would break the file's lines.
+		# A name of 1-32 bytes and a password that of-netplan will take (8-63 characters, or 64 hex digits, or none for an open network), neither with control characters, which would break the file's lines.
 		export LC_ALL=C
 		(( ${#NAME} >= 1 && ${#NAME} <= 32 )) || answer "error: helper.network_name_length"
 		[[ "$NAME$PASS" =~ [[:cntrl:]] ]] && answer "error: helper.control_chars"
@@ -447,8 +478,7 @@ case "$CMD" in
 		if [ -f "$NAMETXT" ]; then cp "$NAMETXT" "$NEW"
 		elif [ -f /usr/lib/openframe/settings/name.txt ]; then cp /usr/lib/openframe/settings/name.txt "$NEW"
 		fi
-		# name= in double quotes (name-settings takes one pair off), in place of the first, the
-		# rest of them gone; the value reaches awk through the environment, backslashes intact
+		# name= in double quotes (name-settings takes one pair off), in place of the first, the rest of them gone; the value reaches awk through the environment, backslashes intact
 		N="$NAME" awk '
 			function line(v) { return v == "" ? "name=" : "name=\"" v "\"" }
 			index($0, "=") && $0 !~ /^[[:space:]]*#/ {
@@ -548,6 +578,23 @@ case "$CMD" in
 		[ -x /usr/local/sbin/of-reset ] || answer "error: helper.erase_needs_update"
 		systemd-run --no-block --quiet --collect --unit=of-reset /usr/local/sbin/of-reset --yes >/dev/null 2>&1 ||
 			answer "error: helper.erase_not_started"
+		answer ok
+		;;
+	shop-refresh)
+		systemctl --quiet is-active sprite-shop.service && answer "error: helper.shop_busy"
+		shop_refresh >/dev/null 2>&1 || answer "error: helper.shop_offline"
+		answer ok
+		;;
+	shop-install|shop-remove)
+		# an app from the Shop: its package is ofapp-<id>, and its id what the recipes allow
+		[[ "$ARG" =~ ^[a-z0-9][a-z0-9-]{0,39}$ ]] || answer "error: bad app id"
+		systemctl --quiet is-active sprite-shop.service && answer "error: helper.shop_busy"
+		mkdir -p -m 755 "$SHOPDIR" || answer "error: helper.shop_failed"
+		# (running at 0 before Sprite looks, rather than the last job's state)
+		SHOP_ACTION=${CMD#shop-} SHOP_ID=$ARG shop_status running 0
+		systemd-run --no-block --quiet --collect --unit=sprite-shop --description="the Shop's ${CMD#shop-} of $ARG" \
+			-p Nice=5 -p IOSchedulingClass=idle "$0" --shop-job "${CMD#shop-}" "$ARG" >/dev/null 2>&1 ||
+			answer "error: helper.shop_busy"
 		answer ok
 		;;
 	after-update)

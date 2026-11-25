@@ -64,6 +64,7 @@ struct sprite_app {
 	uint32_t color;     // tile colour, 0xRRGGBB
 	bool builtin;       // handled inside sprite (settings), no process
 	bool hidden;        // not shown on the home screen (adopted windows)
+	bool gone;          // its manifest has gone (the app was removed): kept, as things may still point at it, but not shown or opened
 	bool x11;           // needs Xwayland (manifest: display=x11)
 	bool pending;       // waiting for Xwayland, or the helper, before it runs
 	float handle;       // home handle opacity while this app shows (manifest: handle=normal|faint|hidden)
@@ -85,7 +86,8 @@ struct sprite_app {
 };
 
 // apps.c
-void apps_load(const char *dirs);             // colon-separated directories of manifests
+void apps_load(const char *dirs);             // colon-separated directories of manifests, watched from then on
+void apps_rescan(void);                       // read the manifests again (an app installed, updated or removed)
 int apps_count(void);
 struct sprite_app *apps_get(int i);
 struct sprite_app *apps_for_pid(pid_t pid);  // the app a process belongs to (its unit, or parents)

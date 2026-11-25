@@ -605,5 +605,12 @@ helper.brightness_not_saved = The brightness settings couldn't be saved.
 helper.erase_needs_update = This system can't be erased from here (its openframe-scripts is too old).
 helper.erase_not_started = The erase didn't start.
 helper.cant_wait = Couldn't wait for the update.
+helper.shop_busy = The Shop is already installing or removing something. Try again once it's finished.
+helper.shop_offline = The Shop couldn't be reached. Check that the OpenFrame is connected to the internet.
+helper.shop_no_space = There isn't enough space left on the OpenFrame.
+helper.shop_not_found = The Shop doesn't have this app any more.
+helper.shop_would_remove = It needs something that would replace part of the OpenFrame's own system, so it was left alone.
+helper.shop_takes_others = Removing it would take other things with it, so it was left alone.
+helper.shop_failed = Something went wrong along the way.
 # When Sprite can't reach its helper at all
 helper.not_running = The OpenFrame's helper isn't running.

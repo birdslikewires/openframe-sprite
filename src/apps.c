@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Apps: manifests on disk, launching them, and tracking their processes.
 //
-// Apps run in sandboxes: sprite-helper starts each as a systemd unit, sprite-app-<id>, under
-// a user of its own (see the helper for what each may do). sprite knows an app's processes
-// by that unit, and its exit by a pidfd on its main process. With SPRITE_SANDBOX=0 (for
-// trying things out) sprite starts apps itself instead, as its own user, as it used to.
+// Apps run in sandboxes: sprite-helper starts each as a systemd unit, sprite-app-<id>, under a user of its own (see the helper for what each may do). sprite knows an app's processes by that unit, and its exit by a pidfd on its main process. With SPRITE_SANDBOX=0 (for trying things out) sprite starts apps itself instead, as its own user, as it used to.
 //
 // A manifest is a small key=value file, one per app, in the apps directory:
 //   name=Clock
@@ -15,13 +12,12 @@
 //   display=x11          (an X11 or SDL app, run through Xwayland; default wayland)
 //   handle=faint         (home handle: normal, faint or hidden while the app shows)
 //   bar=yes              (the status bar stays above it, its window below; default full screen)
-//   kind=screensaver     (a screensaver: no tile; chosen in Settings, Display, and shown
-//                         over everything after a while untouched, until a touch)
-//   allow=network sound  (what a sandboxed app may have beyond the display: network, sound
-//                         to play, microphone to record too; read by the helper)
+//   kind=screensaver     (a screensaver: no tile; chosen in Settings, Display, and shown over everything after a while untouched, until a touch)
+//   allow=network sound  (what a sandboxed app may have beyond the display: network, sound to play, microphone to record too; read by the helper)
 // Comments go on lines of their own.
 #define _GNU_SOURCE
 #include <dirent.h>
+#include <sys/inotify.h>
 #include <time.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -45,11 +41,7 @@ static struct sprite_app apps[MAX_APPS];
 static int n_apps;
 static char env_wayland[64], env_x[32];
 
-// The X keeper. wlroots runs Xwayland as root and starts it only when a client connects;
-// Xwayland admits only its own user, and quits when its last client leaves, forgetting any
-// access granted. So a root helper connects (which starts Xwayland), lets the apps' user in,
-// reports back through a pipe, and stays connected so the grant lasts. X11 apps launch
-// once it has reported.
+// The X keeper. wlroots runs Xwayland as root and starts it only when a client connects; Xwayland admits only its own user, and quits when its last client leaves, forgetting any access granted. So a root helper connects (which starts Xwayland), lets the apps' user in, reports back through a pipe, and stays connected so the grant lasts. X11 apps launch once it has reported.
 // The app opened at startup: "startup=" in settings/interface.txt, by the app's name or id.
 static char autostart_id[64];
 
@@ -81,67 +73,174 @@ static int cmp_apps(const void *a, const void *b) {
 	return strcasecmp(x->name, y->name);
 }
 
+static bool is_manifest(const char *name) {
+	size_t len = strlen(name);
+	return len >= 5 && len - 4 < sizeof apps[0].id && !strcmp(name + len - 4, ".app") && name[0] != '.';
+}
+
+// A manifest, read into a (its id from the file's name). False if it can't be read or has nothing to run.
+static bool read_manifest(const char *dir, const char *file, struct sprite_app *a) {
+	char path[512];
+	snprintf(path, sizeof path, "%s/%s", dir, file);
+	FILE *f = fopen(path, "r");
+	if (!f) return false;
+	memset(a, 0, sizeof *a);
+	snprintf(a->id, sizeof a->id, "%.*s", (int)(strlen(file) - 4), file);
+	a->color = 0x3a4a5a;
+	a->handle = SPRITE_HANDLE_NORMAL;
+	a->pidfd = -1;
+	char line[768];
+	while (fgets(line, sizeof line, f)) {
+		trim(line);
+		char *eq = strchr(line, '=');
+		if (line[0] == '#' || !eq) continue;
+		*eq = 0;
+		const char *k = line, *v = eq + 1;
+		if (!strcmp(k, "name")) snprintf(a->name, sizeof a->name, "%s", v);
+		else if (!strcmp(k, "exec")) snprintf(a->exec, sizeof a->exec, "%s", v);
+		else if (!strcmp(k, "icon")) snprintf(a->icon, sizeof a->icon, "%s", v);
+		else if (!strcmp(k, "color")) a->color = strtoul(v, NULL, 16);
+		else if (!strcmp(k, "builtin")) { a->builtin = true; snprintf(a->exec, sizeof a->exec, "%s", v); }
+		else if (!strcmp(k, "display")) a->x11 = !strcmp(v, "x11");
+		else if (!strcmp(k, "bar")) a->bar = !strcmp(v, "yes");
+		else if (!strcmp(k, "kind")) a->saver = !strcmp(v, "screensaver");
+		else if (!strcmp(k, "handle"))
+			a->handle = !strcmp(v, "hidden") ? 0.0f : !strcmp(v, "faint") ? SPRITE_HANDLE_FAINT : SPRITE_HANDLE_NORMAL;
+	}
+	fclose(f);
+	if (!a->name[0]) memcpy(a->name, a->id, sizeof a->name < sizeof a->id ? sizeof a->name : sizeof a->id);
+	if (!a->exec[0]) { wlr_log(WLR_ERROR, "%s: no exec", path); return false; }
+	return true;
+}
+
 static void load_dir(const char *dir) {
 	DIR *d = opendir(dir);
 	if (!d) return;
 	struct dirent *de;
 	while ((de = readdir(d)) && n_apps < MAX_APPS) {
-		size_t len = strlen(de->d_name);
-		if (len < 5 || strcmp(de->d_name + len - 4, ".app")) continue;
-		char path[512];
-		snprintf(path, sizeof path, "%s/%s", dir, de->d_name);
-		FILE *f = fopen(path, "r");
-		if (!f) continue;
-		struct sprite_app *a = &apps[n_apps];
-		memset(a, 0, sizeof *a);
-		snprintf(a->id, sizeof a->id, "%.*s", (int)(len - 4), de->d_name);
-		a->color = 0x3a4a5a;
-		a->handle = SPRITE_HANDLE_NORMAL;
-		a->pidfd = -1;
-		char line[768];
-		while (fgets(line, sizeof line, f)) {
-			trim(line);
-			char *eq = strchr(line, '=');
-			if (line[0] == '#' || !eq) continue;
-			*eq = 0;
-			const char *k = line, *v = eq + 1;
-			if (!strcmp(k, "name")) snprintf(a->name, sizeof a->name, "%s", v);
-			else if (!strcmp(k, "exec")) snprintf(a->exec, sizeof a->exec, "%s", v);
-			else if (!strcmp(k, "icon")) snprintf(a->icon, sizeof a->icon, "%s", v);
-			else if (!strcmp(k, "color")) a->color = strtoul(v, NULL, 16);
-			else if (!strcmp(k, "builtin")) { a->builtin = true; snprintf(a->exec, sizeof a->exec, "%s", v); }
-			else if (!strcmp(k, "display")) a->x11 = !strcmp(v, "x11");
-			else if (!strcmp(k, "bar")) a->bar = !strcmp(v, "yes");
-			else if (!strcmp(k, "kind")) a->saver = !strcmp(v, "screensaver");
-			else if (!strcmp(k, "handle"))
-				a->handle = !strcmp(v, "hidden") ? 0.0f : !strcmp(v, "faint") ? SPRITE_HANDLE_FAINT : SPRITE_HANDLE_NORMAL;
-		}
-		fclose(f);
-		if (!a->name[0]) memcpy(a->name, a->id, sizeof a->name < sizeof a->id ? sizeof a->name : sizeof a->id);
-		if (!a->exec[0]) { wlr_log(WLR_ERROR, "%s: no exec", path); continue; }
+		if (!is_manifest(de->d_name) || !read_manifest(dir, de->d_name, &apps[n_apps])) continue;
 		bool dup = false; // the first directory to have an app id wins
-		for (int i = 0; i < n_apps; i++) dup |= !strcmp(apps[i].id, a->id);
-		if (dup) { wlr_log(WLR_INFO, "%s: %s is already loaded", path, a->id); continue; }
+		for (int i = 0; i < n_apps; i++) dup |= !strcmp(apps[i].id, apps[n_apps].id);
+		if (dup) { wlr_log(WLR_INFO, "%s/%s: %s is already loaded", dir, de->d_name, apps[n_apps].id); continue; }
 		n_apps++;
 	}
 	closedir(d);
 }
 
+static char app_dirs[512];   // as given to apps_load
+static int watch_fd = -1;
+static struct wl_event_source *watch_src, *rescan_timer;
+
+// The startup app, by id or by name (ignoring case), if it's here
+static void find_autostart(void) {
+	const char *v = settings_get("startup");
+	if (!v || autostart_id[0]) return;
+	for (int i = 0; i < n_apps; i++)
+		if (!apps[i].builtin && !apps[i].hidden && !apps[i].gone && (!strcasecmp(apps[i].id, v) || !strcasecmp(apps[i].name, v)))
+			snprintf(autostart_id, sizeof autostart_id, "%.63s", apps[i].id);
+}
+
+// Watches each of the directories there is for manifests coming and going (a directory that isn't there yet is watched from the rescan after it appears). Adding a watch again is harmless: inotify gives back the one there is.
+static void watch_dirs(void) {
+	if (watch_fd < 0) return;
+	char list[512];
+	snprintf(list, sizeof list, "%s", app_dirs);
+	for (char *save = NULL, *dir = strtok_r(list, ":", &save); dir; dir = strtok_r(NULL, ":", &save))
+		inotify_add_watch(watch_fd, dir, IN_CREATE | IN_CLOSE_WRITE | IN_MOVED_TO | IN_MOVED_FROM | IN_DELETE | IN_ONLYDIR);
+}
+
+static int rescan_cb(void *data) {
+	apps_rescan();
+	return 0;
+}
+
+// Something changed in an apps directory. dpkg writes a package's files under other names and renames them into place one by one, so the rescan waits until things have been quiet for half a second.
+static int watch_readable(int fd, uint32_t mask, void *data) {
+	char buf[4096] __attribute__((aligned(__alignof__(struct inotify_event))));
+	bool ours = false;
+	ssize_t n;
+	while ((n = read(fd, buf, sizeof buf)) > 0)
+		for (char *p = buf; p < buf + n;) {
+			struct inotify_event *ev = (struct inotify_event *)p;
+			ours |= (ev->len && is_manifest(ev->name)) || (ev->mask & IN_IGNORED);
+			p += sizeof *ev + ev->len;
+		}
+	if (ours) wl_event_source_timer_update(rescan_timer, 500);
+	return 0;
+}
+
 // dirs: colon-separated, e.g. sprite's own apps then the ones packages install.
 void apps_load(const char *dirs) {
+	snprintf(app_dirs, sizeof app_dirs, "%s", dirs);
 	char list[512];
 	snprintf(list, sizeof list, "%s", dirs);
 	for (char *save = NULL, *dir = strtok_r(list, ":", &save); dir; dir = strtok_r(NULL, ":", &save))
 		load_dir(dir);
 	qsort(apps, n_apps, sizeof apps[0], cmp_apps);
+	find_autostart();
 	const char *v = settings_get("startup");
-	if (v) {
-		for (int i = 0; i < n_apps; i++) // by id or by name, ignoring case
-			if (!apps[i].builtin && (!strcasecmp(apps[i].id, v) || !strcasecmp(apps[i].name, v)))
-				snprintf(autostart_id, sizeof autostart_id, "%.63s", apps[i].id);
-		if (!autostart_id[0]) wlr_log(WLR_ERROR, "startup=%s: no such app", v);
-	}
+	if (v && !autostart_id[0]) wlr_log(WLR_ERROR, "startup=%s: no such app", v);
 	wlr_log(WLR_INFO, "%d apps from %s", n_apps, dirs);
+	watch_fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+	if (watch_fd < 0) { wlr_log(WLR_ERROR, "inotify: %s: apps won't be seen until sprite restarts", strerror(errno)); return; }
+	watch_src = wl_event_loop_add_fd(sprite_event_loop(), watch_fd, WL_EVENT_READABLE, watch_readable, NULL);
+	rescan_timer = wl_event_loop_add_timer(sprite_event_loop(), rescan_cb, NULL);
+	watch_dirs();
+}
+
+// Reads the manifests again. Entries are never moved or freed, as views, timers and the helper's replies point at them: an app that's here already is updated where it is, a new one goes on the end (the home screen places it in the first free cell), and one whose manifest has gone is marked gone, which hides it, and comes back to the same entry if it's installed again.
+void apps_rescan(void) {
+	bool seen[MAX_APPS] = { false }, changed = false;
+	char list[512];
+	snprintf(list, sizeof list, "%s", app_dirs);
+	for (char *save = NULL, *dir = strtok_r(list, ":", &save); dir; dir = strtok_r(NULL, ":", &save)) {
+		DIR *d = opendir(dir);
+		if (!d) continue;
+		struct dirent *de;
+		struct sprite_app m;
+		while ((de = readdir(d))) {
+			if (!is_manifest(de->d_name) || !read_manifest(dir, de->d_name, &m)) continue;
+			int i = 0;
+			while (i < n_apps && (apps[i].hidden || strcmp(apps[i].id, m.id))) i++;
+			if (i < n_apps && seen[i]) continue; // an earlier directory had it: that one wins
+			if (i == n_apps) {
+				if (n_apps == MAX_APPS) { wlr_log(WLR_ERROR, "%s/%s: no room for another app", dir, de->d_name); continue; }
+				apps[n_apps++] = m;
+				wlr_log(WLR_INFO, "app %s (%s) is new", m.id, m.name);
+				seen[i] = changed = true;
+				continue;
+			}
+			struct sprite_app *a = &apps[i];
+			seen[i] = true;
+			// what the manifest says, leaving what's running as it is
+			bool differs = a->gone || strcmp(a->name, m.name) || strcmp(a->exec, m.exec) || strcmp(a->icon, m.icon) ||
+				a->color != m.color || a->builtin != m.builtin || a->x11 != m.x11 || a->bar != m.bar ||
+				a->saver != m.saver || a->handle != m.handle;
+			if (!differs) continue;
+			if (a->gone) wlr_log(WLR_INFO, "app %s (%s) is back", m.id, m.name);
+			memcpy(a->name, m.name, sizeof a->name);
+			memcpy(a->exec, m.exec, sizeof a->exec);
+			memcpy(a->icon, m.icon, sizeof a->icon);
+			a->color = m.color;
+			a->builtin = m.builtin;
+			a->x11 = m.x11;
+			a->bar = m.bar;
+			a->saver = m.saver;
+			a->handle = m.handle;
+			a->gone = false;
+			changed = true;
+		}
+		closedir(d);
+	}
+	for (int i = 0; i < n_apps; i++)
+		if (!seen[i] && !apps[i].hidden && !apps[i].gone) {
+			apps[i].gone = changed = true;
+			wlr_log(WLR_INFO, "app %s (%s) has gone", apps[i].id, apps[i].name);
+		}
+	watch_dirs();
+	if (!changed) return;
+	find_autostart();
+	shell_apps_changed();
 }
 
 static pid_t parent_of(pid_t pid) {
@@ -183,8 +282,7 @@ struct sprite_app *apps_for_pid(pid_t pid) {
 	for (pid_t p = pid; p > 1; p = parent_of(p))
 		for (int i = 0; i < n_apps; i++)
 			if (apps[i].pid == p) return &apps[i];
-	// A window from a process we didn't launch (started by hand over SSH, say): give it a
-	// hidden entry of its own so it can still be shown and closed like any other app.
+	// A window from a process we didn't launch (started by hand over SSH, say): give it a hidden entry of its own so it can still be shown and closed like any other app.
 	for (int i = 0; i < n_apps; i++)
 		if (apps[i].hidden && apps[i].pid == pid) return &apps[i];
 	if (n_apps >= MAX_APPS) return &apps[n_apps - 1];
@@ -299,7 +397,7 @@ static void launched(char *reply, void *data) {
 }
 
 void apps_launch(struct sprite_app *app) {
-	if (app->builtin) return;
+	if (app->builtin || app->gone) return;
 	app->close_on_start = false; // opened again before it had started: it's wanted after all
 	if (app->pid || app->pending) return;
 	// Xwayland admits only its own user until it's opened to the apps' (or their group)
@@ -354,7 +452,7 @@ void apps_launch(struct sprite_app *app) {
 struct sprite_app *apps_autostart(void) {
 	if (!autostart_id[0]) return NULL;
 	for (int i = 0; i < n_apps; i++)
-		if (!apps[i].hidden && !apps[i].builtin && !apps[i].saver && !strcmp(apps[i].id, autostart_id)) return &apps[i];
+		if (!apps[i].hidden && !apps[i].gone && !apps[i].builtin && !apps[i].saver && !strcmp(apps[i].id, autostart_id)) return &apps[i];
 	return NULL;
 }
 
@@ -405,8 +503,7 @@ static int close_cb(void *data) {
 void apps_close(struct sprite_app *a) {
 	if (a->builtin) return;
 	if (a->pid <= 0) {
-		// Not running yet: still starting (the helper, or waiting for X), it's stopped as soon
-		// as it is; due to be reopened (apps_restart), it isn't
+		// Not running yet: still starting (the helper, or waiting for X), it's stopped as soon as it is; due to be reopened (apps_restart), it isn't
 		if (a->pending) a->close_on_start = true;
 		if (a->restart_timer) wl_event_source_timer_update(a->restart_timer, 0);
 		a->reopening = false;
@@ -420,8 +517,7 @@ void apps_close(struct sprite_app *a) {
 	wl_event_source_timer_update(a->close_timer, a->view ? 2000 : 1);
 }
 
-// The startup app is reopened when it exits, unless it was closed from the shell or keeps
-// failing (three exits within a minute).
+// The startup app is reopened when it exits, unless it was closed from the shell or keeps failing (three exits within a minute).
 static void exited(struct sprite_app *a) {
 	if (a->close_timer) wl_event_source_timer_update(a->close_timer, 0);
 	if (a->reopening) { // apps_restart: opened again straight away
@@ -448,9 +544,7 @@ static void exited(struct sprite_app *a) {
 	wl_event_source_timer_update(a->restart_timer, 2000);
 }
 
-// Closes app a and opens it again as soon as it's gone: for one playing when the sound output
-// changes, which goes on the old way until it opens its sound again. Behind: its window comes
-// back behind what's showing (Settings, where the output was changed), not in front.
+// Closes app a and opens it again as soon as it's gone: for one playing when the sound output changes, which goes on the old way until it opens its sound again. Behind: its window comes back behind what's showing (Settings, where the output was changed), not in front.
 void apps_restart(struct sprite_app *a, bool behind) {
 	if (a->builtin || a->pid <= 0 || a->reopening) return;
 	wlr_log(WLR_INFO, "restarting %s (the sound output changed)", a->name);
@@ -460,10 +554,7 @@ void apps_restart(struct sprite_app *a, bool behind) {
 	wl_event_source_timer_update(a->close_timer, 1); // stopped now: nothing to wait for
 }
 
-// Apps lead their own process groups and, under a PAM session, live outside sprite's
-// service, so nothing else ends them when sprite stops. Left running they hold on to
-// things (HamClock refuses to start while an old copy runs). SIGTERM all, wait up to 2 s,
-// then SIGKILL what's left.
+// Apps lead their own process groups and, under a PAM session, live outside sprite's service, so nothing else ends them when sprite stops. Left running they hold on to things (HamClock refuses to start while an old copy runs). SIGTERM all, wait up to 2 s, then SIGKILL what's left.
 void apps_end_all(void) {
 	int left = 0;
 	for (int i = 0; i < n_apps; i++) {
