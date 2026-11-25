@@ -47,7 +47,7 @@ title.wifi = Wi-Fi
 # Ethernet's details, in the bar
 title.ethernet = Ethernet
 # An update's notes, in the bar
-title.whats_new = What's new
+title.whats_new = What's New
 # The back button from Settings
 back.home = Home
 # The back button to Settings
@@ -70,11 +70,11 @@ app.close = Close
 # Switch on the touch-and-hold sheet
 app.open_at_startup = Open at startup
 # Under that switch
-app.open_at_startup_note = Choose this app to launch automatically at startup.
+app.open_at_startup_note = One app can be chosen to launch automatically.
 # Toast when an app won't start. %s is its name
 app.couldnt_open = %s couldn't be opened
 # Toast when an app keeps failing. %s is its name
-app.keeps_closing = %s keeps closing, so it won't be reopened for now
+app.keeps_closing = %s keeps closing, so we've stopped trying
 # A window's title when it has none. %d is its number
 app.window = Window %d
 # Toast when an app's program wasn't there. %s is its name
@@ -96,7 +96,7 @@ audio.head.output = OUTPUT
 # Heading
 audio.head.volume = VOLUME
 # The OpenFrame's own output, in the list
-audio.builtin = Speaker and headphones
+audio.builtin = Built-in speakers, or headphones
 # Beside a DAC in the list
 audio.usb = USB
 # When there are none
@@ -109,23 +109,23 @@ audio.test.both = Both...
 # Beside the button
 audio.test.note = Left, then right, then both
 # Toast when the test sound can't play in direct mode
-audio.test.busy = The DAC is busy: something else is playing to it
+audio.test.busy = DAC is busy, something else is using it
 # Toast when the test sound can't play
 audio.test.failed = The test sound couldn't play
 # The switch
 audio.direct = Direct to DAC
 # Note when asound.conf is the owner's own
-audio.note.by_hand = Sound is set up by hand on this OpenFrame (an asound.conf of its own), so it's left as it is.
+audio.note.by_hand = Using custom configuration.
 # Note under Direct to DAC, on
-audio.note.direct_on = The DAC gets the audio as it is: nothing mixed in, nothing resampled. Set the volume on your amplifier. One app can play at a time.
+audio.note.direct_on = The DAC is receiving audio directly. No mixer and no resampling, but only one app can play at a time.
 # Note under Direct to DAC, off
-audio.note.direct_off = Turn this on to send the DAC the audio untouched, and set the volume on your amplifier.
+audio.note.direct_off = Turn on to send audio to the DAC directly. Volume must be controlled on your amplifier.
 # Note when no DAC is plugged in
 audio.note.plug_in = Plug in a USB DAC and the sound goes there.
 # The switch
 audio.rate = Mix at 48 kHz
 # Under that switch
-audio.rate.note = Most music is made at 44.1 kHz, so that's what OpenFrame mixes at. Turn this on if you mostly watch video, which is usually 48 kHz.
+audio.rate.note = Requires resampling all 44.1 kHz content, but 48 kHz audio plays without additional processing.
 # Toast when the output changes. %s is its name
 audio.playing_through = Playing through %s
 # Title when the output couldn't be changed
@@ -135,7 +135,7 @@ audio.dac.usb2 = USB 2.0 high speed (480 Mbit/s)
 audio.dac.usb1 = USB full speed (12 Mbit/s)
 audio.dac.usb3 = USB 3 (5 Gbit/s)
 # A DAC's section, a line of its own (starts with \n)
-audio.dac.async = \nAsynchronous: the DAC sets the clock
+audio.dac.async = \nAsynchronous. DAC sets the clock.
 # A DAC's section: its connection, the async line (if any), then "Takes" the bits and the lowest rate, " to " and the highest (if they differ), then "Now:" what it's playing
 audio.dac.lines = %s%s\nTakes %s, %s%s%s\nNow: %s
 # Between the lowest and highest rate
@@ -194,7 +194,7 @@ display.calibrate.tap = Tap the centre of the cross (%d of %d)
 # Title over the calibration's result
 display.calibrate.title = Touch calibration
 # Its result. Average then worst distance before, then with the new calibration
-display.calibrate.result = Touches were landing %.0f px from the crosses on average, %.0f at worst. With this calibration, %.0f px, %.0f at worst.
+display.calibrate.result = Touches were landing %.0f px from the crosses on average, %.0f at worst. After calibration we measured %.0f px, and %.0f at worst.
 # Button
 display.calibrate.again = Again
 # Button
@@ -234,7 +234,7 @@ wifi.couldnt_forget = Couldn't forget the network
 wifi.forgot = Forgot %s
 # Title. %s is the network
 wifi.forget_ask = Forget %s?
-wifi.forget_ask.note = The OpenFrame won't join it again until it's chosen again.
+wifi.forget_ask.note = The OpenFrame won't join again, unless it's chosen again.
 # Status. %s is why
 wifi.couldnt_look = Couldn't look for networks: %s
 # Status
@@ -243,7 +243,7 @@ wifi.none_found = No networks found.
 # The network in use. %s is the address
 wifi.connected_address = Connected, with the address %s.
 # A network saved, not in use
-wifi.saved_note = Saved: the OpenFrame joins it whenever it's in reach.
+wifi.saved_note = Saved. The OpenFrame joins it whenever it's in reach.
 # Button
 wifi.change_password = Change password
 # Title. %s is the network
@@ -251,7 +251,7 @@ wifi.cant_join = Can't join %s
 wifi.cant_join.note = It needs WEP or an enterprise login, which Settings can't set up. A network.yaml in the settings folder on OF-BOOT can.
 # Title. %s is the network
 wifi.join_open = Join %s?
-wifi.join_open.note = It's an open network: what's sent over it isn't encrypted.
+wifi.join_open.note = This is an open network! Wireless traffic is not encrypted.
 # Button
 wifi.join = Join
 # Beside a network in the list
@@ -328,7 +328,7 @@ ssh.and_keys = , and keys
 # Status
 ssh.keys_only = By key only (no password)
 # Status
-ssh.off = Off: set a password to log in
+ssh.off = Off: set a password to log in remotely
 # Button
 ssh.set_password = Set password
 # Button
@@ -343,7 +343,7 @@ ssh.still_on = Remote access is still on
 ssh.is_off = Remote access is off
 # Title
 ssh.off_ask = Turn off remote access?
-ssh.off_ask.note = The password for logging in is removed, along with any keys, and anyone logged in now is disconnected. Setting a password turns it on again.
+ssh.off_ask.note = The password and any keys are removed, and the service will be stopped. Anyone logged in will be disconnected.
 
 ## Name
 
@@ -366,7 +366,7 @@ upd.restart_now = Restart now
 upd.check_now = Check now
 # Status
 upd.checking = Checking for updates...
-upd.preparing = Getting ready to update...
+upd.preparing = Organising updates...
 upd.downloading = Downloading updates...
 # Progress. %.1f of %.1f MB
 upd.mb_of = %.1f of %.1f MB
@@ -404,7 +404,7 @@ upd.head.firmware = FIRMWARE
 upd.firmware = Firmware
 # Beside the firmware
 upd.firmware.when = At the next restart
-upd.firmware.note = At the next restart, the OpenFrame updates its firmware. The screen shows the progress for a minute or two, then it restarts once more by itself. Don't switch it off while that happens.
+upd.firmware.note = Firmware will be updated on the next reboot. Progress will be shown on screen. Don't power off while this happens!
 # Heading in the list
 upd.head.openframe = OPENFRAME
 # Heading in the list
@@ -432,9 +432,9 @@ upd.head.schedule = SCHEDULE
 # A row, and the title of its question
 upd.time = Update time
 # Under it
-upd.time.note = The OpenFrame updates itself once a day at about this time, or soon after it starts if it was off then. If an update needs a restart, that happens then too.
+upd.time.note = Updates will be applied once each day at around this time. Some updates may trigger a restart.
 # In the question
-upd.time.ask = Updates install within half an hour of this time each day. If one needs a restart, the OpenFrame restarts then too, so pick a time nobody's watching.
+upd.time.ask = Updates install within half an hour of this time each day. Some updates may trigger a restart.
 # Title
 upd.time.not_changed = The time wasn't changed
 # Title once the interface (Sprite) has updated itself
@@ -470,9 +470,9 @@ about.cpu = %s, %s GHz
 # Memory: %ld free, %ld in all, in MB
 about.memory = %ld MB free of %ld MB
 # Storage: %s free, %s in all, then where the system is (one of the two below)
-about.storage = %s free of %s, %s
-about.on_internal = internal memory
-about.on_usb = USB stick
+about.storage = %s free of %s %s
+about.on_internal = (MMC)
+about.on_usb = (USB)
 # Sizes. %ld in MB; %.1f and %ld in GB
 about.mb = %ld MB
 about.gb_frac = %.1f GB
@@ -492,13 +492,13 @@ about.up.day = 1 day, %d h
 about.up.hours = %d h %d min
 about.up.minutes = %d min
 # A Crystal HD card: %s its chip (BCM70015), and whether its driver has it
-about.crystalhd.ready = %s, ready
+about.crystalhd.ready = %s
 about.crystalhd.no_driver = %s, no driver
 # On a test unit
 about.test_unit = Updates before they're released
 # Heading
 erase.head = ERASE
-erase.note = Puts this OpenFrame back as it came, for its next owner. Its updates and touch calibration stay; everything else that's been set up on it goes.
+erase.note = Remove all personal information, settings, and apps. Installed updates and touch calibration are retained, everything else goes.
 # Button, and in the question
 erase.button = Erase everything
 # Title
@@ -508,17 +508,17 @@ erase.ask.note = Network settings, passwords and keys, all apps, and their data 
 erase.ask.button = Erase
 # Title, asked again
 erase.sure = Are you sure?
-erase.sure.note = Everything on this OpenFrame is erased. This can't be undone.
+erase.sure.note = Everything on this OpenFrame will be erased. This can't be undone.
 # Title
 erase.erasing = Erasing...
-erase.erasing.note = This takes a few minutes. The OpenFrame restarts by itself when it's done. Don't switch it off.
+erase.erasing.note = This takes a few minutes. The OpenFrame restarts by itself when it's done. Don't switch it off!
 # Title
-erase.failed = It wasn't erased
+erase.failed = OpenFrame was not erased
 
 # Heading, under Erase
 info.head = INFORMATION
 # Under it, what sprite-ping sends
-info.ping = Once an hour, this OpenFrame tells openbeak.net that it's running: its network (MAC) addresses, its model, the versions of its firmware and software (and when an update's kernel last failed to start), and how full its memory and storage are. Nothing else is sent. It helps us see how many OpenFrames are still running, and whether updates have reached them.
+info.ping = Once an hour, OpenFrame devices send a check-in message to openbeak.net. This "heartbeat" includes some of the OpenFrame's information; its model, firmware chip health, whether a kernel update has ever failed, and how full are the memory and storage. Nothing else is sent. This helps us see how many OpenFrames are still running, and whether updates have reached them.
 
 ## Power
 
@@ -533,7 +533,7 @@ power.restart_ask = Restart the OpenFrame?
 # Title
 power.off_ask = Switch off the OpenFrame?
 # With firmware to update
-power.restart_ask.firmware = It updates its firmware as it restarts: the screen shows the progress for a minute or two, then it restarts once more by itself. Don't switch it off while that happens.
+power.restart_ask.firmware = We update your firmware when the OpenFrame restarts. The screen will show the progress for a minute or two, then it restarts once more by itself. Don't power off while it happens!
 power.restart_ask.note = It will be back in about half a minute.
 # With firmware to update
 power.off_ask.firmware = After shutdown, turn it off at the plug. The firmware update waiting happens the next time it starts.
@@ -547,25 +547,25 @@ power.restart_when_done = Restart when done
 # Button
 power.off_when_done = Switch off when done
 # Toast
-power.will_restart = It will restart once the update has finished
+power.will_restart = OpenFrame will restart once the update has finished
 # Toast
-power.will_off = It will switch off once the update has finished
+power.will_off = OpenFrame will switch off once the update has finished
 
 ## Welcome
 # Shown the first time Sprite starts
 
-welcome.title = Welcome to your OpenFrame
-welcome.note = Tap an app on the home screen to open it, or touch and hold it for more. Settings are behind the gear at the top right.
+welcome.title = Welcome back to OpenFrame!
+welcome.note = Tap an app to open it, hold-and-drag to rearrange, or tap-and-hold for more options. Settings are opened with the cog at the top right.
 # A row
 welcome.wifi = Wi-Fi
 welcome.connected = Connected
-welcome.cable = Using the cable
+welcome.cable = Wired connection active
 # A row
 welcome.password = Password for remote access
 welcome.optional = Optional
 # A row
 welcome.updates_at = Daily updates at
-welcome.updates_at.note = It restarts then if an update needs it: pick a time nobody's watching.
+welcome.updates_at.note = Pick a convenient time for updates to happen.
 # Button
 welcome.start = Start
 
