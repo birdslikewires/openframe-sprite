@@ -658,7 +658,7 @@
 #define LV_TXT_ENC LV_TXT_ENC_UTF8
 
 /** While rendering text strings, break (wrap) text on these chars. */
-#define LV_TXT_BREAK_CHARS " ,.;:-_)]}"
+#define LV_TXT_BREAK_CHARS " -" /* sprite: at spaces and after hyphens only (breaking after a comma began the next line with its space) */
 
 /** If a word is at least this long, will break wherever "prettiest".
  *  To disable, set to a value <= 0. */
@@ -941,7 +941,7 @@
 #define LV_USE_RLE 0
 
 /** QR code library */
-#define LV_USE_QRCODE 0
+#define LV_USE_QRCODE 1
 
 /** Barcode code library */
 #define LV_USE_BARCODE 0

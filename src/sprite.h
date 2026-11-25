@@ -114,6 +114,35 @@ void sprite_lvgl_kick(void);                  // run the LVGL timer handler soon
 void sprite_request_frame(void);              // the shell has something to draw at the next refresh
 struct wl_event_loop *sprite_event_loop(void);
 
+// shop.c: what the Shop offers and what's installed (apps.openbeak.net's ofapp-* packages), and the helper's job installing or removing one
+#define SHOP_MAX 64
+struct shop_app {
+	char id[48], package[56];       // its id (its manifest is <id>.app) and its package, ofapp-<id>
+	char name[64], icon[32], summary[128], description[2048]; // the description's paragraphs a line each
+	char author[128], licence[64], source[256], community[256], allow[64];
+	uint32_t color;
+	bool saver;                     // a screensaver (kind=screensaver)
+	char version[64];               // the newest the Shop offers (or, if it doesn't offer it, what's installed)
+	char installed[64];             // the version installed, or "" if it isn't
+	bool listed;                    // the Shop offers it (not, if it was installed by hand or has left the Shop)
+	long size_kb;
+};
+void shop_load(void);                         // read the lists and dpkg's status again
+int shop_count(void);
+struct shop_app *shop_get(int i);             // by name
+struct shop_app *shop_find(const char *id);
+int shop_vercmp(const char *a, const char *b); // Debian's version order: <0, 0 or >0
+long shop_lists_age(void);                    // seconds since the lists were fetched, -1 if never
+enum shop_job_state { SHOP_JOB_NONE, SHOP_JOB_RUNNING, SHOP_JOB_DONE, SHOP_JOB_FAILED };
+struct shop_job {
+	enum shop_job_state state;
+	bool remove;                    // a removal (else an install)
+	char id[48];
+	int percent;
+	char reason[96];                // when it failed: "error: helper.shop_*"
+};
+void shop_job_read(struct shop_job *j);
+
 // shell.c
 void shell_init(void *pixels);                // pixels: SPRITE_W x SPRITE_H XRGB8888
 void shell_pointer(int x, int y, bool pressed);

@@ -90,6 +90,7 @@ static bool ptr_pressed;
 static lv_obj_t *bar_clock, *bar_date, *bar_title, *net_eth, *net_wifi, *net_warn, *net_box, *net_tab_dot, *upd_box, *upd_tab_dot;
 static lv_obj_t *bar_left, *aud_box, *bar_vol, *bar_vol_slider; // the bar's speaker, and its volume slider
 static lv_obj_t *page_home, *pager, *strip, *page_settings, *page_wifi, *page_entry, *page_netinfo, *page_news, *toast;
+static lv_obj_t *page_shop, *page_shopapp; // the Shop, and an app's page in it (see shop_open)
 enum { NETINFO_ETH, NETINFO_WIFI };
 static int netinfo_kind; // the interface page_netinfo is about: the row tapped
 static lv_obj_t *dots, *gear;         // page dots and the Settings gear, in the status bar
@@ -960,12 +961,12 @@ static bool showing(lv_obj_t *page) { return page && !lv_obj_has_flag(page, LV_O
 
 static void show_page(lv_obj_t *page) {
 	if (page != page_entry && showing(page_entry)) entry_clear(); // never leave a password lying about
-	lv_obj_t *pages[] = { page_home, page_settings, page_wifi, page_entry, page_netinfo, page_news };
+	lv_obj_t *pages[] = { page_home, page_settings, page_wifi, page_entry, page_netinfo, page_news, page_shop, page_shopapp };
 	for (size_t i = 0; i < sizeof pages / sizeof pages[0]; i++)
 		if (pages[i]) lv_obj_add_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
 	lv_obj_remove_flag(page, LV_OBJ_FLAG_HIDDEN);
 	snprintf(page_title, sizeof page_title, "%s", page == page_settings ? STR_TITLE_SETTINGS : page == page_netinfo ? (netinfo_kind == NETINFO_WIFI ? STR_TITLE_WIFI : STR_TITLE_ETHERNET) :
-			  page == page_news ? STR_TITLE_WHATS_NEW :
+			  page == page_news ? STR_TITLE_WHATS_NEW : page == page_shop || page == page_shopapp ? STR_TITLE_SHOP :
 			  page == page_wifi || page == page_entry ? STR_TITLE_WIFI : "");
 	lv_label_set_text(bar_title, page_title);
 	update_dots();
@@ -1033,7 +1034,14 @@ static void refresh_settings(lv_timer_t *t) {
 	if (!t && settings_tab == TAB_DISPLAY) bl_limits_ask(); // as Settings opens at Display
 }
 
+static void shop_open(void);
+static void build_shop(lv_obj_t *scr);
+
 static void open_app(struct sprite_app *a) {
+	if (a->builtin && !strcmp(a->exec, "shop")) {
+		shop_open();
+		return;
+	}
 	if (a->builtin) {
 		show_page(page_settings);
 		refresh_settings(NULL);
@@ -1401,12 +1409,16 @@ static void scroll_glide(lv_obj_t *obj, int from, int to, uint32_t ms) {
 	lv_anim_start(&a);
 }
 
+static lv_obj_t *shop_panel_showing(void);
+
 // The scrolling screen showing, if any: sprite does its scrolling itself (see drag_input).
 static lv_obj_t *scrolling_screen(void) {
 	if (showing(page_settings)) return tab_panel[settings_tab];
 	if (showing(page_wifi)) return page_wifi;
 	if (showing(page_netinfo)) return page_netinfo;
 	if (showing(page_news)) return page_news;
+	if (showing(page_shop)) return shop_panel_showing();
+	if (showing(page_shopapp)) return page_shopapp;
 	return NULL;
 }
 
@@ -1595,7 +1607,8 @@ static void layout_write(void) {
 	if (rename(tmp, path) != 0) fprintf(stderr, "sprite: can't replace %s: %s\n", path, strerror(errno));
 }
 
-static bool on_grid(const struct sprite_app *a) { return !a->hidden && !a->gone && !a->builtin && !a->saver; } // Settings is the gear
+// Settings is the gear, not a tile; the Shop is a tile, moved like any other
+static bool on_grid(const struct sprite_app *a) { return !a->hidden && !a->gone && !a->saver && (!a->builtin || !strcmp(a->exec, "shop")); }
 
 // Fills slots[] from the layout, then the rest in name order; returns the number of pages used.
 static int layout_assign(void) {
@@ -4192,9 +4205,8 @@ static void settings_show_tab(int t) {
 
 static void tab_clicked(lv_event_t *e) { settings_show_tab((int)(intptr_t)lv_event_get_user_data(e)); }
 
-// A tab: its glyph and name, the whole row pressable. The chosen one is a lighter box (white
-// at 10%) with its glyph in the accent colour; a press is white at 20%, as everywhere.
-static lv_obj_t *settings_tab_new(lv_obj_t *rail, int t, const char *glyph, const char *name) {
+// A tab in a rail (Settings', the Shop's): its glyph and name, the whole row pressable. The chosen one is a lighter box (white at 10%) with its glyph in the accent colour; a press is white at 20%, as everywhere. *icon gets the glyph's label.
+static lv_obj_t *rail_tab(lv_obj_t *rail, const char *glyph, const char *name, lv_event_cb_t cb, void *data, lv_obj_t **icon) {
 	lv_obj_t *b = lv_obj_create(rail);
 	lv_obj_remove_style_all(b);
 	lv_obj_set_size(b, LV_PCT(100), TAB_H);
@@ -4209,21 +4221,26 @@ static lv_obj_t *settings_tab_new(lv_obj_t *rail, int t, const char *glyph, cons
 	lv_obj_set_style_bg_color(b, lv_color_white(), LV_STATE_PRESSED);
 	lv_obj_set_style_bg_opa(b, LV_OPA_20, LV_STATE_PRESSED);
 	rounded(b);
-	tab_icon[t] = lv_label_create(b);
-	lv_label_set_text(tab_icon[t], glyph);
-	lv_obj_set_style_text_font(tab_icon[t], &sprite_ui_24, 0);
+	*icon = lv_label_create(b);
+	lv_label_set_text(*icon, glyph);
+	lv_obj_set_style_text_font(*icon, &sprite_ui_24, 0);
 	lv_obj_t *l = lv_label_create(b);
 	lv_label_set_text(l, name);
 	lv_obj_set_style_text_font(l, &lv_font_montserrat_20, 0);
 	lv_obj_set_style_text_color(l, lv_color_hex(C_TEXT), 0);
-	lv_obj_add_event_cb(b, tab_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)t);
-	tab_btn[t] = b;
-	if (settings_tab_first < 0) settings_tab_first = t; // whichever's put first
+	lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, data);
 	return b;
 }
 
-static lv_obj_t *settings_panel_new(int t) {
-	lv_obj_t *p = lv_obj_create(page_settings);
+static lv_obj_t *settings_tab_new(lv_obj_t *rail, int t, const char *glyph, const char *name) {
+	tab_btn[t] = rail_tab(rail, glyph, name, tab_clicked, (void *)(intptr_t)t, &tab_icon[t]);
+	if (settings_tab_first < 0) settings_tab_first = t; // whichever's put first
+	return tab_btn[t];
+}
+
+// A rail's panel (Settings', the Shop's), right of the rail: a column sprite scrolls.
+static lv_obj_t *panel_new(lv_obj_t *page) {
+	lv_obj_t *p = lv_obj_create(page);
 	lv_obj_remove_style_all(p);
 	lv_obj_set_size(p, SPRITE_W - RAIL_W, SPRITE_H - BAR_H);
 	lv_obj_set_pos(p, RAIL_W, 0);
@@ -4235,9 +4252,10 @@ static lv_obj_t *settings_panel_new(int t) {
 	lv_obj_set_style_pad_row(p, ROW_GAP, 0);
 	lv_obj_set_scroll_dir(p, LV_DIR_VER);
 	lv_obj_set_scrollbar_mode(p, LV_SCROLLBAR_MODE_OFF);
-	tab_panel[t] = p;
 	return p;
 }
+
+static lv_obj_t *settings_panel_new(int t) { return tab_panel[t] = panel_new(page_settings); }
 
 /* ---- the screensaver and display sleep: after a while untouched, the screensaver
    (screensaver.c), then the screen off (of-backlight sleep); a touch lights the screen again
@@ -4526,6 +4544,8 @@ static void about_show(void) {
 	if (last) lv_obj_set_style_border_width(last, 0, 0);
 }
 
+static lv_obj_t *rail_new(lv_obj_t *page);
+
 static void build_settings(lv_obj_t *scr) {
 	page_settings = lv_obj_create(scr);
 	lv_obj_remove_style_all(page_settings);
@@ -4533,19 +4553,7 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_pos(page_settings, 0, BAR_H);
 	lv_obj_remove_flag(page_settings, LV_OBJ_FLAG_SCROLLABLE);
 
-	lv_obj_t *rail = lv_obj_create(page_settings);
-	lv_obj_remove_style_all(rail);
-	lv_obj_set_size(rail, RAIL_W, SPRITE_H - BAR_H);
-	lv_obj_set_style_bg_color(rail, lv_color_hex(C_RAIL), 0);
-	lv_obj_set_style_bg_opa(rail, LV_OPA_COVER, 0);
-	lv_obj_set_flex_flow(rail, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_style_pad_hor(rail, RAIL_PAD, 0);
-	lv_obj_set_style_pad_ver(rail, CONTENT_TOP, 0);
-	lv_obj_set_style_pad_row(rail, 4, 0);
-	lv_obj_remove_flag(rail, LV_OBJ_FLAG_SCROLLABLE);
-	lv_obj_t *home = button(rail, LV_SYMBOL_LEFT "  " STR_BACK_HOME, BUTTON_MAIN, back_clicked, NULL);
-	lv_obj_set_width(home, BACK_W); // the tabs' width: its arrow and colour set it apart
-	lv_obj_set_style_margin_bottom(home, HEADING_SPACE, 0);
+	lv_obj_t *rail = rail_new(page_settings);
 	// The tabs for settings, in alphabetical order; then, under a line, About and Power, which
 	// aren't settings so much as the unit itself (alphabetical too).
 	settings_tab_new(rail, TAB_AUDIO, UI_ICON_VOLUME_2, STR_TAB_AUDIO);
@@ -5003,6 +5011,509 @@ static void theme_apply(lv_theme_t *th, lv_obj_t *obj) {
 	}
 }
 
+/* ---- the Shop: apps and screensavers to install from apps.openbeak.net. shop.c has the facts (what's offered, what's installed, how the job's going), and sprite-helper's shop-* requests do the work. Laid out as Settings is, a rail of tabs and a panel, with a page of its own for each app. ---- */
+
+enum { SHOP_APPS, SHOP_INSTALLED, SHOP_TABS }; // (screensavers are in Apps, under a heading of their own: "Screensavers" is too long for a tab)
+#define SHOP_ROW_H 84             // a row of a list: its icon, name and summary, and a button
+#define SHOP_ICON 64              // the icon in a row
+#define SHOP_POLL_MS 400          // how often the job's status is read while it runs
+#define SHOP_LIST_OLD_S (30 * 60) // the list is fetched again as the Shop opens if it's older than this
+#define SHOP_QR 150               // the QR code to an app's community, and the white margin a phone needs round it
+#define SHOP_QR_MARGIN 8
+static lv_obj_t *shop_tab_btn[SHOP_TABS], *shop_tab_icon[SHOP_TABS], *shop_panel[SHOP_TABS];
+static int shop_tab;
+static char shop_page_id[48];     // the app whose page is showing ("" for none)
+static lv_obj_t *shop_app_body;
+static lv_timer_t *shop_timer;    // reads the job's status while it runs
+static struct shop_job shop_job;  // as last read
+static bool shop_refreshing;      // fetching the list
+static char shop_req_id[48], shop_ask_id[48];  // the app asked for, and the one a removal's being asked about
+static bool shop_req_remove;
+// The progress shown for the job, in its row and on its page, updated in place as it goes (shop_render makes them again)
+static struct { lv_obj_t *bar, *label; } shop_prog[4];
+static int n_shop_prog;
+
+static lv_obj_t *shop_panel_showing(void) { return shop_panel[shop_tab]; }
+static void shop_render(void);
+static void shop_page_open(const char *id);
+static bool shop_busy(void) { return shop_job.state == SHOP_JOB_RUNNING; }
+
+// An app's icon at any size, as its tile will have it
+static lv_obj_t *shop_badge(lv_obj_t *parent, const struct shop_app *s, int size) {
+	static struct sprite_app a; // (icon_text's stand-in for it; too big for the stack)
+	memset(&a, 0, sizeof a);
+	snprintf(a.name, sizeof a.name, "%s", s->name);
+	snprintf(a.icon, sizeof a.icon, "%s", s->icon);
+	lv_obj_t *b = lv_obj_create(parent);
+	lv_obj_remove_style_all(b);
+	lv_obj_set_size(b, size, size);
+	lv_obj_set_style_radius(b, radius_for(size, size), 0);
+	lv_obj_set_style_bg_color(b, lv_color_hex(s->color ? s->color : 0x3a4a5a), 0);
+	lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+	lv_obj_remove_flag(b, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+	char buf[8];
+	lv_obj_t *l = lv_label_create(b);
+	lv_obj_set_style_text_font(l, icon_text(&a, buf, sizeof buf), 0);
+	lv_label_set_text(l, buf);
+	lv_obj_set_style_text_color(l, lv_color_white(), 0);
+	lv_obj_center(l);
+	return b;
+}
+
+static lv_obj_t *shop_text(lv_obj_t *parent, const char *text, const lv_font_t *font, uint32_t colour) {
+	lv_obj_t *l = lv_label_create(parent);
+	lv_label_set_text(l, text);
+	lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(l, LV_PCT(100));
+	lv_obj_set_style_text_font(l, font, 0);
+	lv_obj_set_style_text_color(l, lv_color_hex(colour), 0);
+	return l;
+}
+
+/* the job: asking the helper, then following its status until it's done */
+
+static void shop_prog_update(void) {
+	char t[48];
+	snprintf(t, sizeof t, shop_job.remove ? STR_SHOP_REMOVING : STR_SHOP_INSTALLING, shop_job.percent);
+	for (int i = 0; i < n_shop_prog; i++) {
+		lv_bar_set_value(shop_prog[i].bar, shop_job.percent, LV_ANIM_ON);
+		lv_label_set_text(shop_prog[i].label, t);
+	}
+}
+
+static void shop_failed(const char *id, bool remove, const char *reason) {
+	struct shop_app *a = shop_find(id);
+	char t[128];
+	snprintf(t, sizeof t, remove ? STR_SHOP_FAILED_REMOVE : STR_SHOP_FAILED_INSTALL, a ? a->name : id);
+	lv_obj_t *card = dialog_open(NULL, t, reason_text(reason[0] ? reason : "error: helper.shop_failed"), true);
+	dialog_button(card, STR_COMMON_OK, BUTTON_MAIN, dialog_cancel, NULL);
+}
+
+// The job's status, while it runs; once it's finished, the Shop as it is now, and what happened.
+static void shop_poll(lv_timer_t *t) {
+	struct shop_job j;
+	shop_job_read(&j);
+	if (j.state == SHOP_JOB_RUNNING) {
+		shop_job = j;
+		shop_prog_update();
+		return;
+	}
+	lv_timer_delete(shop_timer);
+	shop_timer = NULL;
+	if (!j.id[0]) snprintf(j.id, sizeof j.id, "%s", shop_job.id);
+	shop_job = j;
+	// what it was before, for what to say
+	struct shop_app *a = shop_find(j.id);
+	char name[64];
+	snprintf(name, sizeof name, "%s", a ? a->name : j.id);
+	bool saver = a && a->saver, update = a && a->installed[0] && !j.remove;
+	shop_load();
+	if (j.state == SHOP_JOB_DONE) {
+		char s[160];
+		snprintf(s, sizeof s, j.remove ? STR_SHOP_DONE_REMOVED : update ? STR_SHOP_DONE_UPDATED : saver ? STR_SHOP_DONE_SAVER : STR_SHOP_DONE_INSTALLED, name);
+		show_toast(s, 4000);
+	} else if (j.state == SHOP_JOB_FAILED) {
+		shop_failed(j.id, j.remove, j.reason);
+	}
+	shop_render();
+	sprite_lvgl_kick();
+}
+
+static void shop_follow(void) {
+	if (!shop_timer) shop_timer = lv_timer_create(shop_poll, SHOP_POLL_MS, NULL);
+}
+
+static void shop_requested(char *reply, void *data) {
+	const char *st = helper_reply_status(reply);
+	if (!strcmp(st, "ok")) { shop_follow(); return; }
+	shop_job_read(&shop_job); // it didn't start (busy, say): as it really is
+	if (shop_job.state == SHOP_JOB_RUNNING) shop_follow();
+	shop_failed(shop_req_id, shop_req_remove, st);
+	shop_render();
+}
+
+static void shop_request(const struct shop_app *a, bool remove) {
+	snprintf(shop_req_id, sizeof shop_req_id, "%s", a->id);
+	shop_req_remove = remove;
+	char req[96];
+	snprintf(req, sizeof req, "shop-%s %s\n", remove ? "remove" : "install", a->id);
+	// shown as started straight away, rather than once the helper answers
+	memset(&shop_job, 0, sizeof shop_job);
+	shop_job.state = SHOP_JOB_RUNNING;
+	shop_job.remove = remove;
+	snprintf(shop_job.id, sizeof shop_job.id, "%s", a->id);
+	shop_render();
+	helper_request(req, shop_requested, NULL);
+}
+
+/* an app's buttons */
+
+static void shop_get_clicked(lv_event_t *e) { shop_request(lv_event_get_user_data(e), false); }
+
+// Opens the app installed: its tile's, once Sprite has read its manifest
+static void shop_open_clicked(lv_event_t *e) {
+	const struct shop_app *s = lv_event_get_user_data(e);
+	for (int i = 0; i < apps_count(); i++) {
+		struct sprite_app *a = apps_get(i);
+		if (!a->hidden && !a->gone && !strcmp(a->id, s->id)) { open_app(a); return; }
+	}
+	char t[96];
+	snprintf(t, sizeof t, STR_APP_COULDNT_OPEN, s->name);
+	show_toast(t, 3000);
+}
+
+// A screensaver's chosen in Settings, under Display
+static void shop_choose_clicked(lv_event_t *e) {
+	settings_show_tab(TAB_DISPLAY);
+	show_page(page_settings);
+	refresh_settings(NULL);
+}
+
+static void shop_remove_go(lv_event_t *e) {
+	dialog_close();
+	struct shop_app *a = shop_find(shop_ask_id);
+	if (a) shop_request(a, true);
+}
+
+static void shop_remove_clicked(lv_event_t *e) {
+	const struct shop_app *a = lv_event_get_user_data(e);
+	snprintf(shop_ask_id, sizeof shop_ask_id, "%s", a->id);
+	char t[96];
+	snprintf(t, sizeof t, STR_SHOP_REMOVE_TITLE, a->name);
+	lv_obj_t *card = dialog_open(NULL, t, STR_SHOP_REMOVE_BODY, true);
+	dialog_button(card, LV_SYMBOL_TRASH "  " STR_SHOP_REMOVE, BUTTON_DANGER, shop_remove_go, NULL);
+	dialog_button(card, STR_COMMON_CANCEL, BUTTON_OTHER, dialog_cancel, NULL);
+}
+
+// What an app's button does: Get it, Update it, Open it, or (a screensaver) Choose it
+enum shop_act { ACT_GET, ACT_UPDATE, ACT_OPEN, ACT_CHOOSE };
+static enum shop_act shop_act(const struct shop_app *a) {
+	if (!a->installed[0]) return ACT_GET;
+	if (a->listed && shop_vercmp(a->version, a->installed) > 0) return ACT_UPDATE;
+	return a->saver ? ACT_CHOOSE : ACT_OPEN;
+}
+
+// An app's button, or how its job's going; on its page, Remove too, if it's installed. Getting and removing wait while another job runs.
+static void shop_action(lv_obj_t *parent, struct shop_app *a, bool page) {
+	if (shop_busy() && !strcmp(shop_job.id, a->id)) {
+		lv_obj_t *box = lv_obj_create(parent);
+		lv_obj_remove_style_all(box);
+		lv_obj_set_size(box, BUTTON_MIN_W, BUTTON_H);
+		lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
+		lv_obj_set_flex_align(box, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+		lv_obj_set_style_pad_row(box, 6, 0);
+		lv_obj_remove_flag(box, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+		lv_obj_t *l = lv_label_create(box);
+		lv_obj_set_style_text_font(l, &lv_font_montserrat_16, 0);
+		lv_obj_set_style_text_color(l, lv_color_hex(C_DIM), 0);
+		lv_obj_t *bar = lv_bar_create(box);
+		lv_obj_set_size(bar, BUTTON_MIN_W, 8);
+		lv_bar_set_range(bar, 0, 100);
+		if (n_shop_prog < (int)(sizeof shop_prog / sizeof shop_prog[0])) {
+			shop_prog[n_shop_prog].bar = bar;
+			shop_prog[n_shop_prog++].label = l;
+		}
+		shop_prog_update();
+		return;
+	}
+	enum shop_act act = shop_act(a);
+	lv_obj_t *b = act == ACT_GET ? button(parent, STR_SHOP_GET, BUTTON_MAIN, shop_get_clicked, a) :
+		act == ACT_UPDATE ? button(parent, STR_SHOP_UPDATE, BUTTON_MAIN, shop_get_clicked, a) :
+		act == ACT_OPEN ? button(parent, STR_SHOP_OPEN, BUTTON_OTHER, shop_open_clicked, a) :
+		button(parent, STR_SHOP_CHOOSE, BUTTON_OTHER, shop_choose_clicked, a);
+	if (shop_busy() && (act == ACT_GET || act == ACT_UPDATE)) lv_obj_add_state(b, LV_STATE_DISABLED);
+	if (page && a->installed[0]) {
+		lv_obj_t *r = button(parent, LV_SYMBOL_TRASH "  " STR_SHOP_REMOVE, BUTTON_DANGER, shop_remove_clicked, a);
+		if (shop_busy()) lv_obj_add_state(r, LV_STATE_DISABLED);
+	}
+}
+
+/* the lists */
+
+static void shop_row_clicked(lv_event_t *e) { shop_page_open(((struct shop_app *)lv_event_get_user_data(e))->id); }
+
+// An app in a list: its icon, name and summary, pressable for its page, with its button at the end
+static void shop_row(lv_obj_t *panel, struct shop_app *a) {
+	lv_obj_t *r = lv_obj_create(panel);
+	lv_obj_remove_style_all(r);
+	lv_obj_set_size(r, PANEL_TEXT_W + 2 * LIST_ROW_PAD, SHOP_ROW_H);
+	lv_obj_set_style_translate_x(r, -LIST_ROW_PAD, 0); // its highlight reaches past the text, as a list row's does
+	lv_obj_set_style_pad_hor(r, LIST_ROW_PAD, 0);
+	lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(r, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_column(r, 16, 0);
+	lv_obj_remove_flag(r, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_set_style_bg_color(r, lv_color_white(), LV_STATE_PRESSED);
+	lv_obj_set_style_bg_opa(r, LV_OPA_20, LV_STATE_PRESSED);
+	lv_obj_add_flag(r, LV_OBJ_FLAG_CLICKABLE);
+	lv_obj_add_event_cb(r, shop_row_clicked, LV_EVENT_CLICKED, a);
+	rounded(r);
+	shop_badge(r, a, SHOP_ICON);
+	lv_obj_t *col = lv_obj_create(r);
+	lv_obj_remove_style_all(col);
+	lv_obj_set_height(col, LV_SIZE_CONTENT);
+	lv_obj_set_flex_grow(col, 1);
+	lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_style_pad_row(col, 4, 0);
+	lv_obj_remove_flag(col, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE); // the row takes the touch
+	lv_obj_t *n = shop_text(col, a->name, &lv_font_montserrat_20, C_TEXT);
+	lv_label_set_long_mode(n, LV_LABEL_LONG_DOT);
+	lv_obj_set_height(n, lv_font_get_line_height(&lv_font_montserrat_20));
+	lv_obj_t *s = shop_text(col, a->listed ? a->summary : STR_SHOP_BY_HAND, &lv_font_montserrat_16, C_DIM);
+	lv_label_set_long_mode(s, LV_LABEL_LONG_DOT);
+	lv_obj_set_height(s, lv_font_get_line_height(&lv_font_montserrat_16));
+	shop_action(r, a, false);
+}
+
+static void shop_refresh(void);
+static void shop_retry_clicked(lv_event_t *e) { shop_refresh(); shop_render(); }
+
+static void shop_render_tab(int t) {
+	lv_obj_t *p = shop_panel[t];
+	lv_obj_clean(p);
+	if (t != SHOP_INSTALLED && shop_lists_age() < 0) { // never fetched
+		if (shop_refreshing) {
+			shop_text(p, STR_SHOP_LOADING, &lv_font_montserrat_16, C_DIM);
+		} else {
+			shop_text(p, STR_SHOP_NO_LIST, &lv_font_montserrat_20, C_WARN);
+			button(button_row(p), STR_COMMON_TRY_AGAIN, BUTTON_MAIN, shop_retry_clicked, NULL);
+		}
+		return;
+	}
+	shop_text(p, t == SHOP_APPS ? STR_SHOP_FREE_NOTE : STR_SHOP_INSTALLED_NOTE, &lv_font_montserrat_16, C_DIM);
+	if (t == SHOP_INSTALLED) {
+		int n = 0;
+		for (int i = 0; i < shop_count(); i++)
+			if (shop_get(i)->installed[0]) { shop_row(p, shop_get(i)); n++; }
+		if (!n) shop_text(p, STR_SHOP_NONE_INSTALLED, &lv_font_montserrat_20, C_TEXT);
+		return;
+	}
+	// the apps, then the screensavers under a heading of their own (and the apps under one too, when there are both)
+	int apps = 0, savers = 0;
+	for (int i = 0; i < shop_count(); i++)
+		if (shop_get(i)->listed) { apps += !shop_get(i)->saver; savers += shop_get(i)->saver; }
+	if (!apps && !savers) { shop_text(p, STR_SHOP_NONE_APPS, &lv_font_montserrat_20, C_TEXT); return; }
+	for (int s = 0; s < 2; s++) {
+		if ((s ? savers : apps) == 0) continue;
+		if (apps && savers) section(p, s ? STR_SHOP_HEAD_SCREENSAVERS : STR_SHOP_HEAD_APPS);
+		if (s) shop_text(p, STR_SHOP_SAVERS_NOTE, &lv_font_montserrat_16, C_DIM);
+		for (int i = 0; i < shop_count(); i++)
+			if (shop_get(i)->listed && shop_get(i)->saver == s) shop_row(p, shop_get(i));
+	}
+}
+
+/* an app's page */
+
+static void shop_page_render(void) {
+	lv_obj_clean(shop_app_body);
+	struct shop_app *a = shop_page_id[0] ? shop_find(shop_page_id) : NULL;
+	if (!a) { // gone from the Shop (removed, and not offered)
+		shop_page_id[0] = 0;
+		if (showing(page_shopapp)) show_page(page_shop);
+		return;
+	}
+	// its icon, name, summary and maker, and its buttons
+	lv_obj_t *head = lv_obj_create(shop_app_body);
+	lv_obj_remove_style_all(head);
+	lv_obj_set_size(head, LV_PCT(100), LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(head, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(head, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+	lv_obj_set_style_pad_column(head, 24, 0);
+	lv_obj_remove_flag(head, LV_OBJ_FLAG_SCROLLABLE);
+	shop_badge(head, a, ICON_SIZE);
+	lv_obj_t *col = lv_obj_create(head);
+	lv_obj_remove_style_all(col);
+	lv_obj_set_height(col, LV_SIZE_CONTENT);
+	lv_obj_set_flex_grow(col, 1);
+	lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_style_pad_row(col, 6, 0);
+	lv_obj_remove_flag(col, LV_OBJ_FLAG_SCROLLABLE);
+	shop_text(col, a->name, &lv_font_montserrat_28, C_TEXT);
+	shop_text(col, a->listed ? a->summary : STR_SHOP_BY_HAND, &lv_font_montserrat_20, C_DIM);
+	if (a->author[0]) {
+		char by[160];
+		snprintf(by, sizeof by, STR_SHOP_BY, a->author);
+		shop_text(col, by, &lv_font_montserrat_16, C_DIM);
+	}
+	lv_obj_t *br = button_row(col);
+	lv_obj_set_style_margin_top(br, 10, 0);
+	shop_action(br, a, true);
+
+	// what it is, a label to each paragraph
+	char para[sizeof a->description];
+	snprintf(para, sizeof para, "%s", a->description);
+	char *save = NULL;
+	for (char *p = strtok_r(para, "\n", &save); p; p = strtok_r(NULL, "\n", &save))
+		shop_text(shop_app_body, p, &lv_font_montserrat_20, C_TEXT);
+
+	// what it may reach, beyond the screen
+	section(shop_app_body, STR_SHOP_HEAD_USES);
+	char uses[256] = "";
+	if (strstr(a->allow, "network")) snprintf(uses + strlen(uses), sizeof uses - strlen(uses), "%s%s", uses[0] ? "\n" : "", STR_SHOP_USES_NETWORK);
+	if (strstr(a->allow, "sound") || strstr(a->allow, "microphone"))
+		snprintf(uses + strlen(uses), sizeof uses - strlen(uses), "%s%s", uses[0] ? "\n" : "", STR_SHOP_USES_SOUND);
+	if (strstr(a->allow, "microphone")) snprintf(uses + strlen(uses), sizeof uses - strlen(uses), "%s%s", uses[0] ? "\n" : "", STR_SHOP_USES_MICROPHONE);
+	shop_text(shop_app_body, uses[0] ? uses : STR_SHOP_USES_NOTHING, &lv_font_montserrat_20, C_TEXT);
+
+	// where to ask about it: its community, else its source, as a QR code to scan (there's no browser here)
+	section(shop_app_body, STR_SHOP_HEAD_HELP);
+	const char *url = a->community[0] ? a->community : a->source;
+	char note[400];
+	snprintf(note, sizeof note, url[0] ? STR_SHOP_HELP_NOTE : STR_SHOP_HELP_NOWHERE, a->name);
+	if (!url[0]) {
+		shop_text(shop_app_body, note, &lv_font_montserrat_20, C_TEXT);
+	} else {
+		lv_obj_t *hr = lv_obj_create(shop_app_body);
+		lv_obj_remove_style_all(hr);
+		lv_obj_set_size(hr, LV_PCT(100), LV_SIZE_CONTENT);
+		lv_obj_set_flex_flow(hr, LV_FLEX_FLOW_ROW);
+		lv_obj_set_flex_align(hr, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+		lv_obj_set_style_pad_column(hr, 24, 0);
+		lv_obj_remove_flag(hr, LV_OBJ_FLAG_SCROLLABLE);
+		lv_obj_t *qr = lv_qrcode_create(hr);
+		lv_qrcode_set_size(qr, SHOP_QR);
+		lv_qrcode_set_dark_color(qr, lv_color_black());
+		lv_qrcode_set_light_color(qr, lv_color_white());
+		lv_qrcode_update(qr, url, strlen(url));
+		lv_obj_set_style_border_color(qr, lv_color_white(), 0);
+		lv_obj_set_style_border_width(qr, SHOP_QR_MARGIN, 0);
+		lv_obj_t *hc = lv_obj_create(hr);
+		lv_obj_remove_style_all(hc);
+		lv_obj_set_height(hc, LV_SIZE_CONTENT);
+		lv_obj_set_flex_grow(hc, 1);
+		lv_obj_set_flex_flow(hc, LV_FLEX_FLOW_COLUMN);
+		lv_obj_set_style_pad_row(hc, 12, 0);
+		lv_obj_remove_flag(hc, LV_OBJ_FLAG_SCROLLABLE);
+		shop_text(hc, note, &lv_font_montserrat_20, C_TEXT);
+		shop_text(hc, url, &lv_font_montserrat_16, C_DIM);
+	}
+
+	// the details
+	section(shop_app_body, STR_SHOP_HEAD_DETAILS);
+	char v[160];
+	if (a->installed[0] && strcmp(a->installed, a->version)) snprintf(v, sizeof v, STR_SHOP_VERSION_UPDATE, a->version, a->installed);
+	else snprintf(v, sizeof v, "%s", a->version);
+	info_row(shop_app_body, STR_SHOP_DETAIL_VERSION, v);
+	if (a->size_kb > 0) {
+		snprintf(v, sizeof v, STR_SHOP_SIZE_MB, a->size_kb / 1024.0);
+		info_row(shop_app_body, STR_SHOP_DETAIL_SIZE, v);
+	}
+	if (a->licence[0]) info_row(shop_app_body, STR_SHOP_DETAIL_LICENCE, a->licence);
+	if (a->source[0]) info_row(shop_app_body, STR_SHOP_DETAIL_SOURCE, a->source);
+}
+
+static void shop_page_open(const char *id) {
+	snprintf(shop_page_id, sizeof shop_page_id, "%s", id);
+	shop_page_render();
+	show_page(page_shopapp);
+	lv_obj_scroll_to_y(page_shopapp, 0, LV_ANIM_OFF);
+}
+
+static void shop_page_back(lv_event_t *e) {
+	shop_page_id[0] = 0;
+	show_page(page_shop);
+}
+
+/* opening it */
+
+// Every list, and the app's page if one's showing: what's offered or installed, and the job, may have changed any of them.
+static void shop_render(void) {
+	n_shop_prog = 0;
+	for (int t = 0; t < SHOP_TABS; t++) shop_render_tab(t);
+	if (shop_page_id[0]) shop_page_render();
+}
+
+static void shop_refreshed(char *reply, void *data) {
+	shop_refreshing = false;
+	helper_reply_status(reply); // (failing, the list there is stays, or the tabs say it couldn't be fetched)
+	shop_load();
+	shop_render();
+	sprite_lvgl_kick();
+}
+
+// The list, fetched again (a second or so). Not while a job runs, which fetches it itself.
+static void shop_refresh(void) {
+	if (shop_refreshing || shop_busy()) return;
+	shop_refreshing = true;
+	helper_request("shop-refresh\n", shop_refreshed, NULL);
+}
+
+static void shop_show_tab(int t) {
+	shop_tab = t;
+	for (int i = 0; i < SHOP_TABS; i++) {
+		if (i == t) {
+			lv_obj_remove_flag(shop_panel[i], LV_OBJ_FLAG_HIDDEN);
+			lv_obj_add_state(shop_tab_btn[i], LV_STATE_CHECKED);
+		} else {
+			lv_obj_add_flag(shop_panel[i], LV_OBJ_FLAG_HIDDEN);
+			lv_obj_remove_state(shop_tab_btn[i], LV_STATE_CHECKED);
+		}
+		lv_obj_set_style_text_color(shop_tab_icon[i], lv_color_hex(i == t ? C_ACCENT : C_TEXT), 0);
+	}
+	lv_obj_scroll_to_y(shop_panel[t], 0, LV_ANIM_OFF);
+}
+
+static void shop_tab_clicked(lv_event_t *e) { shop_show_tab((int)(intptr_t)lv_event_get_user_data(e)); }
+
+// From its tile: what's offered and installed as it is now, the job if one's running (begun before Sprite last started, say), and the list fetched again if it's old.
+static void shop_open(void) {
+	shop_job_read(&shop_job);
+	if (shop_busy()) shop_follow();
+	shop_load();
+	shop_page_id[0] = 0;
+	long age = shop_lists_age();
+	if (age < 0 || age > SHOP_LIST_OLD_S) shop_refresh();
+	shop_render();
+	shop_show_tab(SHOP_APPS); // at its first tab, as Settings opens at its
+	show_page(page_shop);
+}
+
+// A rail for a page with tabs (Settings, the Shop): Home at its top, then its tabs.
+static lv_obj_t *rail_new(lv_obj_t *page) {
+	lv_obj_t *rail = lv_obj_create(page);
+	lv_obj_remove_style_all(rail);
+	lv_obj_set_size(rail, RAIL_W, SPRITE_H - BAR_H);
+	lv_obj_set_style_bg_color(rail, lv_color_hex(C_RAIL), 0);
+	lv_obj_set_style_bg_opa(rail, LV_OPA_COVER, 0);
+	lv_obj_set_flex_flow(rail, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_style_pad_hor(rail, RAIL_PAD, 0);
+	lv_obj_set_style_pad_ver(rail, CONTENT_TOP, 0);
+	lv_obj_set_style_pad_row(rail, 4, 0);
+	lv_obj_remove_flag(rail, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_t *home = button(rail, LV_SYMBOL_LEFT "  " STR_BACK_HOME, BUTTON_MAIN, back_clicked, NULL);
+	lv_obj_set_width(home, BACK_W); // the tabs' width: its arrow and colour set it apart
+	lv_obj_set_style_margin_bottom(home, HEADING_SPACE, 0);
+	return rail;
+}
+
+static void build_shop(lv_obj_t *scr) {
+	page_shop = lv_obj_create(scr);
+	lv_obj_remove_style_all(page_shop);
+	lv_obj_set_size(page_shop, SPRITE_W, SPRITE_H - BAR_H);
+	lv_obj_set_pos(page_shop, 0, BAR_H);
+	lv_obj_remove_flag(page_shop, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_t *rail = rail_new(page_shop);
+	const char *glyph[SHOP_TABS] = { UI_ICON_LAYOUT_GRID, UI_ICON_PACKAGE };
+	const char *name[SHOP_TABS] = { STR_SHOP_TAB_APPS, STR_SHOP_TAB_INSTALLED };
+	for (int t = 0; t < SHOP_TABS; t++) {
+		shop_tab_btn[t] = rail_tab(rail, glyph[t], name[t], shop_tab_clicked, (void *)(intptr_t)t, &shop_tab_icon[t]);
+		shop_panel[t] = panel_new(page_shop);
+	}
+	shop_show_tab(SHOP_APPS);
+	lv_obj_add_flag(page_shop, LV_OBJ_FLAG_HIDDEN);
+
+	page_shopapp = list_page(scr);
+	lv_obj_t *br = button_row(page_shopapp);
+	lv_obj_set_style_translate_x(br, BACK_X - CONTENT_X, 0); // the back button's place (BACK_X)
+	lv_obj_set_width(button(br, LV_SYMBOL_LEFT "  " STR_BACK_SHOP, BUTTON_MAIN, shop_page_back, NULL), BACK_W);
+	shop_app_body = lv_obj_create(page_shopapp);
+	lv_obj_remove_style_all(shop_app_body);
+	lv_obj_set_size(shop_app_body, LV_PCT(100), LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(shop_app_body, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_style_pad_row(shop_app_body, 12, 0);
+	lv_obj_remove_flag(shop_app_body, LV_OBJ_FLAG_SCROLLABLE);
+}
+
 /* ---- the welcome: once, at the first start of a new system (or one that's been erased) ---- */
 
 // Marked done in sprite's state directory (welcomed), which of-reset empties.
@@ -5165,6 +5676,7 @@ void shell_init(void *pixels) {
 	build_wifi(scr);
 	build_netinfo(scr);
 	build_news(scr);
+	build_shop(scr);
 	build_entry(scr);
 	screensaver_build();
 	updating_resume();

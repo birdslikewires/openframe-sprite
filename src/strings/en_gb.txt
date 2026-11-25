@@ -54,6 +54,10 @@ back.home = Home
 back.settings = Settings
 # The back button to the Wi-Fi networks
 back.wifi = Wi-Fi
+# The Shop, in the bar
+title.shop = Shop
+# The back button from an app's page to the Shop
+back.shop = Shop
 
 ## Apps
 
@@ -79,6 +83,73 @@ app.keeps_closing = %s keeps closing, so we've stopped trying
 app.window = Window %d
 # Toast when an app's program wasn't there. %s is its name
 app.didnt_open = %s didn't open
+
+## The Shop
+# Where apps and screensavers are installed from. Nothing in it costs anything, so its buttons say Get, never Buy.
+
+# The Shop's tabs
+shop.tab.apps = Apps
+shop.tab.installed = Installed
+# At the top of the Apps tab
+shop.free_note = Everything here is free. The apps are made by other people, and OpenBeak brings them to the OpenFrame.
+# Headings in the Apps tab, when it has screensavers as well as apps
+shop.head.apps = APPS
+shop.head.screensavers = SCREENSAVERS
+# Under the screensavers' heading
+shop.savers_note = A screensaver shows when the OpenFrame has been left alone for a while. Once one's installed, choose it in Settings, under Display.
+# At the top of the Installed tab
+shop.installed_note = Updates to these come overnight, with the OpenFrame's own.
+# When a tab has nothing in it
+shop.none.apps = There are no apps here yet.
+shop.none.installed = Nothing has been installed from the Shop yet.
+# While the Shop fetches its list for the first time
+shop.loading = Finding out what the Shop has...
+# When the Shop has never been able to fetch its list
+shop.no_list = The Shop couldn't be reached, so it can't show what it has. Check that the OpenFrame is connected to the internet.
+# An app's buttons
+shop.get = Get
+shop.open = Open
+shop.update = Update
+shop.choose = Choose
+shop.remove = Remove
+# In place of the button while it works. %d is how far it's got
+shop.installing = Installing %d%%
+shop.removing = Removing %d%%
+# Under an app's name on its page. %s is who made it
+shop.by = By %s
+# An app's page: what it may reach beyond the screen
+shop.head.uses = WHAT IT CAN USE
+shop.uses.nothing = Only the screen. It can't reach the internet or make a sound.
+shop.uses.network = The internet, and the network the OpenFrame is on
+shop.uses.sound = Sound, to play it
+shop.uses.microphone = A microphone, to listen
+# An app's page: where to ask about it. %s is the app's name
+shop.head.help = HELP AND QUESTIONS
+shop.help_note = OpenBeak doesn't support the apps in the Shop, only brings them to the OpenFrame. For help with %s, or to ask about it, scan this code with a phone to find the people who make and use it.
+shop.help_nowhere = OpenBeak doesn't support the apps in the Shop, only brings them to the OpenFrame, and %s doesn't say where to ask about it.
+# An app's page: the details
+shop.head.details = DETAILS
+shop.detail.version = Version
+shop.detail.size = Size
+shop.detail.licence = Licence
+shop.detail.source = Source code
+# Its version when an update is waiting. The first %s is the new version, the second the one installed
+shop.version_update = %s (%s installed)
+# Its size, in megabytes
+shop.size_mb = %.1f MB
+# Where an installed app came from, when the Shop doesn't offer it
+shop.by_hand = Not from the Shop
+# Toasts when the Shop has finished. %s is the app's name
+shop.done.installed = %s is installed. Its tile is on the home screen.
+shop.done.saver = %s is installed. Choose it in Settings, under Display.
+shop.done.updated = %s is up to date.
+shop.done.removed = %s has been removed.
+# Messages when it couldn't. %s is the app's name
+shop.failed.install = %s couldn't be installed
+shop.failed.remove = %s couldn't be removed
+# Asked before an app is removed. %s is its name
+shop.remove_title = Remove %s?
+shop.remove_body = Its settings, and anything else it has kept, go with it.
 
 ## Settings tabs
 

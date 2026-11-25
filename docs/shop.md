@@ -101,15 +101,17 @@ On .131 an install of HamClock takes about 30 seconds and a removal about 45, mo
 
 Sprite watches its apps folders (inotify), and reads the manifests again half a second after they stop changing, so a tile appears as soon as an install unpacks and goes when an app's removed. That covers the nightly updates and apps installed by hand too. Entries in Sprite's table of apps are never moved or freed, as running apps and timers point at them, so a removed app is marked gone and comes back to the same entry if it's installed again. `openframe-sprite` owns `/usr/share/sprite/apps`, so the folder stays when the last app goes. A folder that doesn't exist when Sprite starts is watched from the next rescan.
 
-### 5. The Shop in Sprite
+### 5. The Shop in Sprite (built)
 
-A built-in like Settings (`builtin=shop`), with its own tile, laid out the same way: the rail on the left, the list on the right.
+A built-in (`apps/shop.app`, `builtin=shop`) with a tile of its own, which moves like any other, its glyph Lucide's gift. It's laid out as Settings is, a rail and a panel, with a page for each app. `src/shop.c` reads what's offered (apt's lists of apps.openbeak.net through `apt-helper cat-file`, which reads lz4, about 40 ms on the Atom, taking the newest version when a test unit has both suites), what's installed (dpkg's status, which also gives what a package installed by hand says about itself) and the job's status. Versions are compared as dpkg does.
 
-- **Rail:** Apps, Screensavers, Installed, and at the foot "Keep OpenBeak going".
-- **A list row:** the app's tile (its icon on its colour, as on the home screen), its name, its one-line summary, and one button: Get, Open, or Update (when a newer version's waiting and the owner would rather not wait for the night).
-- **An app's page** (tap the row): the description, what it may reach, its size, author, licence, a link to its source as a QR code, and Get or Remove.
-- **While installing:** the button becomes a progress bar (downloading, then installing), and the rest of the Shop stays usable; one install at a time.
-- **No network, or the list never fetched:** a single message and a Try again button.
+- **Rail:** Apps and Installed. Screensavers are in Apps, under a heading of their own, as "Screensavers" is too long for a tab at Settings' rail width, and making the Shop's rail wider would move its Home button from where Settings has it. Apps opens with "Everything here is free", and who makes the apps.
+- **A list row:** the app's icon, as its tile will be, its name, its summary, and one button: Get, Open, Update (when the Shop offers a newer version than the one installed) or, for a screensaver, Choose, which opens Settings at Display.
+- **An app's page** (tap the row): its icon, name, summary and who made it, its buttons (with Remove once it's installed, asked first), its description, what it can use, a QR code to its community (its source if it has none) with the address beside it and a line saying OpenBeak doesn't support the apps, then its version (and the one installed, if they differ), size, licence and source.
+- **While a job runs:** its button becomes a progress bar, in its row and on its page, read from the status file every 0.4 s. Other Gets and Removes wait. When it's done a toast says so (the tile's on the home screen, or choose a screensaver in Settings), and when it fails a message gives the reason. A job begun before Sprite restarted is picked up when the Shop opens.
+- **The list** is fetched again (`shop-refresh`) as the Shop opens if it's more than 30 minutes old. With none ever fetched, it says it's finding out what it has, then, failing that, that it couldn't be reached, with Try again.
+
+Tried on .131: Get, Remove (asked first), progress and the toasts, the Installed tab, Update (with a fake newer version in a list for a moment), and the QR code, which zbar reads as the community's address.
 
 **Keep OpenBeak going:** a short paragraph ("OpenBeak is one person's spare time...") and a QR code to a donations page, as nothing on the OpenFrame can take a payment and it shouldn't try. LVGL has a QR code widget (`LV_USE_QRCODE`), a few KB.
 
