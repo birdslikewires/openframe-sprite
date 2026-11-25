@@ -5020,10 +5020,11 @@ enum { SHOP_APPS, SHOP_INSTALLED, SHOP_TABS }; // (screensavers are in Apps, und
 #define SHOP_LIST_OLD_S (30 * 60) // the list is fetched again as the Shop opens if it's older than this
 #define SHOP_QR 150               // the QR code to an app's community, and the white margin a phone needs round it
 #define SHOP_QR_MARGIN 8
+#define SHOP_CARD_PAD 12          // round and between the icon and the button on the card at the top of an app's page
 static lv_obj_t *shop_tab_btn[SHOP_TABS], *shop_tab_icon[SHOP_TABS], *shop_panel[SHOP_TABS];
 static int shop_tab;
 static char shop_page_id[48];     // the app whose page is showing ("" for none)
-static lv_obj_t *shop_app_body;
+static lv_obj_t *shop_app_head, *shop_app_body; // an app's page: its card, name and summary, and the rest
 static lv_timer_t *shop_timer;    // reads the job's status while it runs
 static struct shop_job shop_job;  // as last read
 static bool shop_refreshing;      // fetching the list
@@ -5193,8 +5194,8 @@ static enum shop_act shop_act(const struct shop_app *a) {
 	return a->saver ? ACT_CHOOSE : ACT_OPEN;
 }
 
-// An app's button, or how its job's going; on its page, Remove too, if it's installed. Getting and removing wait while another job runs.
-static void shop_action(lv_obj_t *parent, struct shop_app *a, bool page) {
+// An app's button, or how its job's going. Getting waits while another job runs.
+static void shop_action(lv_obj_t *parent, struct shop_app *a) {
 	if (shop_busy() && !strcmp(shop_job.id, a->id)) {
 		lv_obj_t *box = lv_obj_create(parent);
 		lv_obj_remove_style_all(box);
@@ -5207,7 +5208,7 @@ static void shop_action(lv_obj_t *parent, struct shop_app *a, bool page) {
 		lv_obj_set_style_text_font(l, &lv_font_montserrat_16, 0);
 		lv_obj_set_style_text_color(l, lv_color_hex(C_DIM), 0);
 		lv_obj_t *bar = lv_bar_create(box);
-		lv_obj_set_size(bar, BUTTON_MIN_W, 8);
+		lv_obj_set_size(bar, LV_PCT(100), 8);
 		lv_bar_set_range(bar, 0, 100);
 		if (n_shop_prog < (int)(sizeof shop_prog / sizeof shop_prog[0])) {
 			shop_prog[n_shop_prog].bar = bar;
@@ -5222,10 +5223,6 @@ static void shop_action(lv_obj_t *parent, struct shop_app *a, bool page) {
 		act == ACT_OPEN ? button(parent, STR_SHOP_OPEN, BUTTON_OTHER, shop_open_clicked, a) :
 		button(parent, STR_SHOP_CHOOSE, BUTTON_OTHER, shop_choose_clicked, a);
 	if (shop_busy() && (act == ACT_GET || act == ACT_UPDATE)) lv_obj_add_state(b, LV_STATE_DISABLED);
-	if (page && a->installed[0]) {
-		lv_obj_t *r = button(parent, LV_SYMBOL_TRASH "  " STR_SHOP_REMOVE, BUTTON_DANGER, shop_remove_clicked, a);
-		if (shop_busy()) lv_obj_add_state(r, LV_STATE_DISABLED);
-	}
 }
 
 /* the lists */
@@ -5262,7 +5259,7 @@ static void shop_row(lv_obj_t *panel, struct shop_app *a) {
 	lv_obj_t *s = shop_text(col, a->listed ? a->summary : STR_SHOP_BY_HAND, &lv_font_montserrat_16, C_DIM);
 	lv_label_set_long_mode(s, LV_LABEL_LONG_DOT);
 	lv_obj_set_height(s, lv_font_get_line_height(&lv_font_montserrat_16));
-	shop_action(r, a, false);
+	shop_action(r, a);
 }
 
 static void shop_refresh(void);
@@ -5305,6 +5302,7 @@ static void shop_render_tab(int t) {
 /* an app's page */
 
 static void shop_page_render(void) {
+	lv_obj_clean(shop_app_head);
 	lv_obj_clean(shop_app_body);
 	struct shop_app *a = shop_page_id[0] ? shop_find(shop_page_id) : NULL;
 	if (!a) { // gone from the Shop (removed, and not offered)
@@ -5312,15 +5310,22 @@ static void shop_page_render(void) {
 		if (showing(page_shopapp)) show_page(page_shop);
 		return;
 	}
-	// its icon, name, summary and maker, and its buttons
-	lv_obj_t *head = lv_obj_create(shop_app_body);
-	lv_obj_remove_style_all(head);
-	lv_obj_set_size(head, LV_PCT(100), LV_SIZE_CONTENT);
-	lv_obj_set_flex_flow(head, LV_FLEX_FLOW_ROW);
-	lv_obj_set_flex_align(head, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-	lv_obj_set_style_pad_column(head, 24, 0);
-	lv_obj_remove_flag(head, LV_OBJ_FLAG_SCROLLABLE);
-	shop_badge(head, a, ICON_SIZE);
+	// a card with its icon and its button, from the content's edge to the back button's right edge, then its name, summary and maker
+	lv_obj_t *head = shop_app_head;
+	lv_obj_t *card = lv_obj_create(head);
+	lv_obj_remove_style_all(card);
+	lv_obj_set_size(card, BACK_X + BACK_W - CONTENT_X, LV_SIZE_CONTENT);
+	lv_obj_set_style_bg_color(card, lv_color_hex(C_CARD), 0);
+	lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+	lv_obj_set_style_pad_all(card, SHOP_CARD_PAD, 0);
+	lv_obj_set_style_pad_row(card, SHOP_CARD_PAD, 0);
+	lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+	rounded(card);
+	shop_badge(card, a, ICON_SIZE);
+	shop_action(card, a);
+	lv_obj_set_width(lv_obj_get_child(card, -1), LV_PCT(100)); // its button, or its progress, fills it
 	lv_obj_t *col = lv_obj_create(head);
 	lv_obj_remove_style_all(col);
 	lv_obj_set_height(col, LV_SIZE_CONTENT);
@@ -5335,9 +5340,6 @@ static void shop_page_render(void) {
 		snprintf(by, sizeof by, STR_SHOP_BY, a->author);
 		shop_text(col, by, &lv_font_montserrat_16, C_DIM);
 	}
-	lv_obj_t *br = button_row(col);
-	lv_obj_set_style_margin_top(br, 10, 0);
-	shop_action(br, a, true);
 
 	// what it is, a label to each paragraph
 	char para[sizeof a->description];
@@ -5400,6 +5402,14 @@ static void shop_page_render(void) {
 	}
 	if (a->licence[0]) info_row(shop_app_body, STR_SHOP_DETAIL_LICENCE, a->licence);
 	if (a->source[0]) info_row(shop_app_body, STR_SHOP_DETAIL_SOURCE, a->source);
+
+	// removing it, at the foot, away from its other button
+	if (a->installed[0]) {
+		lv_obj_t *br = button_row(shop_app_body);
+		lv_obj_set_style_margin_top(br, 12, 0);
+		lv_obj_t *r = button(br, LV_SYMBOL_TRASH "  " STR_SHOP_REMOVE, BUTTON_DANGER, shop_remove_clicked, a);
+		if (shop_busy()) lv_obj_add_state(r, LV_STATE_DISABLED);
+	}
 }
 
 static void shop_page_open(const char *id) {
@@ -5506,6 +5516,13 @@ static void build_shop(lv_obj_t *scr) {
 	lv_obj_t *br = button_row(page_shopapp);
 	lv_obj_set_style_translate_x(br, BACK_X - CONTENT_X, 0); // the back button's place (BACK_X)
 	lv_obj_set_width(button(br, LV_SYMBOL_LEFT "  " STR_BACK_SHOP, BUTTON_MAIN, shop_page_back, NULL), BACK_W);
+	lv_obj_t *head = shop_app_head = lv_obj_create(page_shopapp);
+	lv_obj_remove_style_all(head);
+	lv_obj_set_size(head, LV_PCT(100), LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(head, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(head, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+	lv_obj_set_style_pad_column(head, 24, 0);
+	lv_obj_remove_flag(head, LV_OBJ_FLAG_SCROLLABLE);
 	shop_app_body = lv_obj_create(page_shopapp);
 	lv_obj_remove_style_all(shop_app_body);
 	lv_obj_set_size(shop_app_body, LV_PCT(100), LV_SIZE_CONTENT);
