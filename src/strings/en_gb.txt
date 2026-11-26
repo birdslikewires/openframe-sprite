@@ -103,7 +103,7 @@ shop.installed_note = Updates are installed at your scheduled time.
 shop.none.apps = There are no apps here yet.
 shop.none.installed = Nothing has been installed from the Shop yet.
 # While the Shop fetches its list for the first time
-shop.loading = Finding out what the Shop has...
+shop.loading = Finding out what's in the Shop...
 # When the Shop has never been able to fetch its list
 shop.no_list = The Shop couldn't be reached. Check that the OpenFrame is connected to the internet.
 # An app's buttons
@@ -120,7 +120,7 @@ shop.by = By %s
 # An app's page: what it may reach beyond the screen
 shop.head.uses = WHAT IT CAN USE
 shop.uses.nothing = This app can't reach the internet or make sound.
-shop.uses.network = This app can access the internet, and the local network.
+shop.uses.network = This app can access the internet and the local network.
 shop.uses.sound = This app can play audio.
 shop.uses.microphone = This app can use audio inputs (if present).
 # An app's page: where to ask about it. %s is the app's name
