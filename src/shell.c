@@ -5130,6 +5130,19 @@ static lv_obj_t *shop_text(lv_obj_t *parent, const char *text, const lv_font_t *
 	return l;
 }
 
+// A bullet point: the bullet, then the text, wrapping under itself rather than under the bullet
+static void shop_bullet(lv_obj_t *parent, const char *text) {
+	lv_obj_t *row = lv_obj_create(parent);
+	lv_obj_remove_style_all(row);
+	lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+	lv_obj_set_style_pad_column(row, 12, 0);
+	lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+	shop_text(row, LV_SYMBOL_BULLET, &lv_font_montserrat_20, C_DIM);
+	lv_obj_set_width(lv_obj_get_child(row, 0), LV_SIZE_CONTENT);
+	lv_obj_set_flex_grow(shop_text(row, text, &lv_font_montserrat_20, C_TEXT), 1);
+}
+
 /* the job: asking the helper, then following its status until it's done */
 
 static void shop_prog_update(void) {
@@ -5369,22 +5382,8 @@ static void shop_page_render(void) {
 		if (showing(page_shopapp)) show_page(page_shop);
 		return;
 	}
-	// a card with its icon and its button, from the content's edge to the back button's right edge, then its name, summary and maker
+	// its name, summary and maker, then a card with its icon and its button at the right, as wide as the back button's reach past the content's edge
 	lv_obj_t *head = shop_app_head;
-	lv_obj_t *card = lv_obj_create(head);
-	lv_obj_remove_style_all(card);
-	lv_obj_set_size(card, BACK_X + BACK_W - CONTENT_X, LV_SIZE_CONTENT);
-	lv_obj_set_style_bg_color(card, lv_color_hex(C_CARD), 0);
-	lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
-	lv_obj_set_style_pad_all(card, SHOP_CARD_PAD, 0);
-	lv_obj_set_style_pad_row(card, SHOP_CARD_PAD, 0);
-	lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-	lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
-	rounded(card);
-	shop_badge(card, a, ICON_SIZE);
-	shop_action(card, a);
-	lv_obj_set_width(lv_obj_get_child(card, -1), LV_PCT(100)); // its button, or its progress, fills it
 	lv_obj_t *col = lv_obj_create(head);
 	lv_obj_remove_style_all(col);
 	lv_obj_set_height(col, LV_SIZE_CONTENT);
@@ -5399,6 +5398,20 @@ static void shop_page_render(void) {
 		snprintf(by, sizeof by, STR_SHOP_BY, a->author);
 		shop_text(col, by, &lv_font_montserrat_16, C_DIM);
 	}
+	lv_obj_t *card = lv_obj_create(head);
+	lv_obj_remove_style_all(card);
+	lv_obj_set_size(card, BACK_X + BACK_W - CONTENT_X, LV_SIZE_CONTENT);
+	lv_obj_set_style_bg_color(card, lv_color_hex(C_CARD), 0);
+	lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+	lv_obj_set_style_pad_all(card, SHOP_CARD_PAD, 0);
+	lv_obj_set_style_pad_row(card, SHOP_CARD_PAD, 0);
+	lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+	rounded(card);
+	shop_badge(card, a, ICON_SIZE);
+	shop_action(card, a);
+	lv_obj_set_width(lv_obj_get_child(card, -1), LV_PCT(100)); // its button, or its progress, fills it
 
 	// what it is, a label to each paragraph
 	char para[sizeof a->description];
@@ -5407,14 +5420,13 @@ static void shop_page_render(void) {
 	for (char *p = strtok_r(para, "\n", &save); p; p = strtok_r(NULL, "\n", &save))
 		shop_text(shop_app_body, p, &lv_font_montserrat_20, C_TEXT);
 
-	// what it may reach, beyond the screen
+	// what it may reach, beyond the screen, a bullet point to each
 	section(shop_app_body, STR_SHOP_HEAD_USES);
-	char uses[256] = "";
-	if (strstr(a->allow, "network")) snprintf(uses + strlen(uses), sizeof uses - strlen(uses), "%s%s", uses[0] ? "\n" : "", STR_SHOP_USES_NETWORK);
-	if (strstr(a->allow, "sound") || strstr(a->allow, "microphone"))
-		snprintf(uses + strlen(uses), sizeof uses - strlen(uses), "%s%s", uses[0] ? "\n" : "", STR_SHOP_USES_SOUND);
-	if (strstr(a->allow, "microphone")) snprintf(uses + strlen(uses), sizeof uses - strlen(uses), "%s%s", uses[0] ? "\n" : "", STR_SHOP_USES_MICROPHONE);
-	shop_text(shop_app_body, uses[0] ? uses : STR_SHOP_USES_NOTHING, &lv_font_montserrat_20, C_TEXT);
+	bool net = strstr(a->allow, "network"), mic = strstr(a->allow, "microphone"), snd = mic || strstr(a->allow, "sound");
+	if (net) shop_bullet(shop_app_body, STR_SHOP_USES_NETWORK);
+	if (snd) shop_bullet(shop_app_body, STR_SHOP_USES_SOUND);
+	if (mic) shop_bullet(shop_app_body, STR_SHOP_USES_MICROPHONE);
+	if (!net && !snd) shop_text(shop_app_body, STR_SHOP_USES_NOTHING, &lv_font_montserrat_20, C_TEXT);
 
 	// where to ask about it: its community, else its source, as a QR code to scan (there's no browser here)
 	section(shop_app_body, STR_SHOP_HEAD_HELP);
@@ -5578,8 +5590,9 @@ static void build_shop(lv_obj_t *scr) {
 	lv_obj_remove_style_all(head);
 	lv_obj_set_size(head, LV_PCT(100), LV_SIZE_CONTENT);
 	lv_obj_set_flex_flow(head, LV_FLEX_FLOW_ROW);
-	lv_obj_set_flex_align(head, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+	lv_obj_set_flex_align(head, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START); // the name, summary and maker centred beside the card
 	lv_obj_set_style_pad_column(head, 24, 0);
+	lv_obj_set_style_pad_bottom(head, 8, 0); // a little more room under the card than the page's rows have
 	lv_obj_remove_flag(head, LV_OBJ_FLAG_SCROLLABLE);
 	shop_app_body = lv_obj_create(page_shopapp);
 	lv_obj_remove_style_all(shop_app_body);
