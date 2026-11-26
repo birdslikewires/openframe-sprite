@@ -450,6 +450,11 @@ upd.installing_ready = Getting ready to install...
 upd.installing = Installing updates...
 # Progress. %d of %d
 upd.n_of = %d of %d
+# The stages of an update, under its bar, ticked off as they finish (a check has only the first two)
+upd.step.check = Check
+upd.step.organise = Organise
+upd.step.download = Download
+upd.step.install = Install
 # Status
 upd.restart_to_finish = Restart to finish updating
 # Status

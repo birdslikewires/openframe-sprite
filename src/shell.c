@@ -3626,6 +3626,7 @@ static void ssh_off_clicked(lv_event_t *e) {
 
 static lv_obj_t *upd_status_label, *upd_detail_label, *upd_note_label, *upd_now_btn, *upd_restart_btn, *upd_check_btn;
 static lv_obj_t *upd_bar, *upd_buttons, *upd_list;
+static lv_obj_t *upd_steps, *upd_step[4]; // under the bar while a run goes: its stages, ticked off
 static bool upd_asking;
 // When Check now or Update now was tapped: the helper answers before of-update has started, so
 // until the status shows it running, or a look newer than the tap, it isn't taken as idle.
@@ -3641,6 +3642,17 @@ static const char *upd_part(const char *pkg) {
 	if (!strcmp(pkg, "openframe-resampler")) return STR_UPD_PART_RESAMPLER;
 	if (!strncmp(pkg, "linux-image-", 12)) return STR_UPD_PART_KERNEL;
 	return pkg;
+}
+
+// An app's package (ofapp-<id>) by the app's own name: its manifest's, if it's installed, else the Shop's, else its id
+static const char *upd_app_name(const char *pkg) {
+	const char *id = pkg + 6;
+	for (int i = 0; i < apps_count(); i++) {
+		struct sprite_app *a = apps_get(i);
+		if (!a->gone && !strcmp(a->id, id)) return a->name;
+	}
+	const struct shop_app *s = shop_find(id);
+	return s ? s->name : id;
 }
 
 static lv_obj_t *upd_small(const char *text) {
@@ -3704,7 +3716,7 @@ static void news_done(char *reply, void *data) {
 		if (!strncmp(pkg, "linux-image-openframe-", 22)) continue; // the kernel's metapackage
 		any = true;
 		char head[128], up[64];
-		const char *name = strcmp(tier, "openframe") ? (strcmp(tier, "firmware") ? (strncmp(pkg, "ofapp-", 6) ? pkg : pkg + 6) : STR_UPD_FIRMWARE) : upd_part(pkg);
+		const char *name = strcmp(tier, "openframe") ? (strcmp(tier, "firmware") ? (strncmp(pkg, "ofapp-", 6) ? pkg : upd_app_name(pkg)) : STR_UPD_FIRMWARE) : upd_part(pkg);
 		snprintf(up, sizeof up, "%s", name);
 		for (char *c = up; *c; c++) *c = (char)toupper((unsigned char)*c);
 		snprintf(head, sizeof head, STR_UPD_NOTES_HEAD, up, no_epoch(ver));
@@ -3851,7 +3863,7 @@ static void upd_show_list(char items[][96], int n, bool firmware_pending) {
 		if (!apps) { section(upd_list, STR_UPD_HEAD_APPS); apps = true; }
 		if (n_app_pkgs >= 32) continue;
 		snprintf(app_pkgs[n_app_pkgs], sizeof app_pkgs[0], "%.63s", it[i].pkg);
-		row_pressable(upd_row(strncmp(it[i].pkg, "ofapp-", 6) ? it[i].pkg : it[i].pkg + 6, no_epoch(it[i].ver), it[i].done),
+		row_pressable(upd_row(strncmp(it[i].pkg, "ofapp-", 6) ? it[i].pkg : upd_app_name(it[i].pkg), no_epoch(it[i].ver), it[i].done),
 			      news_open, app_pkgs[n_app_pkgs++]);
 	}
 	// Debian's
@@ -4014,6 +4026,21 @@ static void upd_bar_show(int progress) {
 	if (progress >= 0) lv_bar_set_value(upd_bar, progress, LV_ANIM_ON);
 }
 
+// The stages under the bar: those done ticked, the one going on marked, those to come faint. A check (kind=check) has only the first two. -1 hides them.
+static void upd_steps_show(int stage, bool check_only) {
+	show_if(upd_steps, stage >= 0);
+	if (stage < 0) return;
+	static const char *const names[4] = { STR_UPD_STEP_CHECK, STR_UPD_STEP_ORGANISE, STR_UPD_STEP_DOWNLOAD, STR_UPD_STEP_INSTALL };
+	for (int i = 0; i < 4; i++) {
+		show_if(upd_step[i], i < 2 || !check_only);
+		char t[48];
+		snprintf(t, sizeof t, "%s%s", i < stage ? LV_SYMBOL_OK "  " : i == stage ? LV_SYMBOL_BULLET "  " : "", names[i]);
+		set_text(upd_step[i], t);
+		lv_obj_set_style_text_color(upd_step[i], lv_color_hex(i == stage ? C_TEXT : C_DIM), 0);
+		lv_obj_set_style_text_opa(upd_step[i], i > stage ? LV_OPA_50 : LV_OPA_COVER, 0);
+	}
+}
+
 static void upd_status_done(char *reply, void *data) {
 	upd_asking = false;
 	const char *st = helper_reply_status(reply);
@@ -4026,8 +4053,9 @@ static void upd_status_done(char *reply, void *data) {
 		show_if(upd_check_btn, false);
 		return;
 	}
-	char state[16] = "idle", result[16] = "", message[160] = "", restart[8] = "", firmware[12] = "", notice[200] = "";
+	char state[16] = "idle", result[16] = "", message[160] = "", restart[8] = "", firmware[12] = "", notice[200] = "", kind[8] = "";
 	long last = 0, checked = 0, got = 0, size = 0;
+	int percent = -1; // how far this state has got, where of-update can tell
 	int pending = 0, n_items = 0, n_done = 0, n_partial = 0;
 	char now_pkg[64] = "";
 	static char items[64][96];
@@ -4046,6 +4074,8 @@ static void upd_status_done(char *reply, void *data) {
 		else if (!strncmp(l, "partial=", 8)) n_partial = atoi(l + 8);
 		else if (!strncmp(l, "now=", 4)) snprintf(now_pkg, sizeof now_pkg, "%s", l + 4);
 		else if (!strncmp(l, "state=", 6)) snprintf(state, sizeof state, "%s", l + 6);
+		else if (!strncmp(l, "kind=", 5)) snprintf(kind, sizeof kind, "%s", l + 5);
+		else if (!strncmp(l, "percent=", 8)) percent = atoi(l + 8);
 		else if (!strncmp(l, "result=", 7)) snprintf(result, sizeof result, "%s", l + 7);
 		else if (!strncmp(l, "message=", 8)) snprintf(message, sizeof message, "%s", l + 8);
 		else if (!strncmp(l, "notice=", 7)) snprintf(notice, sizeof notice, "%s", l + 7);
@@ -4064,6 +4094,7 @@ static void upd_status_done(char *reply, void *data) {
 		else {
 			upd_busy(true);             // not started yet: still as tapped
 			upd_bar_show(UPD_SLIDING);
+			upd_steps_show(-1, false);
 			return;
 		}
 	}
@@ -4072,7 +4103,8 @@ static void upd_status_done(char *reply, void *data) {
 	// The bar: a percentage while there's something to measure; UPD_SLIDING while it's busy
 	// with nothing to measure yet (looking, planning, a download not begun); UPD_NO_BAR idle.
 	int progress = UPD_NO_BAR;
-	if (!strcmp(state, "checking")) { snprintf(t, sizeof t, STR_UPD_CHECKING); progress = UPD_SLIDING; }
+	int stage = !strcmp(state, "checking") ? 0 : !strcmp(state, "preparing") ? 1 : !strcmp(state, "downloading") ? 2 : !strcmp(state, "installing") ? 3 : -1;
+	if (!strcmp(state, "checking")) { snprintf(t, sizeof t, STR_UPD_CHECKING); progress = percent > 0 ? percent : UPD_SLIDING; }
 	else if (!strcmp(state, "preparing")) { snprintf(t, sizeof t, STR_UPD_PREPARING); progress = UPD_SLIDING; }
 	else if (!strcmp(state, "downloading")) {
 		snprintf(t, sizeof t, STR_UPD_DOWNLOADING);
@@ -4087,18 +4119,21 @@ static void upd_status_done(char *reply, void *data) {
 		snprintf(t, sizeof t, STR_UPD_FINISHING);
 		progress = 100;
 	} else if (!strcmp(state, "installing")) {
-		// what's going in, by name; before the first, unattended-upgrades works out the order
+		// what's going in, by name; before the first, apt gets ready
 		if (now_pkg[0]) {
 			const char *name = !strncmp(now_pkg, "openframe-", 10) || !strncmp(now_pkg, "linux-image-", 12) ? upd_part(now_pkg)
-					   : !strncmp(now_pkg, "ofapp-", 6) ? now_pkg + 6 : now_pkg;
+					   : !strncmp(now_pkg, "ofapp-", 6) ? upd_app_name(now_pkg) : now_pkg;
 			snprintf(t, sizeof t, STR_UPD_INSTALLING_PKG, name);
 		} else if (!n_done) snprintf(t, sizeof t, STR_UPD_INSTALLING_READY);
 		else snprintf(t, sizeof t, STR_UPD_INSTALLING);
 		progress = UPD_SLIDING;
-		if (n_items > 0) {
-			// an unpacked one, not yet configured, is half in: so even one update moves
+		if (percent > 0) progress = percent; // apt's own count, across everything it's doing
+		else if (n_items > 0) {
+			// (an older of-update: from the list) an unpacked one, not yet configured, is half in: so even one update moves
 			int p = (n_done * 2 + n_partial) * 50 / n_items;
 			if (p > 0) progress = p;
+		}
+		if (n_items > 0) {
 			int rows_in, rows = upd_rows(items, n_items, &rows_in);
 			if (rows > 0) snprintf(d, sizeof d, STR_UPD_N_OF, rows_in, rows); // as the list shows them
 		}
@@ -4130,7 +4165,12 @@ static void upd_status_done(char *reply, void *data) {
 		lv_obj_set_style_text_color(upd_note_label, lv_color_hex(why == message ? C_WARN : C_DIM), 0);
 		show_if(upd_note_label, true);
 	} else show_if(upd_note_label, false);
+	// a new stage starts its bar from nothing, rather than sliding back from the last one's end
+	static int last_stage = -1;
+	if (stage != last_stage && progress >= 0) lv_bar_set_value(upd_bar, 0, LV_ANIM_OFF);
+	last_stage = stage;
 	upd_bar_show(progress);
+	upd_steps_show(stage, !strcmp(kind, "check"));
 	upd_show_list(items, idle && needs_restart ? 0 : n_items, !strcmp(firmware, "pending"));
 	// A list older than six hours is looked at again as the tab shows it (a check, no more).
 	static time_t auto_asked;
@@ -4864,6 +4904,17 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_bg_opa(upd_bar, LV_OPA_COVER, 0);
 	lv_obj_set_style_bg_color(upd_bar, lv_color_hex(C_ACCENT), LV_PART_INDICATOR);
 	lv_obj_add_flag(upd_bar, LV_OBJ_FLAG_HIDDEN);
+	upd_steps = lv_obj_create(pu);
+	lv_obj_remove_style_all(upd_steps);
+	lv_obj_set_size(upd_steps, LV_PCT(100), LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(upd_steps, LV_FLEX_FLOW_ROW);
+	lv_obj_set_style_pad_column(upd_steps, 24, 0);
+	lv_obj_remove_flag(upd_steps, LV_OBJ_FLAG_SCROLLABLE);
+	for (int i = 0; i < 4; i++) {
+		upd_step[i] = lv_label_create(upd_steps);
+		lv_obj_set_style_text_font(upd_step[i], &lv_font_montserrat_16, 0);
+	}
+	lv_obj_add_flag(upd_steps, LV_OBJ_FLAG_HIDDEN);
 	upd_note_label = lv_label_create(pu);
 	lv_label_set_text(upd_note_label, "");
 	lv_obj_set_width(upd_note_label, LV_PCT(100));
