@@ -191,8 +191,6 @@ audio.note.by_hand = Using custom configuration.
 audio.note.direct_on = The DAC is receiving audio directly. No mixer and no resampling, but only one app can play at a time.
 # Note under Direct to DAC, off
 audio.note.direct_off = Turn on to send audio to the DAC directly. Volume must be controlled on your amplifier.
-# Note when no DAC is plugged in
-audio.note.plug_in = Plug in a USB DAC and the sound goes there.
 # The switch
 audio.rate = Mix at 48 kHz
 # Under that switch

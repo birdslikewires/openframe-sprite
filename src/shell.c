@@ -3319,8 +3319,7 @@ static void aud_show(void) {
 		lv_label_set_text(n, aud_known ? STR_AUDIO_NO_CARDS : "");
 		lv_obj_set_style_text_color(n, lv_color_hex(C_DIM), 0);
 	}
-	bool usb = !strcmp(aud_kind, "usb"), vol = aud_managed && aud_n && !aud_direct && aud_mixer[0], any_dac = false;
-	for (int i = 0; i < aud_n; i++) any_dac |= !strcmp(aud_cards[i].kind, "usb");
+	bool usb = !strcmp(aud_kind, "usb"), vol = aud_managed && aud_n && !aud_direct && aud_mixer[0];
 	show_if(aud_vol_head, vol);
 	show_if(aud_slider_row, vol);
 	if (vol && !lv_obj_has_state(aud_slider, LV_STATE_PRESSED)) {
@@ -3335,8 +3334,7 @@ static void aud_show(void) {
 	else lv_obj_remove_state(sw, LV_STATE_CHECKED);
 	const char *note = !aud_managed ? STR_AUDIO_NOTE_BY_HAND
 			   : usb && aud_direct ? STR_AUDIO_NOTE_DIRECT_ON
-			   : usb ? STR_AUDIO_NOTE_DIRECT_OFF
-			   : aud_n && !any_dac ? STR_AUDIO_NOTE_PLUG_IN : "";
+			   : usb ? STR_AUDIO_NOTE_DIRECT_OFF : "";
 	set_text(aud_note, note);
 	show_if(aud_note, note[0]);
 	// The mixer's rate: only while the audio's mixed (Direct to DAC sends it at its own), and
