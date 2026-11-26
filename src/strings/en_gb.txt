@@ -91,21 +91,21 @@ app.didnt_open = %s didn't open
 shop.tab.apps = Apps
 shop.tab.installed = Installed
 # At the top of the Apps tab
-shop.free_note = Everything here is free. The apps are made by other people, and OpenBeak brings them to the OpenFrame.
+shop.free_note = Everything here is free. The apps are made by other people, and the "shop" brings them to the OpenFrame.
 # Headings in the Apps tab, when it has screensavers as well as apps
 shop.head.apps = APPS
 shop.head.screensavers = SCREENSAVERS
 # Under the screensavers' heading
-shop.savers_note = A screensaver shows when the OpenFrame has been left alone for a while. Once one's installed, choose it in Settings, under Display.
+shop.savers_note = A screensaver shows when the OpenFrame has been left alone for a while. Once installed, choose them in Settings, on the Display tab.
 # At the top of the Installed tab
-shop.installed_note = Updates to these come overnight, with the OpenFrame's own.
+shop.installed_note = Updates are installed at your scheduled time.
 # When a tab has nothing in it
 shop.none.apps = There are no apps here yet.
 shop.none.installed = Nothing has been installed from the Shop yet.
 # While the Shop fetches its list for the first time
 shop.loading = Finding out what the Shop has...
 # When the Shop has never been able to fetch its list
-shop.no_list = The Shop couldn't be reached, so it can't show what it has. Check that the OpenFrame is connected to the internet.
+shop.no_list = The Shop couldn't be reached. Check that the OpenFrame is connected to the internet.
 # An app's buttons
 shop.get = Get
 shop.open = Open
@@ -119,14 +119,14 @@ shop.removing = Removing %d%%
 shop.by = By %s
 # An app's page: what it may reach beyond the screen
 shop.head.uses = WHAT IT CAN USE
-shop.uses.nothing = Only the screen. It can't reach the internet or make a sound.
-shop.uses.network = The internet, and the network the OpenFrame is on
-shop.uses.sound = Sound, to play it
-shop.uses.microphone = A microphone, to listen
+shop.uses.nothing = This app can't reach the internet or make sound.
+shop.uses.network = This app can access the internet, and the local network.
+shop.uses.sound = This app can play audio.
+shop.uses.microphone = This app can use audio inputs (if present).
 # An app's page: where to ask about it. %s is the app's name
 shop.head.help = HELP AND QUESTIONS
-shop.help_note = OpenBeak doesn't support the apps in the Shop, only brings them to the OpenFrame. For help with %s, or to ask about it, scan this code with a phone to find the people who make and use it.
-shop.help_nowhere = OpenBeak doesn't support the apps in the Shop, only brings them to the OpenFrame, and %s doesn't say where to ask about it.
+shop.help_note = For help with %s, scan this code with a phone to find the community who make and use it.
+shop.help_nowhere = Unfortunately, no active support community is known for %s.
 # An app's page: the details
 shop.head.details = DETAILS
 shop.detail.version = Version
