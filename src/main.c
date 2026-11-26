@@ -200,13 +200,14 @@ void sprite_set_covered(bool covered) {
 	apply_foreground();
 }
 
-// A touch (or key) while asleep: it wakes the screen and goes no further, so it can't tap
-// something nobody could see. True if it did.
+// A touch (or key) while asleep, or while the screen's off in the dark: it wakes or lights
+// the screen and goes no further, so it can't tap something nobody could see. True if it did.
 static bool wake_on_input(void) {
 	input_seen();
-	if (!S.asleep) return false;
+	bool dark = !S.asleep && shell_dark();
+	if (!S.asleep && !dark) return false;
 	S.asleep = false;
-	wlr_log(WLR_INFO, "awake: a touch");
+	wlr_log(WLR_INFO, "%s", dark ? "lit: a touch in the dark" : "awake: a touch");
 	shell_wake();
 	return true;
 }
@@ -741,8 +742,7 @@ static void input_motion(double x, double y, uint32_t t) {
 
 static void finish_release(double x, double y, uint32_t t, uint32_t button);
 static void input_press(double x, double y, uint32_t t, uint32_t button) {
-	if (S.asleep && !S.release_pending) {
-		wake_on_input();
+	if (!S.release_pending && wake_on_input()) {
 		S.button_down = true;
 		S.gesture = G_DONE; // the rest of the stroke too
 		return;

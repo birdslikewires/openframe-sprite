@@ -153,6 +153,7 @@ void shell_set_bar_app(struct sprite_app *app); // an app is in front below the 
 void shell_frame(void);                       // the display wants a frame: draw what has changed
 void shell_notice(const char *text);          // a banner on the home screen
 void shell_wake(void);                        // display sleep: a touch woke the screen
+bool shell_dark(void);                        // the screen's off in the dark (automatic brightness)
 void shell_screensaver_tap(void);             // a touch while the screensaver's up: it goes
 bool shell_clock_24(void);                    // the clock's a 24-hour one (Settings, Display)
 bool shell_time_known(void);                  // the time's been synced this boot (till then, zeros)

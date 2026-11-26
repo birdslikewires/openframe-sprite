@@ -4350,6 +4350,24 @@ static void idle_step(lv_event_t *e) {
 	settings_set(r->key, t);
 }
 
+// Off in the dark, by automatic brightness (of-backlight, from the light sensor, not
+// Sprite's display sleep): a touch lights it for a glance, at the lowest, rather than tapping
+// what's on the dark screen. of-backlight holds it 15 s from the last ask, so it's asked
+// again every 5 s while the screen's being used, and goes dark about 30 s after the last touch.
+#define GLANCE_IDLE_MS 15000
+#define GLANCE_REPEAT_MS 5000
+#define GLANCE_HOLD_MS 15000 // of-backlight's
+static bool glancing;
+static uint32_t glance_asked;
+
+bool shell_dark(void) { return !sleeping && sysinfo_backlight() == 0; }
+
+static void glance(void) {
+	glancing = true;
+	glance_asked = lv_tick_get();
+	sysinfo_backlight_request("glance");
+}
+
 // Once a second: the screensaver once it's been left ss_min untouched, the screen off once
 // sleep_min, unless something asks it not to (a video playing) or the calibration's screen
 // is up. Asleep only if of-backlight's service takes it: without one the screen stays on, and
@@ -4366,6 +4384,13 @@ static void idle_tick(lv_timer_t *t) {
 		return;
 	}
 	asked = lv_tick_get();
+	// A glance: asked again while the screen's used (any touch, the lit screen's included),
+	// till the dark has it again, or the room's light enough for it to stay on anyway
+	if (glancing) {
+		uint64_t idle = sprite_idle_ms();
+		if (shell_dark() || idle >= GLANCE_IDLE_MS + GLANCE_HOLD_MS) glancing = false;
+		else if (idle < GLANCE_IDLE_MS && lv_tick_elaps(glance_asked) >= GLANCE_REPEAT_MS) glance();
+	}
 	if (cal || sprite_sleep_inhibited()) return;
 	uint64_t idle = sprite_idle_ms();
 	if (ss_min && !sleeping && !screensaver_active() && idle >= (uint64_t)ss_min * 60000) {
@@ -4381,10 +4406,15 @@ static void idle_tick(lv_timer_t *t) {
 	}
 }
 
-// A touch on the dark screen: it lights again at what it went off from. The screensaver, if
-// it was up (the touch is a glance at the clock: another ends it), its app started again
-// (stopped as the screen went off); else whatever was showing.
+// A touch on the dark screen. Asleep (display sleep): it lights again at what it went off
+// from. The screensaver, if it was up (the touch is a glance at the clock: another ends it),
+// its app started again (stopped as the screen went off); else whatever was showing. Off in
+// the dark: lit for a glance.
 void shell_wake(void) {
+	if (!sleeping) {
+		glance();
+		return;
+	}
 	sleeping = false;
 	sysinfo_backlight_request("wake");
 	if (screensaver_active()) sprite_saver_start(saver_app());
