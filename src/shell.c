@@ -1131,6 +1131,17 @@ static lv_obj_t *button(lv_obj_t *parent, const char *text, enum button_role rol
 	return b;
 }
 
+// A back button: BACK_W wide, its words in the middle (child 0, as button()'s) and its chevron at the left
+static lv_obj_t *back_button(lv_obj_t *parent, const char *text, lv_event_cb_t cb, void *data) {
+	lv_obj_t *b = button(parent, text, BUTTON_MAIN, cb, data);
+	lv_obj_set_width(b, BACK_W);
+	lv_obj_t *chev = lv_label_create(b);
+	lv_label_set_text(chev, LV_SYMBOL_LEFT);
+	lv_obj_set_style_text_font(chev, &lv_font_montserrat_20, 0);
+	lv_obj_align(chev, LV_ALIGN_LEFT_MID, 0, 0);
+	return b;
+}
+
 // A row of buttons, BUTTON_GAP apart
 #define BUTTON_GAP 20
 static lv_obj_t *button_row(lv_obj_t *parent) {
@@ -2676,7 +2687,7 @@ static void build_wifi(lv_obj_t *scr) {
 	page_wifi = list_page(scr);
 	lv_obj_t *br = button_row(page_wifi);
 	lv_obj_set_style_translate_x(br, BACK_X - CONTENT_X, 0); // the back button's place (BACK_X)
-	lv_obj_set_width(button(br, LV_SYMBOL_LEFT "  " STR_BACK_SETTINGS, BUTTON_MAIN, wifi_back_clicked, NULL), BACK_W);
+	back_button(br, STR_BACK_SETTINGS, wifi_back_clicked, NULL);
 	wifi_rescan = button(br, LV_SYMBOL_REFRESH "  " STR_WIFI_LOOK_AGAIN, BUTTON_OTHER, wifi_rescan_clicked, NULL);
 	section(page_wifi, STR_WIFI_HEAD_NETWORKS);
 	wifi_note = lv_label_create(page_wifi);
@@ -2856,7 +2867,7 @@ static void open_entry(enum entry_mode mode, const char *ssid) {
 	kb_layout();
 	// back to where it came from: Wi-Fi, or Settings for the login password
 	bool from_settings = mode == ENTRY_SSH || mode == ENTRY_DEVNAME;
-	const char *from = from_settings ? LV_SYMBOL_LEFT "  " STR_BACK_SETTINGS : LV_SYMBOL_LEFT "  " STR_BACK_WIFI;
+	const char *from = from_settings ? STR_BACK_SETTINGS : STR_BACK_WIFI;
 	lv_label_set_text(lv_obj_get_child(entry_back_btn, 0), from);
 	lv_obj_set_width(entry_back_btn, BACK_W);
 	lv_obj_update_layout(entry_back_btn);
@@ -2878,8 +2889,7 @@ static void build_entry(lv_obj_t *scr) {
 	lv_obj_add_flag(page_entry, LV_OBJ_FLAG_HIDDEN);
 
 	// the top row: back, and what's wanted
-	lv_obj_t *back = entry_back_btn = button(page_entry, LV_SYMBOL_LEFT "  " STR_BACK_WIFI, BUTTON_MAIN, entry_back, NULL);
-	lv_obj_set_width(back, BACK_W);
+	lv_obj_t *back = entry_back_btn = back_button(page_entry, STR_BACK_WIFI, entry_back, NULL);
 	lv_obj_set_pos(back, BACK_X, CONTENT_TOP);
 	lv_obj_update_layout(back);
 	int tx = BACK_X + lv_obj_get_width(back) + BUTTON_GAP;
@@ -3117,7 +3127,7 @@ static void build_netinfo(lv_obj_t *scr) {
 	page_netinfo = list_page(scr);
 	lv_obj_t *br = button_row(page_netinfo);
 	lv_obj_set_style_translate_x(br, BACK_X - CONTENT_X, 0); // the back button's place (BACK_X)
-	lv_obj_set_width(button(br, LV_SYMBOL_LEFT "  " STR_BACK_SETTINGS, BUTTON_MAIN, netinfo_back, NULL), BACK_W);
+	back_button(br, STR_BACK_SETTINGS, netinfo_back, NULL);
 	netinfo_body = lv_obj_create(page_netinfo);
 	lv_obj_remove_style_all(netinfo_body);
 	lv_obj_set_size(netinfo_body, LV_PCT(100), LV_SIZE_CONTENT);
@@ -3748,7 +3758,7 @@ static void build_news(lv_obj_t *scr) {
 	page_news = list_page(scr);
 	lv_obj_t *br = button_row(page_news);
 	lv_obj_set_style_translate_x(br, BACK_X - CONTENT_X, 0); // the back button's place (BACK_X)
-	lv_obj_set_width(button(br, LV_SYMBOL_LEFT "  " STR_BACK_SETTINGS, BUTTON_MAIN, news_back, NULL), BACK_W);
+	back_button(br, STR_BACK_SETTINGS, news_back, NULL);
 	news_body = lv_obj_create(page_news);
 	lv_obj_remove_style_all(news_body);
 	lv_obj_set_size(news_body, LV_PCT(100), LV_SIZE_CONTENT);
@@ -5490,8 +5500,7 @@ static lv_obj_t *rail_new(lv_obj_t *page) {
 	lv_obj_set_style_pad_ver(rail, CONTENT_TOP, 0);
 	lv_obj_set_style_pad_row(rail, 4, 0);
 	lv_obj_remove_flag(rail, LV_OBJ_FLAG_SCROLLABLE);
-	lv_obj_t *home = button(rail, LV_SYMBOL_LEFT "  " STR_BACK_HOME, BUTTON_MAIN, back_clicked, NULL);
-	lv_obj_set_width(home, BACK_W); // the tabs' width: its arrow and colour set it apart
+	lv_obj_t *home = back_button(rail, STR_BACK_HOME, back_clicked, NULL); // the tabs' width: its arrow and colour set it apart
 	lv_obj_set_style_margin_bottom(home, HEADING_SPACE, 0);
 	return rail;
 }
@@ -5515,7 +5524,7 @@ static void build_shop(lv_obj_t *scr) {
 	page_shopapp = list_page(scr);
 	lv_obj_t *br = button_row(page_shopapp);
 	lv_obj_set_style_translate_x(br, BACK_X - CONTENT_X, 0); // the back button's place (BACK_X)
-	lv_obj_set_width(button(br, LV_SYMBOL_LEFT "  " STR_BACK_SHOP, BUTTON_MAIN, shop_page_back, NULL), BACK_W);
+	back_button(br, STR_BACK_SHOP, shop_page_back, NULL);
 	lv_obj_t *head = shop_app_head = lv_obj_create(page_shopapp);
 	lv_obj_remove_style_all(head);
 	lv_obj_set_size(head, LV_PCT(100), LV_SIZE_CONTENT);
