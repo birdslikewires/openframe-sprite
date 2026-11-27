@@ -498,7 +498,7 @@ upd.firmware.note = Firmware will be updated on the next reboot. Progress will b
 # Heading in the list
 upd.head.openframe = OPENFRAME
 # Heading in the list
-upd.head.apps = APPS
+upd.head.apps = APPS & SERVICES
 # Heading in the list
 upd.head.debian = FROM DEBIAN
 # The Debian row
