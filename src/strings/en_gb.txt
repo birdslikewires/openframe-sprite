@@ -570,6 +570,20 @@ about.crystalhd.ready = %s
 about.crystalhd.no_driver = %s, no driver
 # On a test unit
 about.test_unit = Updates before they're released
+# Undocumented: About's System line tapped seven times. Title and note, turning testing on
+about.test.on_ask = Take updates before they're released?
+about.test.on_ask.note = This OpenFrame will install OpenBeak's updates as soon as they're built, before they're released to everyone. An update that isn't ready yet could stop it from starting.
+# Title and note, turning it off
+about.test.off_ask = Back to released updates?
+about.test.off_ask.note = This OpenFrame will take released updates only. What's installed now stays until the released updates catch up.
+# Buttons
+about.test.turn_on = Turn on
+about.test.turn_off = Turn off
+# Toasts once it's done
+about.test.on = This OpenFrame is a test unit
+about.test.off = Released updates only
+# Title, when it couldn't be changed
+about.test.not_changed = Testing wasn't changed
 # Heading
 erase.head = ERASE
 erase.note = Remove all personal information, settings, and apps. Installed updates and touch calibration are retained, everything else goes.
@@ -664,6 +678,8 @@ helper.name_needs_update = This system can't be named until it's updated.
 helper.name_length = The name must be 64 characters or fewer.
 helper.preparing_name = The name couldn't be prepared.
 helper.name_not_applied = The name couldn't be applied.
+helper.test_needs_update = This system can't change testing until it's updated.
+helper.test_not_applied = The testing setting couldn't be applied.
 helper.audio_needs_update = This system can't choose its sound output until it's updated.
 helper.audio_not_changed = The sound output couldn't be changed.
 helper.password_not_removed = The password couldn't be removed.

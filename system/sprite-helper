@@ -16,6 +16,7 @@
 ##    ssh-status            logging in as "of", as key=value lines, then "ok": password=none (it has none: SSH needs a key, and sudo can't be used), password=shared (still "joggler", which every unit used to have) or password=set; and keys=<number of authorized keys>. Never the password or its hash.
 ##    ssh-password          set the password of "of": the request line, then a line with the password (8 to 64 characters, no control characters), and start the SSH server, which images keep off until someone can log in
 ##    name-set              the OpenFrame's name: the request line, then a line with the name (up to 64 characters, any but control characters; empty for openframe), into settings/name.txt, which openframe-scripts' name-settings then applies (the hostname made from it, and the name kept as written)
+##    test-set              a test unit or not: the request line, then a line with yes or no, into settings/test.txt (testing=), which openframe-scripts' test-settings then applies (the testing suites in apt's sources, or not). Undocumented: About's System line, tapped seven times
 ##    audio-status          where the sound goes, as openframe-scripts' of-audio status prints it (the cards, the one in use, direct, its volume control), then "ok"
 ##    audio-set             the request line, then a line with output=builtin or a DAC's vid:pid, direct=yes|no and/or mixer_rate=44100|48000: of-audio set
 ##    audio-store           the mixers' levels kept for the next start (alsactl store)
@@ -44,6 +45,7 @@ TEMPLATE="/opt/sprite/share/sprite/interface.txt"
 WIFITXT="/boot/settings/wifi.txt"
 SSHTXT="/boot/settings/ssh.txt"
 NAMETXT="/boot/settings/name.txt"
+TESTTXT="/boot/settings/test.txt"
 WIFITEMPLATE="/usr/lib/openframe/settings/wifi.txt"
 WPACTRL="/run/wpa_supplicant"          # where netplan's wpa_supplicant listens
 SCANCTRL="/run/sprite-helper-wpa"      # ... and ours, when we start one to scan
@@ -489,6 +491,27 @@ case "$CMD" in
 			END { if (!done) print line(ENVIRON["N"]) }' "$NEW" > "$NEW.2" && mv "$NEW.2" "$NEW" || answer "error: helper.preparing_name"
 		boot_write "$NEW" "$NAMETXT"
 		/usr/lib/openframe/name-settings >/dev/null 2>&1 || answer "error: helper.name_not_applied"
+		answer ok
+		;;
+	test-set)
+		IFS= read -r -t 5 ON || answer "error: no yes or no"
+		[ "$ON" = yes ] || [ "$ON" = no ] || answer "error: test-set takes yes or no"
+		[ -x /usr/lib/openframe/test-settings ] || answer "error: helper.test_needs_update"
+		NEW=$(mktemp) || answer "error: no temporary file"
+		trap 'rm -f "$NEW"' EXIT
+		if [ -f "$TESTTXT" ]; then cp "$TESTTXT" "$NEW"
+		elif [ -f /usr/lib/openframe/settings/test.txt ]; then cp /usr/lib/openframe/settings/test.txt "$NEW"
+		fi
+		# testing= in place of the first, the rest of them gone, the notes kept (as name-set does)
+		V="$ON" awk '
+			index($0, "=") && $0 !~ /^[[:space:]]*#/ {
+				k = substr($0, 1, index($0, "=") - 1); gsub(/[[:space:]]/, "", k)
+				if (tolower(k) == "testing") { if (!done) print "testing=" ENVIRON["V"]; done = 1; next }
+			}
+			{ print }
+			END { if (!done) print "testing=" ENVIRON["V"] }' "$NEW" > "$NEW.2" && mv "$NEW.2" "$NEW" || answer "error: preparing test.txt failed"
+		boot_write "$NEW" "$TESTTXT"
+		/usr/lib/openframe/test-settings >/dev/null 2>&1 || answer "error: helper.test_not_applied"
 		answer ok
 		;;
 	audio-status|audio-set|audio-store)

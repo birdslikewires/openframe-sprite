@@ -4538,6 +4538,57 @@ static void saver_build(lv_obj_t *parent) {
 
 #define ABOUT_ROW_H 40
 
+// Undocumented, as Android's build number is: About's System line, tapped seven times with
+// under 1.5 s between taps, turns testing updates on (sprite-helper's test-set, into
+// OF-BOOT/settings/test.txt), and the Test unit row that then shows, tapped once, turns them
+// off, each asked first. Either way, it looks for updates straight away.
+#define TEST_TAPS 7
+#define TEST_TAP_GAP_MS 1500
+static int test_taps;
+static uint32_t test_tap_at;
+
+static void test_set_done(char *reply, void *data) {
+	const char *st = helper_reply_status(reply);
+	if (strcmp(st, "ok")) {
+		lv_obj_t *card = dialog_open(NULL, STR_ABOUT_TEST_NOT_CHANGED, reason_text(st), true);
+		dialog_button(card, STR_COMMON_OK, BUTTON_MAIN, dialog_cancel, NULL);
+	} else {
+		bool on = (intptr_t)data;
+		show_toast(on ? STR_ABOUT_TEST_ON : STR_ABOUT_TEST_OFF, 3000);
+		helper_request("update-check\n", upd_started, NULL); // either way, so what's offered matches the suites now in use
+	}
+	about_show();
+}
+
+static void test_set_go(lv_event_t *e) {
+	bool on = (intptr_t)lv_event_get_user_data(e);
+	dialog_close();
+	helper_request(on ? "test-set\nyes\n" : "test-set\nno\n", test_set_done, (void *)(intptr_t)on);
+}
+
+static void test_ask(bool on) {
+	lv_obj_t *card = dialog_open(NULL, on ? STR_ABOUT_TEST_ON_ASK : STR_ABOUT_TEST_OFF_ASK,
+				     on ? STR_ABOUT_TEST_ON_ASK_NOTE : STR_ABOUT_TEST_OFF_ASK_NOTE, true);
+	dialog_button(card, on ? STR_ABOUT_TEST_TURN_ON : STR_ABOUT_TEST_TURN_OFF, on ? BUTTON_DANGER : BUTTON_MAIN,
+		      test_set_go, (void *)(intptr_t)on);
+	dialog_button(card, STR_COMMON_CANCEL, BUTTON_OTHER, dialog_cancel, NULL);
+}
+
+// Seven taps only ever turn testing on; on a test unit, its Test unit row, tapped once, turns it off
+static void about_system_tapped(lv_event_t *e) {
+	test_taps = lv_tick_elaps(test_tap_at) < TEST_TAP_GAP_MS ? test_taps + 1 : 1;
+	test_tap_at = lv_tick_get();
+	if (test_taps < TEST_TAPS) return;
+	test_taps = 0;
+	struct sprite_about a;
+	sysinfo_about(&a);
+	if (!a.test_unit) test_ask(true);
+}
+
+static void about_test_tapped(lv_event_t *e) {
+	test_ask(false);
+}
+
 static void about_build(lv_obj_t *parent) {
 	static const struct { const char *icon, *name; } rows[N_ABOUT] = {
 		[AB_MODEL] = { UI_ICON_MONITOR, STR_ABOUT_ROW_MODEL },
@@ -4595,6 +4646,10 @@ static void about_build(lv_obj_t *parent) {
 		lv_obj_set_flex_grow(v, 1);
 		lv_obj_set_height(v, lv_font_get_line_height(&lv_font_montserrat_16));
 	}
+	lv_obj_add_flag(about_row[AB_SYSTEM], LV_OBJ_FLAG_CLICKABLE); // (the taps above)
+	lv_obj_add_event_cb(about_row[AB_SYSTEM], about_system_tapped, LV_EVENT_CLICKED, NULL);
+	lv_obj_add_flag(about_row[AB_TEST], LV_OBJ_FLAG_CLICKABLE); // (showing only on a test unit)
+	lv_obj_add_event_cb(about_row[AB_TEST], about_test_tapped, LV_EVENT_CLICKED, NULL);
 	about_show();
 }
 
