@@ -2524,7 +2524,7 @@ static lv_obj_t *list_page(lv_obj_t *scr) {
 #define WIFI_TROUBLE_AFTER_MS 6000 // ignore "trouble" this soon: it may be the old network's
 #define WIFI_RESCAN_MS 30000       // a list older than this is looked for again on opening
 
-enum entry_mode { ENTRY_PASSWORD, ENTRY_OPEN_PASSWORD, ENTRY_NAME, ENTRY_SSH, ENTRY_DEVNAME };
+enum entry_mode { ENTRY_PASSWORD, ENTRY_OPEN_PASSWORD, ENTRY_NAME, ENTRY_SSH, ENTRY_DEVNAME, ENTRY_SHARE, ENTRY_SHARE_USER, ENTRY_SHARE_PASSWORD };
 static void open_entry(enum entry_mode mode, const char *ssid);
 
 static lv_obj_t *wifi_detail_label, *wifi_forget_btn;     // in Settings (and wifi_status_label)
@@ -2914,6 +2914,13 @@ static void entry_validate(void) {
 					  : (n >= 8 && n <= 64) || (entry_mode == ENTRY_OPEN_PASSWORD && n == 0);
 	if (entry_mode == ENTRY_SSH) ok = n >= 8 && n <= 64;
 	if (entry_mode == ENTRY_DEVNAME) ok = n <= 64; // none: openframe
+	if (entry_mode == ENTRY_SHARE) { // //server/folder, or \\server\folder
+		const char *a = lv_textarea_get_text(entry_ta);
+		bool lead = (a[0] == '/' && a[1] == '/') || (a[0] == '\\' && a[1] == '\\');
+		const char *sep = lead ? strpbrk(a + 2, "/\\") : NULL;
+		ok = lead && n <= 200 && sep && sep > a + 2 && sep[1];
+	}
+	if (entry_mode == ENTRY_SHARE_USER || entry_mode == ENTRY_SHARE_PASSWORD) ok = n <= 128; // none: a guest share
 	if (ok) lv_obj_remove_state(entry_go, LV_STATE_DISABLED);
 	else lv_obj_add_state(entry_go, LV_STATE_DISABLED);
 }
@@ -2956,9 +2963,12 @@ static void entry_clear(void) {
 	if (entry_ta) lv_textarea_set_text(entry_ta, "");
 }
 
-static void entry_back(lv_event_t *e) { show_page(entry_mode == ENTRY_SSH || entry_mode == ENTRY_DEVNAME ? page_settings : page_wifi); }
+static bool entry_from_settings(void) { return entry_mode != ENTRY_PASSWORD && entry_mode != ENTRY_OPEN_PASSWORD && entry_mode != ENTRY_NAME; }
+static void entry_back(lv_event_t *e) { show_page(entry_from_settings() ? page_settings : page_wifi); }
 static void ssh_set_now(const char *password);
 static void name_set_now(const char *name);
+static char share_addr[208], share_user[136];
+static void share_add_now(const char *password);
 
 static void entry_go_clicked(lv_event_t *e) {
 	if (lv_obj_has_state(entry_go, LV_STATE_DISABLED)) return;
@@ -2968,6 +2978,19 @@ static void entry_go_clicked(lv_event_t *e) {
 		open_entry(ENTRY_OPEN_PASSWORD, name);
 		return;
 	}
+	// a network share: its address, then its user name, then (with one) its password
+	if (entry_mode == ENTRY_SHARE) {
+		snprintf(share_addr, sizeof share_addr, "%s", lv_textarea_get_text(entry_ta));
+		open_entry(ENTRY_SHARE_USER, "");
+		return;
+	}
+	if (entry_mode == ENTRY_SHARE_USER) {
+		snprintf(share_user, sizeof share_user, "%s", lv_textarea_get_text(entry_ta));
+		if (share_user[0]) open_entry(ENTRY_SHARE_PASSWORD, share_user);
+		else share_add_now("");
+		return;
+	}
+	if (entry_mode == ENTRY_SHARE_PASSWORD) { share_add_now(lv_textarea_get_text(entry_ta)); return; }
 	if (entry_mode == ENTRY_SSH) ssh_set_now(lv_textarea_get_text(entry_ta));
 	else if (entry_mode == ENTRY_DEVNAME) name_set_now(lv_textarea_get_text(entry_ta));
 	else wifi_join_now(entry_ssid, lv_textarea_get_text(entry_ta)); // leaving the screen clears it
@@ -2986,17 +3009,24 @@ static void open_entry(enum entry_mode mode, const char *ssid) {
 	if (mode == ENTRY_NAME) snprintf(t, sizeof t, STR_ENTRY_NETWORK_NAME);
 	else if (mode == ENTRY_SSH) snprintf(t, sizeof t, STR_ENTRY_SSH_PASSWORD);
 	else if (mode == ENTRY_DEVNAME) snprintf(t, sizeof t, STR_ENTRY_DEVICE_NAME);
+	else if (mode == ENTRY_SHARE) snprintf(t, sizeof t, STR_ENTRY_SHARE);
+	else if (mode == ENTRY_SHARE_USER) snprintf(t, sizeof t, STR_ENTRY_SHARE_USER);
 	else snprintf(t, sizeof t, STR_ENTRY_PASSWORD_FOR, ssid);
 	lv_label_set_text(entry_title, t);
 	lv_label_set_text(entry_hint, mode == ENTRY_NAME ? STR_ENTRY_NETWORK_NAME_HINT
 				      : mode == ENTRY_OPEN_PASSWORD ? STR_ENTRY_WIFI_PASSWORD_HINT
 				      : mode == ENTRY_SSH ? STR_ENTRY_SSH_PASSWORD_HINT
 				      : mode == ENTRY_DEVNAME ? STR_ENTRY_DEVICE_NAME_HINT
+				      : mode == ENTRY_SHARE ? STR_ENTRY_SHARE_HINT
+				      : mode == ENTRY_SHARE_USER ? STR_ENTRY_SHARE_USER_HINT
+				      : mode == ENTRY_SHARE_PASSWORD ? STR_ENTRY_SHARE_PASSWORD_HINT
 								    : STR_ENTRY_PASSWORD_HINT);
-	bool plain = mode == ENTRY_NAME || mode == ENTRY_DEVNAME; // what's typed is shown
-	lv_label_set_text(lv_obj_get_child(entry_go, 0), mode == ENTRY_NAME ? STR_ENTRY_NEXT : mode == ENTRY_SSH ? STR_ENTRY_SET
-							 : mode == ENTRY_DEVNAME ? STR_COMMON_SAVE : STR_WIFI_CONNECT);
-	lv_textarea_set_max_length(entry_ta, mode == ENTRY_NAME ? WIFI_SSID_MAX : 64);
+	bool plain = mode == ENTRY_NAME || mode == ENTRY_DEVNAME || mode == ENTRY_SHARE || mode == ENTRY_SHARE_USER; // what's typed is shown
+	lv_label_set_text(lv_obj_get_child(entry_go, 0), mode == ENTRY_NAME || mode == ENTRY_SHARE || mode == ENTRY_SHARE_USER ? STR_ENTRY_NEXT
+							 : mode == ENTRY_SSH ? STR_ENTRY_SET
+							 : mode == ENTRY_DEVNAME ? STR_COMMON_SAVE
+							 : mode == ENTRY_SHARE_PASSWORD ? STR_ENTRY_ADD : STR_WIFI_CONNECT);
+	lv_textarea_set_max_length(entry_ta, mode == ENTRY_NAME ? WIFI_SSID_MAX : mode == ENTRY_SHARE ? 200 : mode >= ENTRY_SHARE_USER ? 128 : 64);
 	lv_textarea_set_password_mode(entry_ta, !plain);
 	if (plain) lv_obj_add_flag(entry_eye, LV_OBJ_FLAG_HIDDEN);
 	else lv_obj_remove_flag(entry_eye, LV_OBJ_FLAG_HIDDEN);
@@ -3005,7 +3035,7 @@ static void open_entry(enum entry_mode mode, const char *ssid) {
 	kb_syms = false;
 	kb_layout();
 	// back to where it came from: Wi-Fi, or Settings for the login password
-	bool from_settings = mode == ENTRY_SSH || mode == ENTRY_DEVNAME;
+	bool from_settings = entry_from_settings();
 	const char *from = from_settings ? STR_BACK_SETTINGS : STR_BACK_WIFI;
 	lv_label_set_text(lv_obj_get_child(entry_back_btn, 0), from);
 	lv_obj_set_width(entry_back_btn, BACK_W);
@@ -6059,6 +6089,37 @@ static void svc_text(char *o, size_t n, const struct svc_state *st) {
 }
 
 static void services_render(void);
+static void music_render(lv_obj_t *panel);
+
+// The music services can read (music-status): each USB drive and network share under /media/music, and each share that isn't mounted, and why
+#define MUSIC_MAX 16
+static struct music_src { bool share, mounted; char name[72], src[208], why[16]; int used_mb, size_mb; } music[MUSIC_MAX];
+static int n_music;
+static bool music_known, music_asking;
+static char music_ask_addr[208]; // the share a removal asks about
+
+static void music_status_done(char *reply, void *data) {
+	music_asking = false;
+	const char *st = helper_reply_status(reply);
+	if (strcmp(st, "ok")) return; // (an older openframe-scripts: no music section)
+	n_music = 0;
+	for (char *save = NULL, *line = strtok_r(reply, "\n", &save); line && n_music < MUSIC_MAX; line = strtok_r(NULL, "\n", &save)) {
+		char *f[5] = { 0 };
+		int k = 0;
+		for (char *p = line; k < 5 && p; k++) { f[k] = p; p = strchr(p, '\t'); if (p) *p++ = 0; }
+		if (k < 4) continue;
+		struct music_src *m = &music[n_music++];
+		memset(m, 0, sizeof *m);
+		m->share = !strcmp(f[0], "share");
+		snprintf(m->name, sizeof m->name, "%s", f[1]);
+		snprintf(m->src, sizeof m->src, "%s", f[2]);
+		m->mounted = k == 5;
+		if (m->mounted) { m->used_mb = atoi(f[3]); m->size_mb = atoi(f[4]); }
+		else snprintf(m->why, sizeof m->why, "%s", f[3]);
+	}
+	music_known = true;
+	services_render();
+}
 
 static void svc_status_done(char *reply, void *data) {
 	svc_asking = false;
@@ -6192,8 +6253,12 @@ static void services_render(void) {
 		// (the memory to the nearest 10 MB, so it isn't built again for every megabyte)
 		if (k < (int)sizeof sig && st) k += snprintf(sig + k, sizeof sig - k, "%d|", st->mem_mb / 10);
 	}
+	for (int i = 0; i < n_music && k < (int)sizeof sig; i++)
+		k += snprintf(sig + k, sizeof sig - k, "m%d %s %s %d %s %d %d|", music[i].share, music[i].name, music[i].src, music[i].mounted, music[i].why, music[i].used_mb / 100, music[i].size_mb / 100);
+	if (k < (int)sizeof sig) k += snprintf(sig + k, sizeof sig - k, "%d", music_known);
 	if (!strcmp(sig, svc_sig)) return;
 	snprintf(svc_sig, sizeof svc_sig, "%s", sig);
+	int32_t scrolled = lv_obj_get_scroll_y(svc_panel); // built again where it was scrolled to, not at the top
 	lv_obj_clean(svc_panel);
 	section(svc_panel, STR_SERVICES_HEAD);
 	lv_obj_set_style_margin_top(lv_obj_get_child(svc_panel, 0), 0, 0); // at the panel's top, as every first heading
@@ -6208,13 +6273,111 @@ static void services_render(void) {
 		struct sprite_app *a = apps_get(i);
 		if (a->service && !a->gone) svc_row(svc_panel, a, svc_find(a->id), ip);
 	}
+	if (music_known) music_render(svc_panel); // (once openframe-scripts can say, with music-mount)
+	lv_obj_update_layout(svc_panel);
+	int32_t most = lv_obj_get_scroll_y(svc_panel) + lv_obj_get_scroll_bottom(svc_panel); // as far as it scrolls now
+	lv_obj_scroll_to_y(svc_panel, LV_MAX(0, LV_MIN(scrolled, most)), LV_ANIM_OFF);
 }
 
 static void services_show(void) {
 	services_render();
+	if (!music_asking) {
+		music_asking = true;
+		helper_request("music-status\n", music_status_done, NULL);
+	}
 	if (svc_asking) return;
 	svc_asking = true;
 	helper_request("service-status\n", svc_status_done, NULL);
+}
+
+/* the music: drives and shares, adding and removing shares */
+
+static void share_done(char *reply, void *data) {
+	const char *st = helper_reply_status(reply);
+	bool adding = data != NULL;
+	if (strcmp(st, "ok")) {
+		lv_obj_t *card = dialog_open(NULL, adding ? STR_MUSIC_NOT_ADDED : STR_MUSIC_NOT_REMOVED, reason_text(st), true);
+		dialog_button(card, STR_COMMON_OK, BUTTON_MAIN, dialog_cancel, NULL);
+	} else if (adding) show_toast(STR_MUSIC_ADDED, 3000);
+	svc_sig[0] = 0;
+	services_show();
+}
+
+static void share_add_now(const char *password) {
+	static char req[600];
+	snprintf(req, sizeof req, "share-add\n%s\n%s\n%s\n", share_addr, share_user, password);
+	helper_request(req, share_done, (void *)1);
+	memset(req, 0, sizeof req); // (the helper has its copy)
+	settings_show_tab(TAB_SERVICES);
+	show_page(page_settings);
+	show_toast(STR_MUSIC_ADDING, 6000);
+}
+
+static void share_add_clicked(lv_event_t *e) {
+	share_addr[0] = share_user[0] = 0;
+	open_entry(ENTRY_SHARE, "");
+}
+
+static void share_remove_go(lv_event_t *e) {
+	dialog_close();
+	char req[256];
+	snprintf(req, sizeof req, "share-remove\n%s\n", music_ask_addr);
+	helper_request(req, share_done, NULL);
+}
+
+static void share_remove_clicked(lv_event_t *e) {
+	const struct music_src *m = lv_event_get_user_data(e);
+	snprintf(music_ask_addr, sizeof music_ask_addr, "%s", m->src);
+	char t[128];
+	snprintf(t, sizeof t, STR_MUSIC_REMOVE_ASK, m->name);
+	lv_obj_t *card = dialog_open(NULL, t, STR_MUSIC_REMOVE_NOTE, true);
+	dialog_button(card, LV_SYMBOL_TRASH "  " STR_MUSIC_REMOVE, BUTTON_DANGER, share_remove_go, NULL);
+	dialog_button(card, STR_COMMON_CANCEL, BUTTON_OTHER, dialog_cancel, NULL);
+}
+
+static void music_row(lv_obj_t *panel, struct music_src *m) {
+	lv_obj_t *r = lv_obj_create(panel);
+	lv_obj_remove_style_all(r);
+	lv_obj_set_size(r, LV_PCT(100), LV_SIZE_CONTENT);
+	lv_obj_set_style_min_height(r, ROW_H, 0);
+	lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(r, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_column(r, 14, 0);
+	lv_obj_remove_flag(r, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_t *g = lv_label_create(r);
+	lv_label_set_text(g, m->share ? UI_ICON_NETWORK : UI_ICON_HARD_DRIVE);
+	lv_obj_set_style_text_font(g, &sprite_ui_24, 0);
+	lv_obj_set_style_text_color(g, lv_color_hex(C_ACCENT), 0);
+	lv_obj_t *col = lv_obj_create(r);
+	lv_obj_remove_style_all(col);
+	lv_obj_set_height(col, LV_SIZE_CONTENT);
+	lv_obj_set_flex_grow(col, 1);
+	lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_style_pad_row(col, 2, 0);
+	lv_obj_remove_flag(col, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_t *n = shop_text(col, m->name, &lv_font_montserrat_20, C_TEXT);
+	lv_label_set_long_mode(n, LV_LABEL_LONG_DOT);
+	lv_obj_set_height(n, lv_font_get_line_height(&lv_font_montserrat_20));
+	char t[256];
+	if (m->mounted && !m->share) snprintf(t, sizeof t, STR_MUSIC_USB, m->used_mb / 1024.0, m->size_mb / 1024.0);
+	else if (m->mounted) snprintf(t, sizeof t, "%s", m->src);
+	else snprintf(t, sizeof t, "%s", !strcmp(m->why, "password") ? STR_MUSIC_WHY_PASSWORD : !strcmp(m->why, "missing") ? STR_MUSIC_WHY_MISSING
+					  : !strcmp(m->why, "unreachable") ? STR_MUSIC_WHY_UNREACHABLE : STR_MUSIC_WHY_WAITING);
+	lv_obj_t *d = shop_text(col, t, &lv_font_montserrat_16, m->mounted ? C_DIM : C_WARN);
+	lv_label_set_long_mode(d, LV_LABEL_LONG_DOT);
+	lv_obj_set_height(d, lv_font_get_line_height(&lv_font_montserrat_16));
+	if (!m->share) return;
+	lv_obj_t *b = button(r, LV_SYMBOL_TRASH, BUTTON_OTHER, share_remove_clicked, m);
+	lv_obj_set_width(b, BUTTON_H + 8);
+}
+
+static void music_render(lv_obj_t *panel) {
+	section(panel, STR_MUSIC_HEAD);
+	shop_text(panel, STR_MUSIC_NOTE, &lv_font_montserrat_16, C_DIM);
+	for (int i = 0; i < n_music; i++) music_row(panel, &music[i]);
+	if (music_known && !n_music) shop_text(panel, STR_MUSIC_NONE, &lv_font_montserrat_20, C_TEXT);
+	lv_obj_t *row = button_row(panel);
+	button(row, LV_SYMBOL_PLUS "  " STR_MUSIC_ADD_SHARE, BUTTON_OTHER, share_add_clicked, NULL);
 }
 
 static void services_build(lv_obj_t *panel) {

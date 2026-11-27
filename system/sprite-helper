@@ -37,6 +37,9 @@
 ##    service-status        each service installed (an app with kind=service), a line each: <id> <state> <on|off> <MB>, its unit's ActiveState (inactive if it has none), whether it's switched on, and the memory it's using (its own, not the files it has cached); then "ok"
 ##    service-set <id> on|off switch a service on (started now, and at each boot) or off (stopped, and left stopped)
 ##    services-boot         start every service switched on (sprite-services.service, at boot)
+##    music-status          the music services can read (openframe-scripts' music-mount status): a line for each USB drive and network share under /media/music, and each share that isn't mounted and why, tab-separated; then "ok". Never a password.
+##    share-add             a network share with music: the request line, then a line with its address (//server/folder, or \\server\folder), one with the user name and one with the password (both empty for a guest share). It's added to settings/shares.txt and mounted; if it can't be, it's taken out again, and the answer says why: helper.share_password, helper.share_missing, helper.share_unreachable or helper.share_failed.
+##    share-remove          the request line, then a line with a share's address: taken out of settings/shares.txt, and unmounted
 ##
 ##  Wi-Fi is set up the OpenFrame way (see of-netplan): settings/wifi.txt on the boot volume, editable from any computer, turned into a netplan configuration. Only name= and password= are changed here: a fixed address in the file stays as it is.
 ##
@@ -51,6 +54,9 @@ WIFITXT="/boot/settings/wifi.txt"
 SSHTXT="/boot/settings/ssh.txt"
 NAMETXT="/boot/settings/name.txt"
 TESTTXT="/boot/settings/test.txt"
+SHARESTXT="/boot/settings/shares.txt"
+SHARESTEMPLATE="/usr/lib/openframe/settings/shares.txt"
+MUSICMOUNT="/usr/lib/openframe/music-mount"
 WIFITEMPLATE="/usr/lib/openframe/settings/wifi.txt"
 WPACTRL="/run/wpa_supplicant"          # where netplan's wpa_supplicant listens
 SCANCTRL="/run/sprite-helper-wpa"      # ... and ours, when we start one to scan
@@ -296,6 +302,30 @@ service_status() {
 	done < <(services_list)
 }
 
+# Network shares (settings/shares.txt, which openframe-scripts' music-mount mounts). An address as music-mount takes it: //server/folder (or with :port after the server), backslashes as slashes, no trailing slash.
+share_norm() {
+	local a="${1//\\//}"
+	a="${a%/}"
+	[[ "$a" =~ ^//[^/[:space:][:cntrl:]]+(:[0-9]{1,5})?/[^[:cntrl:]]+$ ]] || return 1
+	printf '%s' "$a"
+}
+
+# settings/shares.txt without the block for share $1 (from its share= line to the blank line or next share= after it), to stdout
+shares_without() {
+	[ -r "$SHARESTXT" ] || { cat "$SHARESTEMPLATE" 2>/dev/null; return 0; }
+	S="$1" awk '
+		function norm(v) { gsub(/\\/, "/", v); sub(/\/$/, "", v); return v }
+		{ line = $0; sub(/\r$/, "", line) }
+		line ~ /^[[:space:]]*[Ss][Hh][Aa][Rr][Ee][[:space:]]*=/ {
+			v = line; sub(/^[^=]*=[[:space:]]*/, "", v); sub(/[[:space:]]*$/, "", v)
+			if (v ~ /^".*"$/ || v ~ /^\047.*\047$/) v = substr(v, 2, length(v) - 2)
+			skip = (norm(v) == ENVIRON["S"]); if (skip) next
+		}
+		skip && line ~ /^[[:space:]]*$/ { skip = 0 }
+		!skip { print }
+	' "$SHARESTXT"
+}
+
 # The Shop: apps from apps.openbeak.net, which apt can only take ofapp-* packages from (openframe-scripts' pin). An install or a removal is a job of its own, the sprite-shop unit, one at a time, so closing the Shop or restarting Sprite doesn't cut it off. It reports in /run/sprite-shop/status, which Sprite reads, as key=value lines: action (install or remove), id, state (running, done or failed), percent (of the whole job) and reason (when it failed, as the helper's replies give one). What apt printed is in /run/sprite-shop/log.
 SHOPDIR="/run/sprite-shop"
 APPSLIST="/etc/apt/sources.list.d/openframe-apps.list"
@@ -530,6 +560,50 @@ case "$CMD" in
 				;;
 			*) answer "error: service-set takes on or off" ;;
 		esac
+		answer ok
+		;;
+	music-status)
+		[ -x "$MUSICMOUNT" ] || answer "error: helper.music_needs_update"
+		"$MUSICMOUNT" status
+		answer ok
+		;;
+	share-add|share-remove)
+		[ -x "$MUSICMOUNT" ] || answer "error: helper.music_needs_update"
+		IFS= read -r -t 5 ADDR || answer "error: no share"
+		ADDR=$(share_norm "${ADDR%$'\r'}") || answer "error: helper.share_address"
+		TMP=$(mktemp) || answer "error: no room"
+		trap 'rm -f "$TMP"' EXIT
+		shares_without "$ADDR" > "$TMP"
+		if [ "$CMD" = share-add ]; then
+			IFS= read -r -t 5 USER_ || USER_=""
+			IFS= read -r -t 5 PASS || PASS=""
+			USER_="${USER_%$'\r'}" PASS="${PASS%$'\r'}"
+			[ "${#USER_}" -le 128 ] && [ "${#PASS}" -le 128 ] && [[ "$USER_$PASS" != *[[:cntrl:]]* ]] || answer "error: helper.share_login"
+			# a blank line before the new block, unless the file ends with one
+			[ -s "$TMP" ] && [ -n "$(tail -c 1 "$TMP")" ] && echo >> "$TMP"
+			[ -s "$TMP" ] && [ -n "$(tail -n 1 "$TMP")" ] && echo >> "$TMP"
+			printf 'share=%s\nusername=%s\npassword=%s\n' "$ADDR" "$USER_" "$PASS" >> "$TMP"
+			unset PASS
+			boot_write "$TMP" "$SHARESTXT"
+			timeout 60 "$MUSICMOUNT" shares >/dev/null 2>&1
+			# mounted (a line with what it uses and its size), or why not
+			STATUS=$("$MUSICMOUNT" status)
+			WHY=$(awk -F'\t' -v a="$ADDR" '$1 == "share" && $3 == a && NF == 4 { print $4 }' <<< "$STATUS")
+			if ! awk -F'\t' -v a="$ADDR" '$1 == "share" && $3 == a && NF == 5 { f = 1 } END { exit !f }' <<< "$STATUS"; then
+				# not mounted: taken out again, so a mistyped one doesn't stay
+				shares_without "$ADDR" > "$TMP"
+				boot_write "$TMP" "$SHARESTXT"
+				case "$WHY" in
+					password) answer "error: helper.share_password" ;;
+					missing) answer "error: helper.share_missing" ;;
+					unreachable) answer "error: helper.share_unreachable" ;;
+					*) answer "error: helper.share_failed" ;;
+				esac
+			fi
+		else
+			boot_write "$TMP" "$SHARESTXT"
+			timeout 60 "$MUSICMOUNT" shares >/dev/null 2>&1
+		fi
 		answer ok
 		;;
 	services-boot)
