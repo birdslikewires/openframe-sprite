@@ -92,9 +92,12 @@ shop.tab.apps = Apps
 shop.tab.installed = Installed
 # At the top of the Apps tab
 shop.free_note = Everything here is free. The apps are made by other people, and the "shop" brings them to the OpenFrame.
-# Headings in the Apps tab, when it has screensavers as well as apps
+# Headings in the Apps tab, when it has more than one kind (apps, services, screensavers)
 shop.head.apps = APPS
+shop.head.services = SERVICES
 shop.head.screensavers = SCREENSAVERS
+# Under the services' heading
+shop.services_note = A service runs in the background, whatever is on the screen. Once installed, switch it on or off in Settings, on the Services tab.
 # Under the screensavers' heading
 shop.savers_note = A screensaver shows when the OpenFrame has been left alone for a while. Once installed, choose them in Settings, on the Display tab.
 # At the top of the Installed tab
@@ -111,6 +114,8 @@ shop.get = Get
 shop.open = Open
 shop.update = Update
 shop.choose = Choose
+# Button, on an installed service: Settings, at Services
+shop.settings = Settings
 shop.remove = Remove
 # In place of the button while it works. %d is how far it's got
 shop.installing = Installing %d%%
@@ -123,6 +128,8 @@ shop.uses.nothing = This app can't reach the internet or make sound.
 shop.uses.network = This app can access the internet and the local network.
 shop.uses.sound = This app can play audio.
 shop.uses.microphone = This app can use audio inputs (if present).
+shop.uses.music = This app can read the music on USB drives and network shares.
+shop.uses.background = This app keeps running in the background, whatever is on the screen.
 # An app's page: where to ask about it. %s is the app's name
 shop.head.help = HELP AND QUESTIONS
 shop.help_note = For help with %s, scan this code with a phone to find the community who make and use it.
@@ -142,6 +149,7 @@ shop.by_hand = Not from the Shop
 # Toasts when the Shop has finished. %s is the app's name
 shop.done.installed = %s is installed. Its tile is on the home screen.
 shop.done.saver = %s is installed. Choose it in Settings, under Display.
+shop.done.service = %s is installed and switched on. It's in Settings, under Services.
 shop.done.updated = %s is up to date.
 shop.done.removed = %s has been removed.
 # Messages when it couldn't. %s is the app's name
@@ -156,9 +164,9 @@ shop.remove_body = Its settings, and anything else it has kept, go with it.
 tab.audio = Audio
 tab.display = Display
 tab.network = Network
+tab.services = Services
 tab.updates = Updates
 tab.about = About
-tab.power = Power
 
 ## Audio
 
@@ -609,9 +617,10 @@ info.head = INFORMATION
 info.ping = Once an hour, OpenFrame devices send a check-in message to openbeak.net. This "heartbeat" includes some of the OpenFrame's information; its model, firmware chip health, whether a kernel update has ever failed, and how full are the memory and storage. Nothing else is sent. This helps us see how many OpenFrames are still running, and whether updates have reached them.
 
 ## Power
+# Drawn down from the status bar, which has Screen off, Restart and Switch off
 
-# Heading
-power.head = POWER
+# Button: the screen off now, until a touch
+pull.screen_off = Screen off
 # Button
 power.restart = Restart
 # Button
@@ -638,6 +647,29 @@ power.off_when_done = Switch off when done
 power.will_restart = OpenFrame will restart once the update has finished
 # Toast
 power.will_off = OpenFrame will switch off once the update has finished
+
+## Services
+# Apps that run in the background (kind=service), switched on and off here
+
+# Heading
+services.head = SERVICES
+# Under it, with services installed
+services.note = These keep running in the background, whatever is on the screen.
+# With none installed
+services.none = Nothing here yet. Services run in the background, such as a music server, and you'll find them in the Shop.
+# Button
+services.open_shop = Open the Shop
+# What a service is doing, under its name. %d is the memory it's using, in MB
+services.running = Running
+services.running_mem = Running, using %d MB
+services.starting = Starting
+services.not_running = Not running
+services.off = Switched off
+services.failed = Stopped by a problem
+# Over its address and a QR code to it. %s is the service's name
+services.web = Set up %s from a phone or computer, at
+# Title, when the switch didn't take
+services.not_changed = The service wasn't changed
 
 ## Welcome
 # Shown the first time Sprite starts

@@ -13,6 +13,8 @@
 //   handle=faint         (home handle: normal, faint or hidden while the app shows)
 //   bar=yes              (the status bar stays above it, its window below; default full screen)
 //   kind=screensaver     (a screensaver: no tile; chosen in Settings, Display, and shown over everything after a while untouched, until a touch)
+//   kind=service         (a service: no tile; it runs in the background, started by the helper at boot, and is switched on and off in Settings, Services)
+//   web=9000             (a service's own web page, on this port: Services shows its address, and a QR code to it)
 //   allow=network sound  (what a sandboxed app may have beyond the display: network, sound to play, microphone to record too; read by the helper)
 // Comments go on lines of their own.
 #define _GNU_SOURCE
@@ -103,7 +105,8 @@ static bool read_manifest(const char *dir, const char *file, struct sprite_app *
 		else if (!strcmp(k, "builtin")) { a->builtin = true; snprintf(a->exec, sizeof a->exec, "%s", v); }
 		else if (!strcmp(k, "display")) a->x11 = !strcmp(v, "x11");
 		else if (!strcmp(k, "bar")) a->bar = !strcmp(v, "yes");
-		else if (!strcmp(k, "kind")) a->saver = !strcmp(v, "screensaver");
+		else if (!strcmp(k, "kind")) { a->saver = !strcmp(v, "screensaver"); a->service = !strcmp(v, "service"); }
+		else if (!strcmp(k, "web")) a->web = atoi(v) > 0 && atoi(v) < 65536 ? atoi(v) : 0;
 		else if (!strcmp(k, "handle"))
 			a->handle = !strcmp(v, "hidden") ? 0.0f : !strcmp(v, "faint") ? SPRITE_HANDLE_FAINT : SPRITE_HANDLE_NORMAL;
 	}
@@ -215,7 +218,7 @@ void apps_rescan(void) {
 			// what the manifest says, leaving what's running as it is
 			bool differs = a->gone || strcmp(a->name, m.name) || strcmp(a->exec, m.exec) || strcmp(a->icon, m.icon) ||
 				a->color != m.color || a->builtin != m.builtin || a->x11 != m.x11 || a->bar != m.bar ||
-				a->saver != m.saver || a->handle != m.handle;
+				a->saver != m.saver || a->service != m.service || a->web != m.web || a->handle != m.handle;
 			if (!differs) continue;
 			if (a->gone) wlr_log(WLR_INFO, "app %s (%s) is back", m.id, m.name);
 			memcpy(a->name, m.name, sizeof a->name);
@@ -226,6 +229,8 @@ void apps_rescan(void) {
 			a->x11 = m.x11;
 			a->bar = m.bar;
 			a->saver = m.saver;
+			a->service = m.service;
+			a->web = m.web;
 			a->handle = m.handle;
 			a->gone = false;
 			changed = true;
@@ -452,7 +457,7 @@ void apps_launch(struct sprite_app *app) {
 struct sprite_app *apps_autostart(void) {
 	if (!autostart_id[0]) return NULL;
 	for (int i = 0; i < n_apps; i++)
-		if (!apps[i].hidden && !apps[i].gone && !apps[i].builtin && !apps[i].saver && !strcmp(apps[i].id, autostart_id)) return &apps[i];
+		if (!apps[i].hidden && !apps[i].gone && !apps[i].builtin && !apps[i].saver && !apps[i].service && !strcmp(apps[i].id, autostart_id)) return &apps[i];
 	return NULL;
 }
 

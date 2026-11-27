@@ -178,7 +178,7 @@ holds that group's settings, and scrolls when they outgrow the screen (that's fi
 one long page of everything that wasn't). The groups: **Network** (Wi-Fi, Ethernet, remote
 access), **Display** (brightness, touch), **Time** (the clock; the time zone to come),
 **Updates** (what the automatic updates are doing, what's waiting, and asking for them now),
-**About** and **Power**.
+**Services** (apps that run in the background) and **About**. Restart and Switch off, once a Power tab, are in the pull-down from the status bar, with Screen off.
 Sound will be a tab of its own. A status line in a panel is one line, ending in "...".
 **While something slow runs, there are no buttons to press**: its status line says what's
 happening ("Installing updates...", with "2 of 3" on the right), with a progress bar under

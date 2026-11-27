@@ -36,6 +36,7 @@ case "$1" in
 		in_chroot || systemd-tmpfiles --create openframe-sprite.conf || true
 		in_chroot || systemctl daemon-reload 2>/dev/null || true
 		systemctl enable --quiet sprite-helper.socket 2>/dev/null || true
+		systemctl enable --quiet sprite-services.service 2>/dev/null || true # starts nothing till a service is installed
 		in_chroot || systemctl restart sprite-helper.socket 2>/dev/null || true # its group may be new
 
 		if [ ! -e "$ENABLEMARKER" ]; then

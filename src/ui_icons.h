@@ -7,6 +7,8 @@
 #define UI_ICON_INFO "\xee\x83\xbe"
 #define UI_ICON_POWER "\xee\x85\x84"
 #define UI_ICON_MONITOR "\xee\x84\xa1"
+#define UI_ICON_MONITOR_OFF "\xee\x87\x9c"
+#define UI_ICON_SERVER "\xee\x85\x97"
 #define UI_ICON_MICROCHIP "\xee\x98\x9f"
 #define UI_ICON_CPU "\xee\x82\xad"
 #define UI_ICON_MEMORY_STICK "\xee\x91\x8a"

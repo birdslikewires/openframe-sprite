@@ -100,11 +100,13 @@ static int cur_page, n_pages;
 #define RAIL_PAD BACK_X
 #define TAB_H 50
 #define C_RAIL 0x0d1217   // a step between the bar and the background
-enum { TAB_AUDIO, TAB_DISPLAY, TAB_NETWORK, TAB_UPDATES, TAB_ABOUT, TAB_POWER, N_TABS };
+enum { TAB_AUDIO, TAB_DISPLAY, TAB_NETWORK, TAB_SERVICES, TAB_UPDATES, TAB_ABOUT, N_TABS };
 static lv_obj_t *tab_btn[N_TABS], *tab_icon[N_TABS], *tab_panel[N_TABS];
 static int settings_tab;
 static int settings_tab_first = -1; // the top of the rail: where the gear opens Settings
 static void settings_show_tab(int t);
+static void services_build(lv_obj_t *panel);
+static void services_show(void);
 static void aud_refresh(void);
 static void bar_aud_update(void);
 static void bar_aud_icon(int v);
@@ -123,12 +125,18 @@ static void bar_aud_icon(int v);
 // springs back from past an end in PAGE_SLIDE_MS.
 #define SCROLL_GLIDE_MS 300
 #define SCROLL_GLIDE_MIN_SPEED 0.15  // px/ms
-static enum { DRAG_NONE, DRAG_MAYBE, DRAG_PAGING, DRAG_SCROLL, DRAG_TILE } drag;
+static enum { DRAG_NONE, DRAG_MAYBE, DRAG_PAGING, DRAG_SCROLL, DRAG_TILE, DRAG_PULL } drag;
 static int drag_x0, drag_y0;
 static bool drag_can_page;           // the touch began where a sideways drag turns pages
 static lv_obj_t *drag_scroll;        // ... or where an up/down drag scrolls this
+static bool drag_can_pull;           // ... or on the status bar, where a drag down brings the power pull-down
 static int scroll_y0, scroll_max;
 static void drag_input(int x, int y, bool pressed, bool was_pressed);
+#define PULL_OPEN_PX 56      // the power pull-down, let go further down than this (or flicked down), opens
+static lv_obj_t *pull_scrim, *pull_panel;
+static void pull_build(void);
+static void pull_place(int32_t shown);
+static void pull_glide(bool open);
 static void tile_drop(bool place);
 static void tile_follow(int x, int y);
 static lv_obj_t *bl_slider, *bl_auto;
@@ -1020,6 +1028,7 @@ static void refresh_settings(lv_timer_t *t) {
 	eth_show();
 	net_notes_show();
 	if (settings_tab == TAB_ABOUT) about_show();
+	if (settings_tab == TAB_SERVICES) services_show();
 	if (!t && settings_tab == TAB_DISPLAY) saver_show(); // the screensavers installed
 	bool autobl = sysinfo_backlight_auto();
 	if (autobl) lv_obj_add_state(bl_auto, LV_STATE_CHECKED);
@@ -1457,7 +1466,8 @@ static void drag_input(int x, int y, bool pressed, bool was_pressed) {
 		// one page can be flicked too, against the ends: it shows there's paging to be had
 		drag_can_page = free && pager && !lv_obj_has_flag(page_home, LV_OBJ_FLAG_HIDDEN);
 		drag_scroll = free ? scrolling_screen() : NULL;
-		drag = (drag_can_page || drag_scroll) && y >= BAR_H ? DRAG_MAYBE : DRAG_NONE;
+		drag_can_pull = free && !bar_app && y < BAR_H;
+		drag = ((drag_can_page || drag_scroll) && y >= BAR_H) || drag_can_pull ? DRAG_MAYBE : DRAG_NONE;
 		drag_x0 = x;
 		drag_y0 = y;
 		if (drag_scroll) lv_anim_delete(drag_scroll, scroll_exec); // a touch stops a glide
@@ -1466,6 +1476,21 @@ static void drag_input(int x, int y, bool pressed, bool was_pressed) {
 	if (drag == DRAG_NONE) return;
 	int dx = x - drag_x0, dy = y - drag_y0;
 	if (pressed) {
+		if (drag == DRAG_MAYBE && drag_can_pull) { // from the bar: down brings the pull-down; else the bar's own taps
+			if (dy >= PAGE_DRAG_START && dy > abs(dx)) {
+				drag = DRAG_PULL;
+				pull_build();
+				lv_indev_reset(indev, NULL);
+				lv_indev_wait_release(indev);
+			} else {
+				if (abs(dx) >= PAGE_DRAG_START || dy <= -PAGE_DRAG_START) drag = DRAG_NONE;
+				return;
+			}
+		}
+		if (drag == DRAG_PULL) {
+			pull_place(dy);
+			return;
+		}
 		if (drag == DRAG_MAYBE) {
 			if (drag_can_page && abs(dx) >= PAGE_DRAG_START && abs(dx) >= abs(dy)) {
 				drag = DRAG_PAGING;
@@ -1505,7 +1530,9 @@ static void drag_input(int x, int y, bool pressed, bool was_pressed) {
 		vx = (smp[1].x - smp[0].x) / (smp[1].t - smp[0].t);
 		vy = (smp[1].y - smp[0].y) / (smp[1].t - smp[0].t);
 	}
-	if (drag == DRAG_PAGING) { // released: turn the page, or settle back (from where the strip is)
+	if (drag == DRAG_PULL) { // released: open, or back up
+		if (pull_panel) pull_glide(dy >= PULL_OPEN_PX || vy >= PAGE_FLICK_SPEED);
+	} else if (drag == DRAG_PAGING) { // released: turn the page, or settle back (from where the strip is)
 		int p = cur_page;
 		if (dx <= -PAGE_TURN_PX || vx <= -PAGE_FLICK_SPEED) p++;
 		else if (dx >= PAGE_TURN_PX || vx >= PAGE_FLICK_SPEED) p--;
@@ -1619,7 +1646,7 @@ static void layout_write(void) {
 }
 
 // Settings is the gear, not a tile; the Shop is a tile, moved like any other
-static bool on_grid(const struct sprite_app *a) { return !a->hidden && !a->gone && !a->saver && (!a->builtin || !strcmp(a->exec, "shop")); }
+static bool on_grid(const struct sprite_app *a) { return !a->hidden && !a->gone && !a->saver && !a->service && (!a->builtin || !strcmp(a->exec, "shop")); }
 
 // Fills slots[] from the layout, then the rest in name order; returns the number of pages used.
 static int layout_assign(void) {
@@ -2141,8 +2168,10 @@ static void after_update_cb(lv_event_t *e) {
 					   : STR_POWER_WILL_OFF, 4000);
 }
 
-static void power_clicked(lv_event_t *e) {
-	bool reboot = !strcmp(lv_event_get_user_data(e), "reboot");
+static void power_ask(bool reboot);
+static void upd_restart_clicked(lv_event_t *e) { power_ask(true); }
+
+static void power_ask(bool reboot) {
 	enum upd_state us = update_state();
 	if (us == UPD_DOWNLOADING || us == UPD_INSTALLING) {
 		// Not halfway through installing something: once it's done.
@@ -2164,6 +2193,116 @@ static void power_clicked(lv_event_t *e) {
 	dialog_button(card, reboot ? LV_SYMBOL_REFRESH "  " STR_POWER_RESTART : LV_SYMBOL_POWER "  " STR_POWER_OFF,
 		      reboot ? BUTTON_MAIN : BUTTON_DANGER, confirm_cb, reboot ? "reboot" : "poweroff");
 	dialog_button(card, STR_COMMON_CANCEL, BUTTON_OTHER, dialog_cancel, NULL);
+}
+
+/* ---- the power pull-down: drawn down from anywhere on the status bar (drag_input), not just
+   its edge, which a resistive screen reads poorly. A panel of Screen off, Restart and Switch
+   off slides down over the screen, dimming the rest, and goes back up at a tap outside it or
+   once one's chosen. Not over an app. ---- */
+
+#define PULL_H 140           // the panel's height on the screen, open
+#define PULL_R 16            // its lower corners' radius (the upper ones are off the top)
+#define PULL_TILE_W 172
+#define PULL_TILE_H 92
+static int pull_shown;       // how much of it is on the screen, 0 to PULL_H
+static bool sleep_now(void);
+
+static void pull_place(int32_t shown) {
+	if (shown < 0) shown = 0;
+	if (shown > PULL_H) shown = PULL_H;
+	pull_shown = shown;
+	lv_obj_set_y(pull_panel, shown - PULL_H - PULL_R);
+	lv_obj_set_style_bg_opa(pull_scrim, (lv_opa_t)(LV_OPA_60 * shown / PULL_H), 0);
+}
+
+static void pull_anim_exec(void *o, int32_t shown) { pull_place(shown); }
+
+static void pull_dismiss(void) { // at once, no glide
+	if (!pull_scrim) return;
+	lv_anim_delete(pull_panel, pull_anim_exec);
+	lv_obj_delete_async(pull_scrim);
+	pull_scrim = pull_panel = NULL;
+}
+
+static void pull_gone(lv_anim_t *a) { pull_dismiss(); }
+
+static void pull_glide(bool open) {
+	lv_anim_delete(pull_panel, pull_anim_exec);
+	lv_anim_t a;
+	lv_anim_init(&a);
+	lv_anim_set_var(&a, pull_panel);
+	lv_anim_set_exec_cb(&a, pull_anim_exec);
+	lv_anim_set_values(&a, pull_shown, open ? PULL_H : 0);
+	lv_anim_set_duration(&a, PAGE_SLIDE_MS);
+	lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+	if (!open) lv_anim_set_completed_cb(&a, pull_gone);
+	lv_anim_start(&a);
+}
+
+static void pull_scrim_clicked(lv_event_t *e) {
+	if (lv_event_get_target(e) == lv_event_get_current_target(e)) pull_glide(false); // outside the panel
+}
+
+static void pull_chosen(lv_event_t *e) {
+	const char *what = lv_event_get_user_data(e);
+	pull_dismiss();
+	if (!strcmp(what, "sleep")) sleep_now();
+	else power_ask(!strcmp(what, "reboot"));
+}
+
+static void pull_tile(lv_obj_t *row, const char *glyph, uint32_t glyph_color, const char *name, const char *what) {
+	lv_obj_t *t = lv_obj_create(row);
+	lv_obj_remove_style_all(t);
+	lv_obj_set_size(t, PULL_TILE_W, PULL_TILE_H);
+	lv_obj_set_flex_flow(t, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_align(t, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_row(t, 10, 0);
+	lv_obj_set_style_bg_color(t, lv_color_white(), 0);
+	lv_obj_set_style_bg_opa(t, LV_OPA_10, 0);
+	lv_obj_set_style_bg_opa(t, LV_OPA_20, LV_STATE_PRESSED);
+	rounded(t);
+	lv_obj_add_flag(t, LV_OBJ_FLAG_CLICKABLE);
+	lv_obj_remove_flag(t, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_add_event_cb(t, pull_chosen, LV_EVENT_CLICKED, (void *)what);
+	lv_obj_t *g = lv_label_create(t);
+	lv_label_set_text(g, glyph);
+	lv_obj_set_style_text_font(g, &sprite_ui_24, 0);
+	lv_obj_set_style_text_color(g, lv_color_hex(glyph_color), 0);
+	lv_obj_t *l = lv_label_create(t);
+	lv_label_set_text(l, name);
+	lv_obj_set_style_text_font(l, &lv_font_montserrat_16, 0);
+	lv_obj_set_style_text_color(l, lv_color_hex(C_TEXT), 0);
+}
+
+static void pull_build(void) {
+	pull_dismiss();
+	pull_scrim = lv_obj_create(lv_layer_top());
+	lv_obj_remove_style_all(pull_scrim);
+	lv_obj_set_size(pull_scrim, SPRITE_W, SPRITE_H);
+	lv_obj_set_style_bg_color(pull_scrim, lv_color_black(), 0);
+	lv_obj_add_flag(pull_scrim, LV_OBJ_FLAG_CLICKABLE); // nothing underneath takes a touch meanwhile
+	lv_obj_remove_flag(pull_scrim, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_add_event_cb(pull_scrim, pull_scrim_clicked, LV_EVENT_CLICKED, NULL);
+	pull_panel = lv_obj_create(pull_scrim);
+	lv_obj_remove_style_all(pull_panel);
+	lv_obj_set_size(pull_panel, SPRITE_W, PULL_H + PULL_R);
+	lv_obj_set_style_bg_color(pull_panel, lv_color_hex(C_CARD), 0);
+	lv_obj_set_style_bg_opa(pull_panel, LV_OPA_COVER, 0);
+	lv_obj_set_style_radius(pull_panel, PULL_R, 0);
+	lv_obj_add_flag(pull_panel, LV_OBJ_FLAG_CLICKABLE); // a tap on it isn't a tap outside it
+	lv_obj_remove_flag(pull_panel, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_t *row = lv_obj_create(pull_panel);
+	lv_obj_remove_style_all(row);
+	lv_obj_set_size(row, LV_PCT(100), PULL_TILE_H);
+	lv_obj_align(row, LV_ALIGN_BOTTOM_MID, 0, -(PULL_H - PULL_TILE_H) / 2); // centred in what shows (the panel's PULL_R more is off the top)
+	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_column(row, 16, 0);
+	lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+	pull_tile(row, UI_ICON_MONITOR_OFF, C_TEXT, STR_PULL_SCREEN_OFF, "sleep");
+	pull_tile(row, UI_ICON_REFRESH_CW, C_TEXT, STR_POWER_RESTART, "reboot");
+	pull_tile(row, UI_ICON_POWER, C_BUTTON_DANGER, STR_POWER_OFF, "poweroff");
+	pull_place(0);
 }
 
 // A list screen (Settings) is a column of headings and rows, ROW_GAP apart. Every row of
@@ -4249,6 +4388,7 @@ static void settings_show_tab(int t) {
 	if (t == TAB_DISPLAY) { bl_limits_ask(); saver_show(); }
 	if (t == TAB_NETWORK && wifi_status_label) wifi_refresh(); // (polled only while it shows)
 	if (t == TAB_ABOUT) about_show(); // (and polled only while it shows)
+	if (t == TAB_SERVICES) services_show();
 }
 
 static void tab_clicked(lv_event_t *e) { settings_show_tab((int)(intptr_t)lv_event_get_user_data(e)); }
@@ -4395,15 +4535,22 @@ static void idle_tick(lv_timer_t *t) {
 	uint64_t idle = sprite_idle_ms();
 	if (ss_min && !sleeping && !screensaver_active() && idle >= (uint64_t)ss_min * 60000) {
 		bar_vol_hide();
+		pull_dismiss();
 		screensaver_start(); // the flip clock, and over it the app chosen, once it shows
 		sprite_saver_start(saver_app());
 	}
-	if (sleep_min && !sleeping && idle >= (uint64_t)sleep_min * 60000 && sysinfo_backlight_request("sleep")) {
-		sleeping = true;
-		sprite_set_asleep(true);
-		sprite_saver_end(); // nothing to draw for in the dark (the flip clock costs nothing)
-		bar_vol_hide();
-	}
+	if (sleep_min && !sleeping && idle >= (uint64_t)sleep_min * 60000) sleep_now();
+}
+
+// The screen off now (display sleep, or Screen off in the pull-down), if of-backlight's service takes it
+static bool sleep_now(void) {
+	if (sleeping || !sysinfo_backlight_request("sleep")) return false;
+	sleeping = true;
+	sprite_set_asleep(true);
+	sprite_saver_end(); // nothing to draw for in the dark (the flip clock costs nothing)
+	bar_vol_hide();
+	pull_dismiss();
+	return true;
 }
 
 // A touch on the dark screen. Asleep (display sleep): it lights again at what it went off
@@ -4687,8 +4834,8 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_remove_flag(page_settings, LV_OBJ_FLAG_SCROLLABLE);
 
 	lv_obj_t *rail = rail_new(page_settings);
-	// The tabs for settings, in alphabetical order; then, under a line, About and Power, which
-	// aren't settings so much as the unit itself (alphabetical too).
+	// The tabs for settings, in alphabetical order; then, under a line, About, which isn't
+	// settings so much as the unit itself. Restart and Switch off are in the power pull-down.
 	settings_tab_new(rail, TAB_AUDIO, UI_ICON_VOLUME_2, STR_TAB_AUDIO);
 	settings_tab_new(rail, TAB_DISPLAY, UI_ICON_SUN, STR_TAB_DISPLAY);
 	lv_obj_t *nt = settings_tab_new(rail, TAB_NETWORK, UI_ICON_WIFI, STR_TAB_NETWORK);
@@ -4702,6 +4849,7 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_bg_opa(net_tab_dot, LV_OPA_COVER, 0);
 	lv_obj_remove_flag(net_tab_dot, LV_OBJ_FLAG_CLICKABLE);
 	lv_obj_add_flag(net_tab_dot, LV_OBJ_FLAG_HIDDEN);
+	settings_tab_new(rail, TAB_SERVICES, UI_ICON_SERVER, STR_TAB_SERVICES);
 	lv_obj_t *ut = settings_tab_new(rail, TAB_UPDATES, UI_ICON_REFRESH_CW, STR_TAB_UPDATES);
 	upd_tab_dot = lv_obj_create(ut); // there while updates are waiting (update_net), as Network's is
 	lv_obj_remove_style_all(upd_tab_dot);
@@ -4721,7 +4869,6 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_bg_color(rule, lv_color_white(), 0);
 	lv_obj_set_style_bg_opa(rule, LV_OPA_10, 0);
 	settings_tab_new(rail, TAB_ABOUT, UI_ICON_INFO, STR_TAB_ABOUT);
-	settings_tab_new(rail, TAB_POWER, UI_ICON_POWER, STR_TAB_POWER);
 
 	// Network: Wi-Fi (on units with a card) and remote access
 	lv_obj_t *pn = settings_panel_new(TAB_NETWORK);
@@ -5005,7 +5152,7 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_add_flag(upd_note_label, LV_OBJ_FLAG_HIDDEN);
 	lv_obj_t *ub = upd_buttons = button_row(pu);
 	upd_now_btn = button(ub, LV_SYMBOL_DOWNLOAD "  " STR_UPD_UPDATE_NOW, BUTTON_MAIN, upd_now_clicked, NULL);
-	upd_restart_btn = button(ub, LV_SYMBOL_REFRESH "  " STR_UPD_RESTART_NOW, BUTTON_MAIN, power_clicked, "reboot");
+	upd_restart_btn = button(ub, LV_SYMBOL_REFRESH "  " STR_UPD_RESTART_NOW, BUTTON_MAIN, upd_restart_clicked, NULL);
 	upd_check_btn = button(ub, LV_SYMBOL_REFRESH "  " STR_UPD_CHECK_NOW, BUTTON_OTHER, upd_check_clicked, NULL);
 	lv_obj_add_flag(upd_now_btn, LV_OBJ_FLAG_HIDDEN);
 	lv_obj_add_flag(upd_restart_btn, LV_OBJ_FLAG_HIDDEN);
@@ -5088,12 +5235,8 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_text_font(tl, &lv_font_montserrat_16, 0);
 	lv_obj_set_style_text_color(tl, lv_color_hex(C_DIM), 0);
 
-	// Power
-	lv_obj_t *pp = settings_panel_new(TAB_POWER);
-	section(pp, STR_POWER_HEAD);
-	lv_obj_t *prow = button_row(pp);
-	button(prow, LV_SYMBOL_REFRESH "  " STR_POWER_RESTART, BUTTON_OTHER, power_clicked, "reboot");
-	button(prow, LV_SYMBOL_POWER "  " STR_POWER_OFF, BUTTON_DANGER, power_clicked, "poweroff");
+	// Services: apps that run in the background (kind=service), each switched on or off
+	services_build(settings_panel_new(TAB_SERVICES));
 
 	// the first heading of each panel sits at its top, not a heading's space below it
 	for (int t = 0; t < N_TABS; t++) lv_obj_set_style_margin_top(lv_obj_get_child(tab_panel[t], 0), 0, 0);
@@ -5264,11 +5407,11 @@ static void shop_poll(lv_timer_t *t) {
 	struct shop_app *a = shop_find(j.id);
 	char name[64];
 	snprintf(name, sizeof name, "%s", a ? a->name : j.id);
-	bool saver = a && a->saver, update = a && a->installed[0] && !j.remove;
+	bool saver = a && a->saver, service = a && a->service, update = a && a->installed[0] && !j.remove;
 	shop_load();
 	if (j.state == SHOP_JOB_DONE) {
 		char s[160];
-		snprintf(s, sizeof s, j.remove ? STR_SHOP_DONE_REMOVED : update ? STR_SHOP_DONE_UPDATED : saver ? STR_SHOP_DONE_SAVER : STR_SHOP_DONE_INSTALLED, name);
+		snprintf(s, sizeof s, j.remove ? STR_SHOP_DONE_REMOVED : update ? STR_SHOP_DONE_UPDATED : saver ? STR_SHOP_DONE_SAVER : service ? STR_SHOP_DONE_SERVICE : STR_SHOP_DONE_INSTALLED, name);
 		show_toast(s, 4000);
 	} else if (j.state == SHOP_JOB_FAILED) {
 		shop_failed(j.id, j.remove, j.reason);
@@ -5327,6 +5470,13 @@ static void shop_choose_clicked(lv_event_t *e) {
 	refresh_settings(NULL);
 }
 
+// A service is switched on and off, and its web page found, in Settings, under Services
+static void shop_service_clicked(lv_event_t *e) {
+	settings_show_tab(TAB_SERVICES);
+	show_page(page_settings);
+	refresh_settings(NULL);
+}
+
 static void shop_remove_go(lv_event_t *e) {
 	dialog_close();
 	struct shop_app *a = shop_find(shop_ask_id);
@@ -5343,12 +5493,15 @@ static void shop_remove_clicked(lv_event_t *e) {
 	dialog_button(card, STR_COMMON_CANCEL, BUTTON_OTHER, dialog_cancel, NULL);
 }
 
-// What an app's button does: Get it, Update it, Open it, or (a screensaver) Choose it
-enum shop_act { ACT_GET, ACT_UPDATE, ACT_OPEN, ACT_CHOOSE };
+// Which of the Shop's lists an app is in: 0 apps, 1 services, 2 screensavers
+static int shop_kind(const struct shop_app *a) { return a->saver ? 2 : a->service ? 1 : 0; }
+
+// What an app's button does: Get it, Update it, Open it, (a screensaver) Choose it or (a service) find it in Settings
+enum shop_act { ACT_GET, ACT_UPDATE, ACT_OPEN, ACT_CHOOSE, ACT_SERVICE };
 static enum shop_act shop_act(const struct shop_app *a) {
 	if (!a->installed[0]) return ACT_GET;
 	if (a->listed && shop_vercmp(a->version, a->installed) > 0) return ACT_UPDATE;
-	return a->saver ? ACT_CHOOSE : ACT_OPEN;
+	return a->saver ? ACT_CHOOSE : a->service ? ACT_SERVICE : ACT_OPEN;
 }
 
 // An app's button, or how its job's going. Getting waits while another job runs.
@@ -5378,6 +5531,7 @@ static void shop_action(lv_obj_t *parent, struct shop_app *a) {
 	lv_obj_t *b = act == ACT_GET ? button(parent, STR_SHOP_GET, BUTTON_MAIN, shop_get_clicked, a) :
 		act == ACT_UPDATE ? button(parent, STR_SHOP_UPDATE, BUTTON_MAIN, shop_get_clicked, a) :
 		act == ACT_OPEN ? button(parent, STR_SHOP_OPEN, BUTTON_OTHER, shop_open_clicked, a) :
+		act == ACT_SERVICE ? button(parent, STR_SHOP_SETTINGS, BUTTON_OTHER, shop_service_clicked, a) :
 		button(parent, STR_SHOP_CHOOSE, BUTTON_OTHER, shop_choose_clicked, a);
 	if (shop_busy() && (act == ACT_GET || act == ACT_UPDATE)) lv_obj_add_state(b, LV_STATE_DISABLED);
 }
@@ -5442,17 +5596,20 @@ static void shop_render_tab(int t) {
 		if (!n) shop_text(p, STR_SHOP_NONE_INSTALLED, &lv_font_montserrat_20, C_TEXT);
 		return;
 	}
-	// the apps, then the screensavers under a heading of their own (and the apps under one too, when there are both)
-	int apps = 0, savers = 0;
+	// the apps, then the services and the screensavers, each under a heading of their own (and the apps under one too, when there's more than one kind)
+	int n[3] = { 0 }, kinds = 0;
 	for (int i = 0; i < shop_count(); i++)
-		if (shop_get(i)->listed) { apps += !shop_get(i)->saver; savers += shop_get(i)->saver; }
-	if (!apps && !savers) { shop_text(p, STR_SHOP_NONE_APPS, &lv_font_montserrat_20, C_TEXT); return; }
-	for (int s = 0; s < 2; s++) {
-		if ((s ? savers : apps) == 0) continue;
-		if (apps && savers) section(p, s ? STR_SHOP_HEAD_SCREENSAVERS : STR_SHOP_HEAD_APPS);
-		if (s) shop_text(p, STR_SHOP_SAVERS_NOTE, &lv_font_montserrat_16, C_DIM);
+		if (shop_get(i)->listed) n[shop_kind(shop_get(i))]++;
+	for (int k = 0; k < 3; k++) kinds += n[k] > 0;
+	if (!kinds) { shop_text(p, STR_SHOP_NONE_APPS, &lv_font_montserrat_20, C_TEXT); return; }
+	static const char *const heads[3] = { STR_SHOP_HEAD_APPS, STR_SHOP_HEAD_SERVICES, STR_SHOP_HEAD_SCREENSAVERS };
+	static const char *const notes[3] = { NULL, STR_SHOP_SERVICES_NOTE, STR_SHOP_SAVERS_NOTE };
+	for (int k = 0; k < 3; k++) {
+		if (!n[k]) continue;
+		if (kinds > 1) section(p, heads[k]);
+		if (notes[k]) shop_text(p, notes[k], &lv_font_montserrat_16, C_DIM);
 		for (int i = 0; i < shop_count(); i++)
-			if (shop_get(i)->listed && shop_get(i)->saver == s) shop_row(p, shop_get(i));
+			if (shop_get(i)->listed && shop_kind(shop_get(i)) == k) shop_row(p, shop_get(i));
 	}
 }
 
@@ -5508,10 +5665,13 @@ static void shop_page_render(void) {
 	// what it may reach, beyond the screen, a bullet point to each
 	section(shop_app_body, STR_SHOP_HEAD_USES);
 	bool net = strstr(a->allow, "network"), mic = strstr(a->allow, "microphone"), snd = mic || strstr(a->allow, "sound");
+	bool music = strstr(a->allow, "music");
 	if (net) shop_bullet(shop_app_body, STR_SHOP_USES_NETWORK);
 	if (snd) shop_bullet(shop_app_body, STR_SHOP_USES_SOUND);
 	if (mic) shop_bullet(shop_app_body, STR_SHOP_USES_MICROPHONE);
-	if (!net && !snd) shop_text(shop_app_body, STR_SHOP_USES_NOTHING, &lv_font_montserrat_20, C_TEXT);
+	if (music) shop_bullet(shop_app_body, STR_SHOP_USES_MUSIC);
+	if (a->service) shop_bullet(shop_app_body, STR_SHOP_USES_BACKGROUND);
+	if (!net && !snd && !music) shop_text(shop_app_body, STR_SHOP_USES_NOTHING, &lv_font_montserrat_20, C_TEXT);
 
 	// where to ask about it: its community, else its source, as a QR code to scan (there's no browser here)
 	section(shop_app_body, STR_SHOP_HEAD_HELP);
@@ -5857,4 +6017,207 @@ void shell_init(void *pixels) {
 		lv_timer_t *w = lv_timer_create(welcome_show, 1500, NULL);
 		lv_timer_set_repeat_count(w, 1);
 	}
+}
+
+/* ---- Services: apps that run in the background (kind=service), whatever's on the screen. The
+   helper starts those switched on at boot, and switches them on and off from here (service-set);
+   it says what each is doing (service-status). A row each: its icon, its name and what it's
+   doing, and a switch; while one runs with a web page of its own (web=), its address and a QR
+   code to it, as it's set up from a phone or a computer. Polled every 3 s while it shows. ---- */
+
+#define SVC_MAX 16
+#define SVC_QR 112
+static lv_obj_t *svc_panel;
+static struct svc_state { char id[64], state[16]; bool on; int mem_mb; } svc_st[SVC_MAX];
+static int n_svc_st;
+static bool svc_known, svc_asking;
+static char svc_sig[2048]; // what the panel shows, so it's built again only when that changes
+
+static const struct svc_state *svc_find(const char *id) {
+	for (int i = 0; i < n_svc_st; i++)
+		if (!strcmp(svc_st[i].id, id)) return &svc_st[i];
+	return NULL;
+}
+
+// The OpenFrame's address, as About shows it (Ethernet's, else Wi-Fi's), or "" with neither
+static void svc_address(char *o, size_t n) {
+	struct sprite_about ab;
+	sysinfo_about(&ab);
+	const char *ip = isdigit((unsigned char)ab.eth[0]) ? ab.eth : isdigit((unsigned char)ab.wifi[0]) ? ab.wifi : "";
+	size_t k = strcspn(ip, " ,(");
+	snprintf(o, n, "%.*s", (int)k, ip);
+}
+
+static void svc_text(char *o, size_t n, const struct svc_state *st) {
+	if (!st) snprintf(o, n, "%s", "");
+	else if (!strcmp(st->state, "active")) {
+		if (st->mem_mb > 0) snprintf(o, n, STR_SERVICES_RUNNING_MEM, st->mem_mb);
+		else snprintf(o, n, "%s", STR_SERVICES_RUNNING);
+	} else if (!strcmp(st->state, "activating") || !strcmp(st->state, "reloading")) snprintf(o, n, "%s", STR_SERVICES_STARTING);
+	else if (!strcmp(st->state, "failed")) snprintf(o, n, "%s", STR_SERVICES_FAILED);
+	else snprintf(o, n, "%s", st->on ? STR_SERVICES_NOT_RUNNING : STR_SERVICES_OFF);
+}
+
+static void services_render(void);
+
+static void svc_status_done(char *reply, void *data) {
+	svc_asking = false;
+	const char *st = helper_reply_status(reply);
+	if (strcmp(st, "ok")) return;
+	n_svc_st = 0;
+	for (char *save = NULL, *line = strtok_r(reply, "\n", &save); line && n_svc_st < SVC_MAX; line = strtok_r(NULL, "\n", &save)) {
+		struct svc_state *v = &svc_st[n_svc_st];
+		char on[8];
+		if (sscanf(line, "%63s %15s %7s %d", v->id, v->state, on, &v->mem_mb) == 4) {
+			v->on = !strcmp(on, "on");
+			n_svc_st++;
+		}
+	}
+	svc_known = true;
+	services_render();
+}
+
+static void svc_set_done(char *reply, void *data) {
+	const char *st = helper_reply_status(reply);
+	if (strcmp(st, "ok")) {
+		lv_obj_t *card = dialog_open(NULL, STR_SERVICES_NOT_CHANGED, reason_text(st), true);
+		dialog_button(card, STR_COMMON_OK, BUTTON_MAIN, dialog_cancel, NULL);
+	}
+	svc_sig[0] = 0; // built again, the switch put right if it didn't change
+	services_show();
+}
+
+static void svc_switch_changed(lv_event_t *e) {
+	const struct sprite_app *a = lv_event_get_user_data(e);
+	bool on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+	char req[96];
+	snprintf(req, sizeof req, "service-set %s %s\n", a->id, on ? "on" : "off");
+	helper_request(req, svc_set_done, NULL);
+}
+
+static void svc_shop_clicked(lv_event_t *e) { shop_open(); }
+
+static void svc_row(lv_obj_t *panel, struct sprite_app *a, const struct svc_state *st, const char *ip) {
+	lv_obj_t *card = lv_obj_create(panel);
+	lv_obj_remove_style_all(card);
+	lv_obj_set_size(card, LV_PCT(100), LV_SIZE_CONTENT);
+	lv_obj_set_style_bg_color(card, lv_color_hex(C_CARD), 0);
+	lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+	lv_obj_set_style_radius(card, 12, 0);
+	lv_obj_set_style_pad_all(card, 16, 0);
+	lv_obj_set_style_pad_row(card, 14, 0);
+	lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+	lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_t *r = lv_obj_create(card);
+	lv_obj_remove_style_all(r);
+	lv_obj_set_size(r, LV_PCT(100), LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(r, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_column(r, 16, 0);
+	lv_obj_remove_flag(r, LV_OBJ_FLAG_SCROLLABLE);
+	static struct shop_app badge; // (shop_badge's stand-in for it; too big for the stack)
+	memset(&badge, 0, sizeof badge);
+	snprintf(badge.name, sizeof badge.name, "%s", a->name);
+	snprintf(badge.icon, sizeof badge.icon, "%s", a->icon);
+	badge.color = a->color;
+	shop_badge(r, &badge, 48);
+	lv_obj_t *col = lv_obj_create(r);
+	lv_obj_remove_style_all(col);
+	lv_obj_set_height(col, LV_SIZE_CONTENT);
+	lv_obj_set_flex_grow(col, 1);
+	lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_style_pad_row(col, 4, 0);
+	lv_obj_remove_flag(col, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_t *n = shop_text(col, a->name, &lv_font_montserrat_20, C_TEXT);
+	lv_label_set_long_mode(n, LV_LABEL_LONG_DOT);
+	lv_obj_set_height(n, lv_font_get_line_height(&lv_font_montserrat_20));
+	char t[192];
+	svc_text(t, sizeof t, st);
+	shop_text(col, t, &lv_font_montserrat_16, st && !strcmp(st->state, "failed") ? C_WARN : C_DIM);
+	lv_obj_t *sw = lv_switch_create(r);
+	lv_obj_set_size(sw, 72, 38);
+	if (!st || st->on) lv_obj_add_state(sw, LV_STATE_CHECKED);
+	if (!st) lv_obj_add_state(sw, LV_STATE_DISABLED); // till the helper's said
+	lv_obj_add_event_cb(sw, svc_switch_changed, LV_EVENT_VALUE_CHANGED, a);
+	if (!a->web || !ip[0] || !st || strcmp(st->state, "active")) return;
+	// its own web page: the address, and a QR code to it
+	char url[96];
+	snprintf(url, sizeof url, "http://%s:%d", ip, a->web);
+	lv_obj_t *w = lv_obj_create(card);
+	lv_obj_remove_style_all(w);
+	lv_obj_set_size(w, LV_PCT(100), LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(w, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(w, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_column(w, 16, 0);
+	lv_obj_remove_flag(w, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_t *qbox = lv_obj_create(w); // the white margin a phone needs round it
+	lv_obj_remove_style_all(qbox);
+	lv_obj_set_size(qbox, SVC_QR + 2 * SHOP_QR_MARGIN, SVC_QR + 2 * SHOP_QR_MARGIN);
+	lv_obj_set_style_bg_color(qbox, lv_color_white(), 0);
+	lv_obj_set_style_bg_opa(qbox, LV_OPA_COVER, 0);
+	lv_obj_set_style_radius(qbox, 8, 0);
+	lv_obj_remove_flag(qbox, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_t *qr = lv_qrcode_create(qbox);
+	lv_qrcode_set_size(qr, SVC_QR);
+	lv_qrcode_set_dark_color(qr, lv_color_black());
+	lv_qrcode_set_light_color(qr, lv_color_white());
+	lv_qrcode_update(qr, url, strlen(url));
+	lv_obj_center(qr);
+	lv_obj_t *wc = lv_obj_create(w);
+	lv_obj_remove_style_all(wc);
+	lv_obj_set_height(wc, LV_SIZE_CONTENT);
+	lv_obj_set_flex_grow(wc, 1);
+	lv_obj_set_flex_flow(wc, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_style_pad_row(wc, 6, 0);
+	lv_obj_remove_flag(wc, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+	snprintf(t, sizeof t, STR_SERVICES_WEB, a->name);
+	shop_text(wc, t, &lv_font_montserrat_16, C_DIM);
+	shop_text(wc, url, &lv_font_montserrat_20, C_TEXT);
+}
+
+static void services_render(void) {
+	if (!svc_panel) return;
+	char ip[48], sig[sizeof svc_sig];
+	svc_address(ip, sizeof ip);
+	int k = snprintf(sig, sizeof sig, "%d %s|", svc_known, ip), n = 0;
+	for (int i = 0; i < apps_count(); i++) {
+		struct sprite_app *a = apps_get(i);
+		if (!a->service || a->gone) continue;
+		n++;
+		const struct svc_state *st = svc_find(a->id);
+		char t[96];
+		svc_text(t, sizeof t, st);
+		if (k < (int)sizeof sig)
+			k += snprintf(sig + k, sizeof sig - k, "%s %s %s %d %d|", a->id, a->name, st ? st->state : "-", st ? st->on : -1, a->web);
+		// (the memory to the nearest 10 MB, so it isn't built again for every megabyte)
+		if (k < (int)sizeof sig && st) k += snprintf(sig + k, sizeof sig - k, "%d|", st->mem_mb / 10);
+	}
+	if (!strcmp(sig, svc_sig)) return;
+	snprintf(svc_sig, sizeof svc_sig, "%s", sig);
+	lv_obj_clean(svc_panel);
+	section(svc_panel, STR_SERVICES_HEAD);
+	lv_obj_set_style_margin_top(lv_obj_get_child(svc_panel, 0), 0, 0); // at the panel's top, as every first heading
+	if (!n) {
+		shop_text(svc_panel, STR_SERVICES_NONE, &lv_font_montserrat_20, C_TEXT);
+		lv_obj_t *row = button_row(svc_panel);
+		button(row, STR_SERVICES_OPEN_SHOP, BUTTON_OTHER, svc_shop_clicked, NULL);
+		return;
+	}
+	shop_text(svc_panel, STR_SERVICES_NOTE, &lv_font_montserrat_16, C_DIM);
+	for (int i = 0; i < apps_count(); i++) {
+		struct sprite_app *a = apps_get(i);
+		if (a->service && !a->gone) svc_row(svc_panel, a, svc_find(a->id), ip);
+	}
+}
+
+static void services_show(void) {
+	services_render();
+	if (svc_asking) return;
+	svc_asking = true;
+	helper_request("service-status\n", svc_status_done, NULL);
+}
+
+static void services_build(lv_obj_t *panel) {
+	svc_panel = panel;
+	services_render();
 }

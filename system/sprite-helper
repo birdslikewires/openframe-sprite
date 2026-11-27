@@ -34,10 +34,15 @@
 ##    shop-refresh          the Shop's list of apps, fetched again from apps.openbeak.net
 ##    shop-install <id>     install app <id> (its package, ofapp-<id>) from the Shop, answering once it's started: it carries on as the sprite-shop job, and says how it's going in /run/sprite-shop/status (see The Shop, below)
 ##    shop-remove <id>      remove app <id>, what only it needed, and what it kept, the same way
+##    service-status        each service installed (an app with kind=service), a line each: <id> <state> <on|off> <MB>, its unit's ActiveState (inactive if it has none), whether it's switched on, and the memory it's using (its own, not the files it has cached); then "ok"
+##    service-set <id> on|off switch a service on (started now, and at each boot) or off (stopped, and left stopped)
+##    services-boot         start every service switched on (sprite-services.service, at boot)
 ##
 ##  Wi-Fi is set up the OpenFrame way (see of-netplan): settings/wifi.txt on the boot volume, editable from any computer, turned into a netplan configuration. Only name= and password= are changed here: a fixed address in the file stays as it is.
 ##
 ##  Apps: each runs as a transient systemd unit, sprite-app-<id>.service, under a user of its own (DynamicUser), in the sprite-apps group, which can reach sprite's display sockets and nothing else of sprite's. What it runs comes only from its manifest (in one of sprite's app directories, all root's), never from the request. It has no sudo, no capabilities, a read-only system, no /home or /boot (where wifi.txt is), its own /tmp, no other processes to see, and one directory of its own to keep things in (/var/lib/sprite-apps/<id>, kept between runs). The manifest's allow= line names what more it may have: network (otherwise it has none), sound (/dev/snd to play: the capture devices there as it starts are hidden) and microphone (those too). It has less of the CPU than sprite, and is held to 192 MB of memory, 64 MB of swap and 64 processes (with MEMCG and CGROUP_PIDS in the kernel), past which the kernel ends it, not something else. It's bound to sprite.service, so it stops when sprite does.
+##
+##  Services: an app whose manifest says kind=service runs in the background whatever's on the screen, in the same sandbox as an app, as sprite-service-<id>.service, which isn't bound to sprite (it carries on while sprite restarts) and has no display. Each is started at boot unless it's been switched off (a file /var/lib/sprite-services/off/<id>, root's), and again 10 s after it fails. Its manifest may ask for more memory (memory=<MB>, 64 to 320; swap is 64 MB more), and allow=music lets it read /media, where openframe-scripts mounts USB drives and network shares, read-only; anything else (an app, too) can't see /media at all.
 
 SETTINGS="/boot/settings/interface.txt"
 OLDSETTINGS="/boot/settings/sprite.txt"   # its name until 26.11.122 (the postinst moves it)
@@ -131,10 +136,10 @@ app_manifest() {
 	return 1
 }
 
-# A manifest's values, read as sprite reads them (key=value lines, the last one for a key, # lines skipped, trailing spaces trimmed), into M_EXEC, M_BUILTIN, M_DISPLAY and M_ALLOW. In bash alone: each process started costs time on the Atom, and this is on the way to an app's window.
+# A manifest's values, read as sprite reads them (key=value lines, the last one for a key, # lines skipped, trailing spaces trimmed), into M_EXEC, M_BUILTIN, M_DISPLAY, M_ALLOW, M_KIND and M_MEMORY. In bash alone: each process started costs time on the Atom, and this is on the way to an app's window.
 app_read() {
 	local LINE K
-	M_EXEC="" M_BUILTIN="" M_DISPLAY="" M_ALLOW=""
+	M_EXEC="" M_BUILTIN="" M_DISPLAY="" M_ALLOW="" M_KIND="" M_MEMORY=""
 	while IFS= read -r LINE || [ -n "$LINE" ]; do
 		LINE="${LINE%"${LINE##*[![:space:]]}"}"
 		[[ "$LINE" == \#* || "$LINE" != *=* ]] && continue
@@ -144,6 +149,8 @@ app_read() {
 			builtin) M_BUILTIN="${LINE#*=}" ;;
 			display) M_DISPLAY="${LINE#*=}" ;;
 			allow) M_ALLOW="${LINE#*=}" ;;
+			kind) M_KIND="${LINE#*=}" ;;
+			memory) M_MEMORY="${LINE#*=}" ;;
 		esac
 	done < "$1"
 }
@@ -165,21 +172,16 @@ app_pid() {
 	[ "${PID:-0}" -gt 1 ] && echo "$PID"
 }
 
-app_start() {
-	local ID="$1" DISP="$2" M UNIT PID
-	M=$(app_manifest "$ID") || answer "error: no app $ID"
-	app_read "$M"
-	[ -n "$M_EXEC" ] || answer "error: $ID has nothing to run"
-	[ -z "$M_BUILTIN" ] || answer "error: $ID is part of Sprite"
-	UNIT="sprite-app-$ID.service"
-
-	local P=(
-		--quiet --unit="$UNIT" --description="sprite app $ID" --expand-environment=no
-		-p Type=exec -p CollectMode=inactive-or-failed -p TimeoutStopSec=2
-		-p BindsTo=sprite.service -p After=sprite.service
+# The sandbox every app and service runs in (see Apps and Services above), for unit $2 of app $1, its manifest read (app_read): into P, for systemd-run.
+sandbox_props() {
+	local ID="$1" UNIT="$2" MEM=192
+	[[ "$M_MEMORY" =~ ^[0-9]{2,3}$ ]] && [ "$M_MEMORY" -ge 64 ] && [ "$M_MEMORY" -le 320 ] && MEM=$M_MEMORY
+	P=(
+		--quiet --unit="$UNIT" --expand-environment=no
+		-p Type=exec -p CollectMode=inactive-or-failed
 		# who it is, and where it may write
 		-p DynamicUser=yes -p Group=sprite-apps -p UMask=0077
-		-p StateDirectory="sprite-apps/$ID" -p RuntimeDirectory="sprite-app-$ID"
+		-p StateDirectory="sprite-apps/$ID" -p RuntimeDirectory="${UNIT%.service}"
 		-p WorkingDirectory="/var/lib/sprite-apps/$ID"
 		-p ProtectSystem=strict -p ProtectHome=yes -p PrivateTmp=yes -p ProtectProc=invisible
 		# OF-BOOT is FAT, so everything on it is anyone's to read: wifi.txt's password too
@@ -190,21 +192,11 @@ app_start() {
 		-p ProtectControlGroups=yes -p ProtectClock=yes -p ProtectHostname=yes
 		-p RestrictNamespaces=yes -p RestrictRealtime=yes -p LockPersonality=yes
 		-p SystemCallArchitectures=native -p SystemCallFilter=@system-service
-		# its share: sprite comes first. Swap is zram, which is RAM too, so it's limited as well.
-		-p OOMScoreAdjust=500 -p CPUWeight=50 -p MemoryMax=192M -p MemorySwapMax=64M -p TasksMax=64
-		# the display
-		--setenv=WAYLAND_DISPLAY="$APPSOCKET"
-		--setenv=XDG_RUNTIME_DIR="/run/sprite-app-$ID"
+		# its share: sprite comes first. Swap is zram, which is RAM too, so it's limited as well: without that, something growing past the memory there is thrashes the whole OpenFrame to a standstill (Lyrion's first try, 27 November) rather than being ended.
+		-p OOMScoreAdjust=500 -p CPUWeight=50 -p MemoryMax=${MEM}M -p MemorySwapMax=64M -p TasksMax=64
 		--setenv=HOME="/var/lib/sprite-apps/$ID"
-		--setenv=SDL_VIDEODRIVER=x11 # SDL's Wayland backend needs EGL, which we don't have
-		--setenv=SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS=0 # sprite keeps it, in the background
-		# sdl12-compat loads our Mesa-free SDL2 at run time
-		--setenv=LD_LIBRARY_PATH=/opt/sprite/lib:/opt/sprite/lib/i386-linux-gnu
+		--setenv=XDG_RUNTIME_DIR="/run/${UNIT%.service}"
 	)
-	if [ "$M_DISPLAY" = x11 ]; then
-		[[ "$DISP" =~ ^:[0-9]{1,2}$ ]] || answer "error: $ID needs X, which isn't there"
-		P+=(--setenv=DISPLAY="$DISP" -p BindPaths=/tmp/.X11-unix)
-	fi
 	if [[ " $M_ALLOW " == *" network "* ]]; then
 		P+=(-p "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK")
 	else
@@ -219,6 +211,33 @@ app_start() {
 	else
 		P+=(-p PrivateDevices=yes)
 	fi
+	# music: the USB drives and network shares mounted under /media, read-only (ProtectSystem), or nothing there at all
+	[[ " $M_ALLOW " == *" music "* ]] || P+=(-p InaccessiblePaths=-/media)
+}
+
+app_start() {
+	local ID="$1" DISP="$2" M UNIT PID
+	M=$(app_manifest "$ID") || answer "error: no app $ID"
+	app_read "$M"
+	[ -n "$M_EXEC" ] || answer "error: $ID has nothing to run"
+	[ -z "$M_BUILTIN" ] || answer "error: $ID is part of Sprite"
+	[ "$M_KIND" != service ] || answer "error: $ID is a service"
+	UNIT="sprite-app-$ID.service"
+	sandbox_props "$ID" "$UNIT"
+	P+=(
+		--description="sprite app $ID" -p TimeoutStopSec=2
+		-p BindsTo=sprite.service -p After=sprite.service
+		# the display
+		--setenv=WAYLAND_DISPLAY="$APPSOCKET"
+		--setenv=SDL_VIDEODRIVER=x11 # SDL's Wayland backend needs EGL, which we don't have
+		--setenv=SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS=0 # sprite keeps it, in the background
+		# sdl12-compat loads our Mesa-free SDL2 at run time
+		--setenv=LD_LIBRARY_PATH=/opt/sprite/lib:/opt/sprite/lib/i386-linux-gnu
+	)
+	if [ "$M_DISPLAY" = x11 ]; then
+		[[ "$DISP" =~ ^:[0-9]{1,2}$ ]] || answer "error: $ID needs X, which isn't there"
+		P+=(--setenv=DISPLAY="$DISP" -p BindPaths=/tmp/.X11-unix)
+	fi
 	# Straight to systemd-run, which refuses if the unit is still there: only then is it worth asking systemd (about 0.1 s a time) whether it's running or stopping.
 	if ! systemd-run "${P[@]}" /bin/sh -c "$M_EXEC" >/dev/null 2>&1; then
 		app_settle "$ID" || answer "error: $ID is still stopping"
@@ -231,6 +250,50 @@ app_start() {
 	PID=$(app_pid "$ID") || answer "error: $ID ended as it started"
 	echo "pid $PID"
 	answer ok
+}
+
+# Services (see Services above). Each id is a manifest's file name, as an app's is.
+SVCOFF="/var/lib/sprite-services/off"
+
+# The services installed: their ids, a line each
+services_list() {
+	local d f M_KIND
+	for d in $APPDIRS; do
+		for f in "$d"/*.app; do
+			[ -f "$f" ] || continue
+			M_KIND=$(sed -n 's/^kind=//p' "$f" | tail -1)
+			[ "${M_KIND%"${M_KIND##*[![:space:]]}"}" = service ] && { f="${f##*/}"; echo "${f%.app}"; }
+		done
+	done | sort -u
+}
+
+# Start service $1, unless it's running already (quietly: at boot, and after an install, a failure is the service's own, which its status shows)
+service_start() {
+	local ID="$1" M UNIT="sprite-service-$1.service"
+	M=$(app_manifest "$ID") || return 1
+	app_read "$M"
+	[ "$M_KIND" = service ] && [ -n "$M_EXEC" ] || return 1
+	[ "$(systemctl show -P ActiveState "$UNIT" 2>/dev/null)" = active ] && return 0
+	systemctl reset-failed "$UNIT" 2>/dev/null
+	sandbox_props "$ID" "$UNIT"
+	P+=(
+		--description="sprite service $ID" -p TimeoutStopSec=15
+		-p Restart=on-failure -p RestartSec=10 -p Nice=10 -p IOSchedulingClass=idle
+	)
+	systemd-run "${P[@]}" /bin/sh -c "$M_EXEC" >/dev/null 2>&1
+}
+
+service_status() {
+	local ID UNIT STATE MEM
+	while read -r ID; do
+		[ -n "$ID" ] || continue
+		UNIT="sprite-service-$ID.service"
+		STATE=$(systemctl show -P ActiveState "$UNIT" 2>/dev/null)
+		# its own memory (anon), not its cgroup's whole (MemoryCurrent), which counts the files it has read too, cached and given back as soon as anything needs the room: Lyrion's 70 MB looked like 240
+		MEM=$(awk '$1 == "anon" { print $2 }' "/sys/fs/cgroup/system.slice/$UNIT/memory.stat" 2>/dev/null)
+		[[ "$MEM" =~ ^[0-9]+$ ]] || MEM=0
+		echo "$ID ${STATE:-inactive} $([ -e "$SVCOFF/$ID" ] && echo off || echo on) $(( MEM / 1048576 ))"
+	done < <(services_list)
 }
 
 # The Shop: apps from apps.openbeak.net, which apt can only take ofapp-* packages from (openframe-scripts' pin). An install or a removal is a job of its own, the sprite-shop unit, one at a time, so closing the Shop or restarting Sprite doesn't cut it off. It reports in /run/sprite-shop/status, which Sprite reads, as key=value lines: action (install or remove), id, state (running, done or failed), percent (of the whole job) and reason (when it failed, as the helper's replies give one). What apt printed is in /run/sprite-shop/log.
@@ -303,9 +366,15 @@ shop_job() {
 				apt-get -q -o DPkg::Lock::Timeout=300 update >>"$SHOPDIR/log" 2>&1
 				shop_apt 10 100 install --no-install-recommends "$PKG" || shop_fail "$(shop_reason)"
 			fi
+			# a service starts now (and again, newer, after an update), unless it's been switched off
+			if [ ! -e "$SVCOFF/$SHOP_ID" ] && services_list | grep -qx -- "$SHOP_ID"; then
+				systemctl stop "sprite-service-$SHOP_ID.service" 2>/dev/null
+				service_start "$SHOP_ID" || true
+			fi
 			;;
 		remove)
-			systemctl stop "sprite-app-$SHOP_ID.service" 2>/dev/null
+			systemctl stop "sprite-app-$SHOP_ID.service" "sprite-service-$SHOP_ID.service" 2>/dev/null
+			rm -f -- "$SVCOFF/$SHOP_ID"
 			shop_status running 5
 			# It alone goes (nothing depends on an app), then the packages only it needed, and not the ones already unneeded before it went, which aren't the Shop's business.
 			SIM=$(apt-get -s -q purge "$PKG" 2>>"$SHOPDIR/log") || shop_fail "$(shop_reason)"
@@ -439,6 +508,34 @@ case "$CMD" in
 			app_start "$ID" "$DISP"
 		fi
 		systemctl --no-block stop "sprite-app-$ID.service" 2>/dev/null
+		answer ok
+		;;
+	service-status)
+		service_status
+		answer ok
+		;;
+	service-set)
+		ID="${ARG%% *}" ON="${ARG#* }"
+		[[ "$ID" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,47}$ ]] || answer "error: bad service id"
+		services_list | grep -qx -- "$ID" || answer "error: no service $ID"
+		case "$ON" in
+			on)
+				rm -f -- "$SVCOFF/$ID"
+				service_start "$ID" || answer "error: $ID didn't start"
+				;;
+			off)
+				mkdir -p "$SVCOFF" && touch "$SVCOFF/$ID" || answer "error: couldn't switch $ID off"
+				systemctl stop "sprite-service-$ID.service" 2>/dev/null
+				systemctl reset-failed "sprite-service-$ID.service" 2>/dev/null
+				;;
+			*) answer "error: service-set takes on or off" ;;
+		esac
+		answer ok
+		;;
+	services-boot)
+		while read -r ID; do
+			[ -n "$ID" ] && [ ! -e "$SVCOFF/$ID" ] && service_start "$ID"
+		done < <(services_list)
 		answer ok
 		;;
 	ssh-status)

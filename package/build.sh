@@ -30,7 +30,7 @@ rm -f "$pkg$P"/lib/*.so.*.*.*.debug
 install -m 644 settings/interface.txt "$pkg$P/share/sprite/interface.txt"
 install -m 644 apps/settings.app apps/shop.app "$pkg$P/share/sprite/apps/"
 install -m 644 system/sprite.service system/sprite-helper.socket system/sprite-helper@.service \
-  system/sprite-ping.service system/sprite-ping.timer \
+  system/sprite-ping.service system/sprite-ping.timer system/sprite-services.service \
   "$pkg/usr/lib/systemd/system/"
 install -D -m 644 system/sprite.sysusers "$pkg/usr/lib/sysusers.d/openframe-sprite.conf"
 install -D -m 644 system/sprite.tmpfiles "$pkg/usr/lib/tmpfiles.d/openframe-sprite.conf"

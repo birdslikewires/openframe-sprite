@@ -1,0 +1,16 @@
+# sprite-services: at boot, starts each service switched on (an app with kind=service, which
+# runs in the background, whatever's on the screen), through sprite-helper, which sandboxes it
+# as it would an app (sprite-service-<id>.service). Services are switched on and off in
+# Settings, under Services. Not waiting for the network: a service copes with it coming later.
+[Unit]
+Description=Start the OpenFrame's background services
+Documentation=https://github.com/birdslikewires/openframe-sprite
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'echo services-boot | /opt/sprite/libexec/sprite-helper'
+StandardOutput=null
+
+[Install]
+WantedBy=multi-user.target

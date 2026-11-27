@@ -11,7 +11,7 @@ case "$1" in
 		if ! systemd-detect-virt -q --chroot 2>/dev/null; then
 			systemctl stop sprite.service sprite-helper.socket sprite-ping.timer 2>/dev/null || true
 		fi
-		systemctl disable --quiet sprite.service sprite-helper.socket sprite-ping.timer 2>/dev/null || true
+		systemctl disable --quiet sprite.service sprite-helper.socket sprite-ping.timer sprite-services.service 2>/dev/null || true
 		;;
 esac
 

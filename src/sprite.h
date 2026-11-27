@@ -70,6 +70,8 @@ struct sprite_app {
 	float handle;       // home handle opacity while this app shows (manifest: handle=normal|faint|hidden)
 	bool bar;           // the status bar stays above its window (manifest: bar=yes); else full screen
 	bool saver;         // a screensaver (manifest: kind=screensaver): no tile, chosen in Display
+	bool service;       // a service (manifest: kind=service): no tile, runs in the background, started by the helper (not sprite), switched on and off in Settings, Services
+	int web;            // a service's own web page, on this port (manifest: web=9000), shown in Services as an address and a QR code; 0 if none
 	pid_t pid;          // launched process, 0 when not running
 	int pidfd;          // a sandboxed app's main process, watched for its exit (-1 if not)
 	struct wl_event_source *exit_src;
@@ -122,6 +124,7 @@ struct shop_app {
 	char author[128], licence[64], source[256], community[256], allow[64];
 	uint32_t color;
 	bool saver;                     // a screensaver (kind=screensaver)
+	bool service;                   // a service (kind=service)
 	char version[64];               // the newest the Shop offers (or, if it doesn't offer it, what's installed)
 	char installed[64];             // the version installed, or "" if it isn't
 	bool listed;                    // the Shop offers it (not, if it was installed by hand or has left the Shop)

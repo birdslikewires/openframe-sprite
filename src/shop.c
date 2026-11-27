@@ -97,7 +97,7 @@ static void field(struct stanza *s, const char *k, const char *v) {
 	else if (!strcmp(k, "Installed-Size")) a->size_kb = strtol(v, NULL, 10);
 	else if (!strcmp(k, "Homepage")) snprintf(a->source, sizeof a->source, "%s", v);
 	else if (!strcmp(k, "X-Sprite-Name")) snprintf(a->name, sizeof a->name, "%s", v);
-	else if (!strcmp(k, "X-Sprite-Kind")) a->saver = !strcmp(v, "screensaver");
+	else if (!strcmp(k, "X-Sprite-Kind")) { a->saver = !strcmp(v, "screensaver"); a->service = !strcmp(v, "service"); }
 	else if (!strcmp(k, "X-Sprite-Icon")) snprintf(a->icon, sizeof a->icon, "%s", v);
 	else if (!strcmp(k, "X-Sprite-Color")) a->color = strtoul(v, NULL, 16);
 	else if (!strcmp(k, "X-Sprite-Allow")) snprintf(a->allow, sizeof a->allow, "%s", v);
