@@ -1234,10 +1234,15 @@ static lv_obj_t *dialog_open(lv_obj_t *on, const char *title, const char *body, 
 }
 
 // A button on a dialog's card, in its row (made with the first), widening the card to fit.
+// A dialog's buttons, given main action first and Cancel (or Close) last, are laid out the other way round at the card's right: the action in the bottom right corner, Cancel at the left of the row, anything else between them.
 static lv_obj_t *dialog_button(lv_obj_t *card, const char *text, enum button_role role, lv_event_cb_t cb, void *data) {
 	lv_obj_t *row = lv_obj_get_user_data(card);
-	if (!row) lv_obj_set_user_data(card, row = button_row(card));
+	if (!row) {
+		lv_obj_set_user_data(card, row = button_row(card));
+		lv_obj_set_flex_align(row, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	}
 	lv_obj_t *b = button(row, text, role, cb, data);
+	lv_obj_move_to_index(b, 0);
 	int w = 2 * DIALOG_PAD - BUTTON_GAP;
 	for (uint32_t i = 0; i < lv_obj_get_child_count(row); i++)
 		w += lv_obj_get_style_width(lv_obj_get_child(row, i), 0) + BUTTON_GAP;

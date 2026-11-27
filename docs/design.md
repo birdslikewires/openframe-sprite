@@ -201,7 +201,7 @@ they don't jump about. Their arrow and accent colour set them apart.
 
 **Every button has one shape** (`button()`): **48 px tall** (the smallest touch target), as
 wide as its label plus 24 px each side, and **never narrower than 160 px**. Text is 20 px.
-Buttons in a row are 20 px apart.
+Buttons in a row are 20 px apart. **A dialog's buttons sit at its bottom right, with the action in the corner** and Cancel (or Close) at the left of them, anything else in between, as the Mac has always had them (`dialog_button()` lays them out so, from the action given first).
 
 - **Coloured by role:** the main action in the accent blue, others grey `#3a4a5a`,
   destructive ones red `#b3403a`.
