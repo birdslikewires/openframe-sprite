@@ -36,6 +36,13 @@ static void request_end(struct request *r, bool ok) {
 	free(r);
 }
 
+// A request that couldn't be made ends from the event loop, not inside helper_request: its caller (a switch's own event, say) carries on first, rather than finding its reply already in, and what it showed perhaps deleted under it
+static void request_failed_later(void *data) { request_end(data, false); }
+static void request_failed(struct request *r) {
+	if (r->src) { wl_event_source_remove(r->src); r->src = NULL; }
+	if (!wl_event_loop_add_idle(sprite_event_loop(), request_failed_later, r)) request_end(r, false);
+}
+
 static int request_readable(int fd, uint32_t mask, void *data) {
 	struct request *r = data;
 	for (;;) {
@@ -67,12 +74,12 @@ void helper_request(const char *text, void (*done)(char *reply, void *ctx), void
 	if (r->fd < 0 || connect(r->fd, (struct sockaddr *)&sa, sizeof sa) != 0 ||
 	    write(r->fd, text, len) != (ssize_t)len) { // a few bytes into a fresh socket: all go at once
 		fprintf(stderr, "sprite: helper not reachable at %s\n", HELPER_SOCKET);
-		request_end(r, false);
+		request_failed(r);
 		return;
 	}
 	shutdown(r->fd, SHUT_WR);
 	r->src = wl_event_loop_add_fd(sprite_event_loop(), r->fd, WL_EVENT_READABLE, request_readable, r);
-	if (!r->src) request_end(r, false);
+	if (!r->src) request_failed(r);
 }
 
 // The reply's last line: "ok", or "error: <reason>". The lines before it are the answer.

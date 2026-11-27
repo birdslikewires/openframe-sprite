@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <time.h>
 #include <wlr/util/log.h>
 
@@ -16,7 +17,9 @@
 #define APT_HELPER "/usr/lib/apt/apt-helper"
 #define DPKG_STATUS "/var/lib/dpkg/status"
 #define JOB_STATUS "/run/sprite-shop/status"
-#define JOB_STALE_S 600 // a job that's said nothing for this long has died (apt waits up to 5 minutes for dpkg's lock)
+// A job's running while systemd has its unit (sprite-shop.service): this is there from its start to its end. Without it, a status still saying running is from a job that died (the OpenFrame restarted mid-install, say), once it's a few seconds old (the helper writes the status just before it starts the unit). Not by how long the status has said nothing, by the clock, which jumps when NTP first sets it (no clock battery), and a long wait for dpkg's lock says nothing for minutes.
+#define JOB_UNIT "/run/systemd/units/invocation:sprite-shop.service"
+#define JOB_START_S 10
 
 static struct shop_app shop[SHOP_MAX];
 static int n_shop;
@@ -147,6 +150,7 @@ static void read_stanzas(FILE *f, void (*done)(struct stanza *s)) {
 }
 
 // The id an app's package is for: ofapp-<id>, as its manifest is <id>.app
+static bool id_fits(const char *package) { return strlen(package) > 6 && strlen(package + 6) < sizeof shop[0].id; }
 static void set_ids(struct shop_app *a, const char *package) {
 	snprintf(a->package, sizeof a->package, "%s", package);
 	snprintf(a->id, sizeof a->id, "%s", package + 6);
@@ -155,6 +159,7 @@ static void set_ids(struct shop_app *a, const char *package) {
 
 // A package the lists offer: kept if it's the newest of it so far (a test unit has the testing suite's list as well as the released one).
 static void offered(struct stanza *s) {
+	if (!id_fits(s->package)) return; // (an id too long to keep would be cut short, and never found again)
 	struct shop_app *a = shop_find(s->package + 6);
 	if (a && shop_vercmp(s->version, a->version) <= 0) return;
 	if (!a) {
@@ -172,6 +177,7 @@ static void installed(struct stanza *s) {
 	const char *st = s->status;
 	size_t n = strlen(st);
 	if (n < 10 || strcmp(st + n - 10, " installed")) return; // ("install ok installed"; half-installed or removed isn't)
+	if (!id_fits(s->package)) return;
 	struct shop_app *a = shop_find(s->package + 6);
 	if (!a) {
 		if (n_shop == SHOP_MAX) return;
@@ -247,7 +253,8 @@ void shop_job_read(struct shop_job *j) {
 		else if (!strcmp(k, "reason")) snprintf(j->reason, sizeof j->reason, "%s", v);
 	}
 	struct stat st;
-	bool stale = fstat(fileno(f), &st) == 0 && time(NULL) - st.st_mtime > JOB_STALE_S;
+	bool stale = access(JOB_UNIT, F_OK) != 0 && fstat(fileno(f), &st) == 0 &&
+		(time(NULL) - st.st_mtime > JOB_START_S || time(NULL) < st.st_mtime);
 	fclose(f);
 	j->state = !strcmp(state, "running") ? (stale ? SHOP_JOB_NONE : SHOP_JOB_RUNNING) :
 		!strcmp(state, "done") ? SHOP_JOB_DONE : !strcmp(state, "failed") ? SHOP_JOB_FAILED : SHOP_JOB_NONE;

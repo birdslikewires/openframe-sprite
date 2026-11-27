@@ -45,7 +45,7 @@
 ##
 ##  Apps: each runs as a transient systemd unit, sprite-app-<id>.service, under a user of its own (DynamicUser), in the sprite-apps group, which can reach sprite's display sockets and nothing else of sprite's. What it runs comes only from its manifest (in one of sprite's app directories, all root's), never from the request. It has no sudo, no capabilities, a read-only system, no /home or /boot (where wifi.txt is), its own /tmp, no other processes to see, and one directory of its own to keep things in (/var/lib/sprite-apps/<id>, kept between runs). The manifest's allow= line names what more it may have: network (otherwise it has none), sound (/dev/snd to play: the capture devices there as it starts are hidden) and microphone (those too). It has less of the CPU than sprite, and is held to 192 MB of memory, 64 MB of swap and 64 processes (with MEMCG and CGROUP_PIDS in the kernel), past which the kernel ends it, not something else. It's bound to sprite.service, so it stops when sprite does.
 ##
-##  Services: an app whose manifest says kind=service runs in the background whatever's on the screen, in the same sandbox as an app, as sprite-service-<id>.service, which isn't bound to sprite (it carries on while sprite restarts) and has no display. Each is started at boot unless it's been switched off (a file /var/lib/sprite-services/off/<id>, root's), and again 10 s after it fails. Its manifest may ask for more memory (memory=<MB>, 64 to 320; swap is 64 MB more), and allow=music lets it read /media, where openframe-scripts mounts USB drives and network shares, read-only; anything else (an app, too) can't see /media at all.
+##  Services: an app whose manifest says kind=service runs in the background whatever's on the screen, in the same sandbox as an app, as sprite-service-<id>.service, which isn't bound to sprite (it carries on while sprite restarts) and has no display (nor the sprite-apps group, so it can't reach sprite's sockets). Each is started at boot unless it's been switched off (a file /var/lib/sprite-services/off/<id>, root's), and again 10 s after it fails, up to five times in ten minutes, after which it's left failed. openframe-scripts' of-update starts one again after an update changes its package. Its manifest may ask for more memory (memory=<MB>, 64 to 320; swap is 64 MB more), and allow=music lets it read /media, where openframe-scripts mounts USB drives and network shares, read-only; anything else (an app, too) can't see /media at all.
 
 SETTINGS="/boot/settings/interface.txt"
 OLDSETTINGS="/boot/settings/sprite.txt"   # its name until 26.11.122 (the postinst moves it)
@@ -180,13 +180,17 @@ app_pid() {
 
 # The sandbox every app and service runs in (see Apps and Services above), for unit $2 of app $1, its manifest read (app_read): into P, for systemd-run.
 sandbox_props() {
-	local ID="$1" UNIT="$2" MEM=192
-	[[ "$M_MEMORY" =~ ^[0-9]{2,3}$ ]] && [ "$M_MEMORY" -ge 64 ] && [ "$M_MEMORY" -le 320 ] && MEM=$M_MEMORY
+	local ID="$1" UNIT="$2" MEM=192 GROUP=(-p Group=sprite-apps)
+	# a service's own: the memory it asks for (64 to 320 MB), and no share of the display (sprite-apps is the group that may reach Sprite's Wayland and X sockets)
+	if [ "$M_KIND" = service ]; then
+		[[ "$M_MEMORY" =~ ^[0-9]{2,3}$ ]] && [ "$M_MEMORY" -ge 64 ] && [ "$M_MEMORY" -le 320 ] && MEM=$M_MEMORY
+		GROUP=()
+	fi
 	P=(
 		--quiet --unit="$UNIT" --expand-environment=no
 		-p Type=exec -p CollectMode=inactive-or-failed
 		# who it is, and where it may write
-		-p DynamicUser=yes -p Group=sprite-apps -p UMask=0077
+		-p DynamicUser=yes "${GROUP[@]}" -p UMask=0077
 		-p StateDirectory="sprite-apps/$ID" -p RuntimeDirectory="${UNIT%.service}"
 		-p WorkingDirectory="/var/lib/sprite-apps/$ID"
 		-p ProtectSystem=strict -p ProtectHome=yes -p PrivateTmp=yes -p ProtectProc=invisible
@@ -285,6 +289,8 @@ service_start() {
 	P+=(
 		--description="sprite service $ID" -p TimeoutStopSec=15
 		-p Restart=on-failure -p RestartSec=10 -p Nice=10 -p IOSchedulingClass=idle
+		# (five failures in ten minutes, and it's left failed, which the Services tab shows, rather than started again every 10 s for ever, each a heavy start on an Atom)
+		-p StartLimitIntervalSec=600 -p StartLimitBurst=5
 	)
 	systemd-run "${P[@]}" /bin/sh -c "$M_EXEC" >/dev/null 2>&1
 }
@@ -305,6 +311,8 @@ service_status() {
 # Network shares (settings/shares.txt, which openframe-scripts' music-mount mounts). An address as music-mount takes it: //server/folder (or with :port after the server), backslashes as slashes, no trailing slash.
 share_norm() {
 	local a="${1//\\//}"
+	a="${a#"${a%%[![:space:]]*}"}"
+	a="${a%"${a##*[![:space:]]}"}"
 	a="${a%/}"
 	[[ "$a" =~ ^//[^/[:space:][:cntrl:]]+(:[0-9]{1,5})?/[^[:cntrl:]]+$ ]] || return 1
 	printf '%s' "$a"
@@ -315,7 +323,7 @@ shares_without() {
 	[ -r "$SHARESTXT" ] || { cat "$SHARESTEMPLATE" 2>/dev/null; return 0; }
 	S="$1" awk '
 		function norm(v) { gsub(/\\/, "/", v); sub(/\/$/, "", v); return v }
-		{ line = $0; sub(/\r$/, "", line) }
+		{ line = $0; sub(/\r$/, "", line); if (NR == 1) sub(/^\357\273\277/, "", line) }
 		line ~ /^[[:space:]]*[Ss][Hh][Aa][Rr][Ee][[:space:]]*=/ {
 			v = line; sub(/^[^=]*=[[:space:]]*/, "", v); sub(/[[:space:]]*$/, "", v)
 			if (v ~ /^".*"$/ || v ~ /^\047.*\047$/) v = substr(v, 2, length(v) - 2)
@@ -377,7 +385,7 @@ shop_fail() { shop_status failed "${2:-0}" "$1"; exit 1; }
 shop_job() {
 	SHOP_ACTION=$1 SHOP_ID=$2
 	local PKG="ofapp-$2" SIM BEFORE AFTER LEFT
-	[[ "$SHOP_ID" =~ ^[a-z0-9][a-z0-9-]{0,39}$ ]] || exit 1
+	[[ "$SHOP_ID" =~ ^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$ ]] || exit 1
 	export DEBIAN_FRONTEND=noninteractive LC_ALL=C
 	: > "$SHOPDIR/log"
 	shop_status running 0
@@ -390,30 +398,32 @@ shop_job() {
 			SIM=$(apt-get -s -q --no-install-recommends install "$PKG" 2>>"$SHOPDIR/log") || shop_fail "$(shop_reason)"
 			grep -q '^Remv ' <<< "$SIM" && shop_fail "error: helper.shop_would_remove"
 			shop_status running 10
-			if ! shop_apt 10 100 install --no-install-recommends "$PKG"; then
+			if ! shop_apt 10 100 install --no-install-recommends --no-remove "$PKG"; then
 				# Debian's lists can be behind what its mirrors have (they're updated overnight): newer ones, and once more
 				grep -qE '^(E|W): (Failed|Unable) to fetch' "$SHOPDIR/log" || shop_fail "$(shop_reason)"
 				apt-get -q -o DPkg::Lock::Timeout=300 update >>"$SHOPDIR/log" 2>&1
-				shop_apt 10 100 install --no-install-recommends "$PKG" || shop_fail "$(shop_reason)"
+				shop_apt 10 100 install --no-install-recommends --no-remove "$PKG" || shop_fail "$(shop_reason)"
 			fi
 			# a service starts now (and again, newer, after an update), unless it's been switched off
-			if [ ! -e "$SVCOFF/$SHOP_ID" ] && services_list | grep -qx -- "$SHOP_ID"; then
+			if [ ! -e "$SVCOFF/$SHOP_ID" ] && services_list | grep -qFx -- "$SHOP_ID"; then
 				systemctl stop "sprite-service-$SHOP_ID.service" 2>/dev/null
 				service_start "$SHOP_ID" || true
 			fi
 			;;
 		remove)
-			systemctl stop "sprite-app-$SHOP_ID.service" "sprite-service-$SHOP_ID.service" 2>/dev/null
-			rm -f -- "$SVCOFF/$SHOP_ID"
 			shop_status running 5
-			# It alone goes (nothing depends on an app), then the packages only it needed, and not the ones already unneeded before it went, which aren't the Shop's business.
+			# It alone goes (nothing depends on an app), then the packages only it needed, and not the ones already unneeded before it went, which aren't the Shop's business. (Worked out before it's stopped, so one that can't go is left running, as it was.)
 			SIM=$(apt-get -s -q purge "$PKG" 2>>"$SHOPDIR/log") || shop_fail "$(shop_reason)"
 			LEFT=$(awk '/^(Remv|Purg) / { print $2 }' <<< "$SIM")
 			[ -z "$LEFT" ] || [ "$LEFT" = "$PKG" ] || shop_fail "error: helper.shop_takes_others"
 			shop_status running 10
 			BEFORE=$(apt-get -s -q autoremove 2>/dev/null | awk '/^Remv / { print $2 }' | sort)
 			shop_status running 20
+			systemctl stop "sprite-app-$SHOP_ID.service" "sprite-service-$SHOP_ID.service" 2>/dev/null
 			shop_apt 20 80 purge "$PKG" || shop_fail "$(shop_reason)"
+			# gone: its switch with it, and stopped again in case it was started in the meantime (a switch, the boot's start), before its folder goes
+			rm -f -- "$SVCOFF/$SHOP_ID"
+			systemctl stop "sprite-app-$SHOP_ID.service" "sprite-service-$SHOP_ID.service" 2>/dev/null
 			AFTER=$(apt-get -s -q autoremove 2>/dev/null | awk '/^Remv / { print $2 }' | sort)
 			LEFT=$(comm -13 <(echo "$BEFORE") <(echo "$AFTER"))
 			# (left installed if this fails: they do no harm)
@@ -547,14 +557,15 @@ case "$CMD" in
 	service-set)
 		ID="${ARG%% *}" ON="${ARG#* }"
 		[[ "$ID" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,47}$ ]] || answer "error: bad service id"
-		services_list | grep -qx -- "$ID" || answer "error: no service $ID"
+		services_list | grep -qFx -- "$ID" || answer "error: no service $ID"
 		case "$ON" in
 			on)
-				rm -f -- "$SVCOFF/$ID"
+				rm -f -- "$SVCOFF/$ID" && sync "$SVCOFF"
 				service_start "$ID" || answer "error: $ID didn't start"
 				;;
 			off)
-				mkdir -p "$SVCOFF" && touch "$SVCOFF/$ID" || answer "error: couldn't switch $ID off"
+				# (synced, so a power cut just after doesn't switch it back on)
+				mkdir -p "$SVCOFF" && touch "$SVCOFF/$ID" && sync "$SVCOFF/$ID" "$SVCOFF" || answer "error: couldn't switch $ID off"
 				systemctl stop "sprite-service-$ID.service" 2>/dev/null
 				systemctl reset-failed "sprite-service-$ID.service" 2>/dev/null
 				;;
@@ -571,28 +582,38 @@ case "$CMD" in
 		[ -x "$MUSICMOUNT" ] || answer "error: helper.music_needs_update"
 		IFS= read -r -t 5 ADDR || answer "error: no share"
 		ADDR=$(share_norm "${ADDR%$'\r'}") || answer "error: helper.share_address"
-		TMP=$(mktemp) || answer "error: no room"
-		trap 'rm -f "$TMP"' EXIT
-		shares_without "$ADDR" > "$TMP"
+		TMP=$(mktemp) && ORIG=$(mktemp) || answer "error: no room"
+		trap 'rm -f "$TMP" "$ORIG"' EXIT
+		# as it was, to put back if the new one doesn't mount
+		if [ -r "$SHARESTXT" ]; then cat "$SHARESTXT" > "$ORIG" || answer "error: helper.share_failed"; else cat "$SHARESTEMPLATE" > "$ORIG" 2>/dev/null || : > "$ORIG"; fi
+		shares_without "$ADDR" > "$TMP" || answer "error: helper.share_failed"
+		# (where it's mounted, if it's listed already: as mounted, without a port)
+		NOPORT=$(sed -E 's#^//([^/:]+):[0-9]+/#//\1/#' <<< "$ADDR")
+		WAS=$(findmnt -rn -t cifs -S "$NOPORT" -o TARGET 2>/dev/null | head -1)
 		if [ "$CMD" = share-add ]; then
-			IFS= read -r -t 5 USER_ || USER_=""
-			IFS= read -r -t 5 PASS || PASS=""
+			# (a last line without its newline is read all the same)
+			IFS= read -r -t 5 USER_ || true
+			IFS= read -r -t 5 PASS || true
 			USER_="${USER_%$'\r'}" PASS="${PASS%$'\r'}"
 			[ "${#USER_}" -le 128 ] && [ "${#PASS}" -le 128 ] && [[ "$USER_$PASS" != *[[:cntrl:]]* ]] || answer "error: helper.share_login"
 			# a blank line before the new block, unless the file ends with one
 			[ -s "$TMP" ] && [ -n "$(tail -c 1 "$TMP")" ] && echo >> "$TMP"
 			[ -s "$TMP" ] && [ -n "$(tail -n 1 "$TMP")" ] && echo >> "$TMP"
-			printf 'share=%s\nusername=%s\npassword=%s\n' "$ADDR" "$USER_" "$PASS" >> "$TMP"
+			# (in quotes, which music-mount takes off, so spaces at either end, or quotes, stay as they were typed)
+			printf 'share=%s\nusername="%s"\npassword="%s"\n' "$ADDR" "$USER_" "$PASS" >> "$TMP"
 			unset PASS
 			boot_write "$TMP" "$SHARESTXT"
-			timeout 60 "$MUSICMOUNT" shares >/dev/null 2>&1
+			# listed and mounted already: unmounted, so the user name and password given now are the ones tried
+			[ -z "$WAS" ] || umount -l "$(printf '%b' "$WAS")" 2>/dev/null
+			# only this one tried, so the others (a server that's off) don't use up the time
+			timeout 60 "$MUSICMOUNT" shares "$ADDR" >/dev/null 2>&1
 			# mounted (a line with what it uses and its size), or why not
 			STATUS=$("$MUSICMOUNT" status)
 			WHY=$(awk -F'\t' -v a="$ADDR" '$1 == "share" && $3 == a && NF == 4 { print $4 }' <<< "$STATUS")
 			if ! awk -F'\t' -v a="$ADDR" '$1 == "share" && $3 == a && NF == 5 { f = 1 } END { exit !f }' <<< "$STATUS"; then
-				# not mounted: taken out again, so a mistyped one doesn't stay
-				shares_without "$ADDR" > "$TMP"
-				boot_write "$TMP" "$SHARESTXT"
+				# not mounted: the file as it was, so a mistyped one doesn't stay, and one listed before keeps what it had (and is mounted again with it)
+				boot_write "$ORIG" "$SHARESTXT"
+				[ -z "$WAS" ] || timeout 60 "$MUSICMOUNT" shares "$ADDR" >/dev/null 2>&1
 				case "$WHY" in
 					password) answer "error: helper.share_password" ;;
 					missing) answer "error: helper.share_missing" ;;
@@ -781,7 +802,7 @@ case "$CMD" in
 		;;
 	shop-install|shop-remove)
 		# an app from the Shop: its package is ofapp-<id>, and its id what the recipes allow
-		[[ "$ARG" =~ ^[a-z0-9][a-z0-9-]{0,39}$ ]] || answer "error: bad app id"
+		[[ "$ARG" =~ ^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$ ]] || answer "error: bad app id"
 		systemctl --quiet is-active sprite-shop.service && answer "error: helper.shop_busy"
 		mkdir -p -m 755 "$SHOPDIR" || answer "error: helper.shop_failed"
 		# (running at 0 before Sprite looks, rather than the last job's state)

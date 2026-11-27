@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <math.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
@@ -116,6 +117,8 @@ static void bar_aud_icon(int v);
 // (until then it can still be a tap or long press on an app); it turns the page if it went
 // PAGE_TURN_PX, or was moving at PAGE_FLICK_SPEED when it lifted.
 #define PAGE_DRAG_START 12
+// A touch on the bar becomes the pull-down once it has moved this far down (more than sideways): further than a page drag, as LVGL's own scroll limit is, so a tap on the clock or a button that smears a little down on a resistive panel is still a tap
+#define PULL_START 24
 #define PAGE_TURN_PX 60
 #define PAGE_FLICK_SPEED 0.4       // px/ms
 #define PAGE_SLIDE_MS 180
@@ -136,6 +139,7 @@ static void drag_input(int x, int y, bool pressed, bool was_pressed);
 static lv_obj_t *pull_scrim, *pull_panel;
 static void pull_build(void);
 static void pull_place(int32_t shown);
+static void pull_dismiss(void);
 static void pull_glide(bool open);
 static void tile_drop(bool place);
 static void tile_follow(int x, int y);
@@ -326,6 +330,7 @@ static void shell_tidy(void) {
 	tile_drop(false);
 	sheet_dismiss();
 	dialog_close();
+	pull_dismiss(); // (pulled down while an app was opening, say)
 }
 
 // An app in front that keeps the bar (bar=yes): only the bar shows, with the app's name in
@@ -1240,6 +1245,18 @@ static lv_obj_t *dialog_button(lv_obj_t *card, const char *text, enum button_rol
 	return b;
 }
 
+// What went wrong with something asked a while ago (a reply that comes in later): a dialog, unless one's open already (it isn't swept away: a question being answered, say) or nobody would see it (an app in front, the screensaver, the screen off), when it's a banner instead
+static void late_dialog(const char *title, const char *body) {
+	if (dialog_backdrop || bar_app || !visible || unseen()) {
+		static char t[320];
+		snprintf(t, sizeof t, "%s %s", title, body ? body : "");
+		show_toast(t, 8000);
+		return;
+	}
+	lv_obj_t *card = dialog_open(NULL, title, body, true);
+	dialog_button(card, STR_COMMON_OK, BUTTON_MAIN, dialog_cancel, NULL);
+}
+
 static void sheet_dismiss(void) {
 	if (!sheet) return;
 	dialog_close();
@@ -1477,7 +1494,7 @@ static void drag_input(int x, int y, bool pressed, bool was_pressed) {
 	int dx = x - drag_x0, dy = y - drag_y0;
 	if (pressed) {
 		if (drag == DRAG_MAYBE && drag_can_pull) { // from the bar: down brings the pull-down; else the bar's own taps
-			if (dy >= PAGE_DRAG_START && dy > abs(dx)) {
+			if (dy >= PULL_START && dy > abs(dx)) {
 				drag = DRAG_PULL;
 				pull_build();
 				lv_indev_reset(indev, NULL);
@@ -2208,6 +2225,7 @@ static int pull_shown;       // how much of it is on the screen, 0 to PULL_H
 static bool sleep_now(void);
 
 static void pull_place(int32_t shown) {
+	if (!pull_panel) return; // (put away meanwhile)
 	if (shown < 0) shown = 0;
 	if (shown > PULL_H) shown = PULL_H;
 	pull_shown = shown;
@@ -2222,6 +2240,7 @@ static void pull_dismiss(void) { // at once, no glide
 	lv_anim_delete(pull_panel, pull_anim_exec);
 	lv_obj_delete_async(pull_scrim);
 	pull_scrim = pull_panel = NULL;
+	if (drag == DRAG_PULL) drag = DRAG_NONE; // a finger still on it moves nothing now
 }
 
 static void pull_gone(lv_anim_t *a) { pull_dismiss(); }
@@ -4372,8 +4391,7 @@ static void upd_started(char *reply, void *data) {
 	const char *st = helper_reply_status(reply);
 	if (strcmp(st, "ok")) {
 		upd_requested = 0; // it won't start: back to the buttons
-		lv_obj_t *card = dialog_open(NULL, STR_UPD_COULDNT_START, reason_text(st), true);
-		dialog_button(card, STR_COMMON_OK, BUTTON_MAIN, dialog_cancel, NULL);
+		late_dialog(STR_UPD_COULDNT_START, reason_text(st));
 	}
 	upd_refresh();
 	update_net(NULL); // the bar's spinner now, not at its next look
@@ -4530,12 +4548,15 @@ static void idle_step(lv_event_t *e) {
 static bool glancing;
 static uint32_t glance_asked;
 
-bool shell_dark(void) { return !sleeping && sysinfo_backlight() == 0; }
+// Dark by automatic brightness only: at a level of 0 set by hand, or with of-backlight's service not there (so nothing could light it for a glance), a touch goes through as ever, rather than every touch being swallowed for good
+bool shell_dark(void) { return !sleeping && sysinfo_backlight() == 0 && sysinfo_backlight_auto(); }
 
-static void glance(void) {
+static bool glance(void) {
 	glancing = true;
 	glance_asked = lv_tick_get();
-	sysinfo_backlight_request("glance");
+	if (sysinfo_backlight_request("glance")) return true;
+	glancing = false;
+	return false;
 }
 
 // Once a second: the screensaver once it's been left ss_min untouched, the screen off once
@@ -4558,7 +4579,8 @@ static void idle_tick(lv_timer_t *t) {
 	// till the dark has it again, or the room's light enough for it to stay on anyway
 	if (glancing) {
 		uint64_t idle = sprite_idle_ms();
-		if (shell_dark() || idle >= GLANCE_IDLE_MS + GLANCE_HOLD_MS) glancing = false;
+		// (dark only once of-backlight's had time to light it: it takes the ask on its next pass)
+		if ((shell_dark() && lv_tick_elaps(glance_asked) >= 3000) || idle >= GLANCE_IDLE_MS + GLANCE_HOLD_MS) glancing = false;
 		else if (idle < GLANCE_IDLE_MS && lv_tick_elaps(glance_asked) >= GLANCE_REPEAT_MS) glance();
 	}
 	if (cal || sprite_sleep_inhibited()) return;
@@ -4586,16 +4608,18 @@ static bool sleep_now(void) {
 // A touch on the dark screen. Asleep (display sleep): it lights again at what it went off
 // from. The screensaver, if it was up (the touch is a glance at the clock: another ends it),
 // its app started again (stopped as the screen went off); else whatever was showing. Off in
-// the dark: lit for a glance.
-void shell_wake(void) {
-	if (!sleeping) {
-		glance();
-		return;
-	}
+// the dark: lit for a glance. True if the touch is taken for that (false: dark, but nothing
+// could light it, so it goes through).
+bool shell_wake(void) {
+	if (!sleeping) return glance();
 	sleeping = false;
 	sysinfo_backlight_request("wake");
+	// of-backlight takes a wake in the dark as a glance, so it's asked again while the screen's used, as for one
+	glancing = true;
+	glance_asked = lv_tick_get();
 	if (screensaver_active()) sprite_saver_start(saver_app());
 	sprite_request_frame();
+	return true;
 }
 
 void shell_screensaver_tap(void) {
@@ -4724,11 +4748,12 @@ static void saver_build(lv_obj_t *parent) {
 static int test_taps;
 static uint32_t test_tap_at;
 
+static bool test_setting; // asked, and not answered yet (so seven more taps meanwhile ask nothing again)
 static void test_set_done(char *reply, void *data) {
 	const char *st = helper_reply_status(reply);
+	test_setting = false;
 	if (strcmp(st, "ok")) {
-		lv_obj_t *card = dialog_open(NULL, STR_ABOUT_TEST_NOT_CHANGED, reason_text(st), true);
-		dialog_button(card, STR_COMMON_OK, BUTTON_MAIN, dialog_cancel, NULL);
+		late_dialog(STR_ABOUT_TEST_NOT_CHANGED, reason_text(st));
 	} else {
 		bool on = (intptr_t)data;
 		show_toast(on ? STR_ABOUT_TEST_ON : STR_ABOUT_TEST_OFF, 3000);
@@ -4740,6 +4765,8 @@ static void test_set_done(char *reply, void *data) {
 static void test_set_go(lv_event_t *e) {
 	bool on = (intptr_t)lv_event_get_user_data(e);
 	dialog_close();
+	if (test_setting) return;
+	test_setting = true;
 	helper_request(on ? "test-set\nyes\n" : "test-set\nno\n", test_set_done, (void *)(intptr_t)on);
 }
 
@@ -5347,9 +5374,18 @@ static struct shop_job shop_job;  // as last read
 static bool shop_refreshing;      // fetching the list
 static char shop_req_id[48], shop_ask_id[48];  // the app asked for, and the one a removal's being asked about
 static bool shop_req_remove;
-// The progress shown for the job, in its row and on its page, updated in place as it goes (shop_render makes them again)
+// The progress shown for the job, in its row and on its page, updated in place as it goes (shop_render makes them again). Each leaves the list as its bar is deleted (shop_prog_gone), however its row or page was made again, so nothing's ever updated after it's gone.
 static struct { lv_obj_t *bar, *label; } shop_prog[4];
 static int n_shop_prog;
+
+static void shop_prog_gone(lv_event_t *e) {
+	lv_obj_t *bar = lv_event_get_target(e);
+	for (int i = 0; i < n_shop_prog; i++)
+		if (shop_prog[i].bar == bar) {
+			shop_prog[i] = shop_prog[--n_shop_prog];
+			break;
+		}
+}
 
 static lv_obj_t *shop_panel_showing(void) { return shop_panel[shop_tab]; }
 static void shop_render(void);
@@ -5416,8 +5452,7 @@ static void shop_failed(const char *id, bool remove, const char *reason) {
 	struct shop_app *a = shop_find(id);
 	char t[128];
 	snprintf(t, sizeof t, remove ? STR_SHOP_FAILED_REMOVE : STR_SHOP_FAILED_INSTALL, a ? a->name : id);
-	lv_obj_t *card = dialog_open(NULL, t, reason_text(reason[0] ? reason : "error: helper.shop_failed"), true);
-	dialog_button(card, STR_COMMON_OK, BUTTON_MAIN, dialog_cancel, NULL);
+	late_dialog(t, reason_text(reason[0] ? reason : "error: helper.shop_failed"));
 }
 
 // The job's status, while it runs; once it's finished, the Shop as it is now, and what happened.
@@ -5553,6 +5588,7 @@ static void shop_action(lv_obj_t *parent, struct shop_app *a) {
 		if (n_shop_prog < (int)(sizeof shop_prog / sizeof shop_prog[0])) {
 			shop_prog[n_shop_prog].bar = bar;
 			shop_prog[n_shop_prog++].label = l;
+			lv_obj_add_event_cb(bar, shop_prog_gone, LV_EVENT_DELETE, NULL);
 		}
 		shop_prog_update();
 		return;
@@ -6060,8 +6096,13 @@ void shell_init(void *pixels) {
 static lv_obj_t *svc_panel;
 static struct svc_state { char id[64], state[16]; bool on; int mem_mb; } svc_st[SVC_MAX];
 static int n_svc_st;
-static bool svc_known, svc_asking;
-static char svc_sig[2048]; // what the panel shows, so it's built again only when that changes
+static bool svc_known, svc_asking, svc_ask_again;
+static uint32_t svc_sig;   // a hash of what the panel shows (but the memory), so it's built again only when that changes (0: build it)
+static char svc_ip[48];    // the address its web pages are at, as of the last poll
+static char svc_pending[64]; // the service a switch has asked to change, till the helper's done
+// each service's status line, put right in place as its memory changes, without building the panel again
+static struct { lv_obj_t *label; const struct sprite_app *app; } svc_lines[SVC_MAX];
+static int n_svc_lines;
 
 static const struct svc_state *svc_find(const char *id) {
 	for (int i = 0; i < n_svc_st; i++)
@@ -6090,6 +6131,7 @@ static void svc_text(char *o, size_t n, const struct svc_state *st) {
 
 static void services_render(void);
 static void music_render(lv_obj_t *panel);
+static void services_ask(void);
 
 // The music services can read (music-status): each USB drive and network share under /media/music, and each share that isn't mounted, and why
 #define MUSIC_MAX 16
@@ -6123,6 +6165,8 @@ static void music_status_done(char *reply, void *data) {
 
 static void svc_status_done(char *reply, void *data) {
 	svc_asking = false;
+	// asked before a switch's change was done: perhaps from before it, so asked again
+	if (svc_ask_again) { svc_ask_again = false; services_ask(); return; }
 	const char *st = helper_reply_status(reply);
 	if (strcmp(st, "ok")) return;
 	n_svc_st = 0;
@@ -6138,19 +6182,23 @@ static void svc_status_done(char *reply, void *data) {
 	services_render();
 }
 
+// Done: built again from a status asked for after it (one already on its way may be from before), with the switch as it now is, and usable again
 static void svc_set_done(char *reply, void *data) {
 	const char *st = helper_reply_status(reply);
-	if (strcmp(st, "ok")) {
-		lv_obj_t *card = dialog_open(NULL, STR_SERVICES_NOT_CHANGED, reason_text(st), true);
-		dialog_button(card, STR_COMMON_OK, BUTTON_MAIN, dialog_cancel, NULL);
-	}
-	svc_sig[0] = 0; // built again, the switch put right if it didn't change
-	services_show();
+	if (strcmp(st, "ok")) late_dialog(STR_SERVICES_NOT_CHANGED, reason_text(st));
+	svc_pending[0] = 0;
+	svc_sig = 0;
+	if (svc_asking) svc_ask_again = true;
+	else services_ask();
 }
 
 static void svc_switch_changed(lv_event_t *e) {
 	const struct sprite_app *a = lv_event_get_user_data(e);
-	bool on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+	lv_obj_t *sw = lv_event_get_target(e);
+	bool on = lv_obj_has_state(sw, LV_STATE_CHECKED);
+	if (svc_pending[0]) return; // (it's disabled meanwhile, so this is only a stray)
+	snprintf(svc_pending, sizeof svc_pending, "%s", a->id);
+	lv_obj_add_state(sw, LV_STATE_DISABLED); // one change at a time, till the helper's done it
 	char req[96];
 	snprintf(req, sizeof req, "service-set %s %s\n", a->id, on ? "on" : "off");
 	helper_request(req, svc_set_done, NULL);
@@ -6194,11 +6242,12 @@ static void svc_row(lv_obj_t *panel, struct sprite_app *a, const struct svc_stat
 	lv_obj_set_height(n, lv_font_get_line_height(&lv_font_montserrat_20));
 	char t[192];
 	svc_text(t, sizeof t, st);
-	shop_text(col, t, &lv_font_montserrat_16, st && !strcmp(st->state, "failed") ? C_WARN : C_DIM);
+	lv_obj_t *line = shop_text(col, t, &lv_font_montserrat_16, st && !strcmp(st->state, "failed") ? C_WARN : C_DIM);
+	if (n_svc_lines < SVC_MAX) { svc_lines[n_svc_lines].label = line; svc_lines[n_svc_lines++].app = a; }
 	lv_obj_t *sw = lv_switch_create(r);
 	lv_obj_set_size(sw, 72, 38);
 	if (!st || st->on) lv_obj_add_state(sw, LV_STATE_CHECKED);
-	if (!st) lv_obj_add_state(sw, LV_STATE_DISABLED); // till the helper's said
+	if (!st || !strcmp(svc_pending, a->id)) lv_obj_add_state(sw, LV_STATE_DISABLED); // till the helper's said
 	lv_obj_add_event_cb(sw, svc_switch_changed, LV_EVENT_VALUE_CHANGED, a);
 	if (!a->web || !ip[0] || !st || strcmp(st->state, "active")) return;
 	// its own web page: the address, and a QR code to it
@@ -6236,30 +6285,46 @@ static void svc_row(lv_obj_t *panel, struct sprite_app *a, const struct svc_stat
 	shop_text(wc, url, &lv_font_montserrat_20, C_TEXT);
 }
 
+// FNV-1a, over what the panel shows, piece by piece (so nothing is cut off, however much there is)
+static uint32_t svc_hash(uint32_t h, const char *fmt, ...) {
+	char t[512];
+	va_list ap;
+	va_start(ap, fmt);
+	vsnprintf(t, sizeof t, fmt, ap);
+	va_end(ap);
+	for (const char *c = t; *c; c++) h = (h ^ (uint8_t)*c) * 16777619u;
+	return (h ^ '|') * 16777619u;
+}
+
 static void services_render(void) {
 	if (!svc_panel) return;
-	char ip[48], sig[sizeof svc_sig];
-	svc_address(ip, sizeof ip);
-	int k = snprintf(sig, sizeof sig, "%d %s|", svc_known, ip), n = 0;
+	const char *ip = svc_ip;
+	uint32_t sig = svc_hash(2166136261u, "%d %s %s", svc_known, ip, svc_pending);
+	int n = 0;
 	for (int i = 0; i < apps_count(); i++) {
 		struct sprite_app *a = apps_get(i);
 		if (!a->service || a->gone) continue;
 		n++;
 		const struct svc_state *st = svc_find(a->id);
-		char t[96];
-		svc_text(t, sizeof t, st);
-		if (k < (int)sizeof sig)
-			k += snprintf(sig + k, sizeof sig - k, "%s %s %s %d %d|", a->id, a->name, st ? st->state : "-", st ? st->on : -1, a->web);
-		// (the memory to the nearest 10 MB, so it isn't built again for every megabyte)
-		if (k < (int)sizeof sig && st) k += snprintf(sig + k, sizeof sig - k, "%d|", st->mem_mb / 10);
+		sig = svc_hash(sig, "%s %s %s %d %d", a->id, a->name, st ? st->state : "-", st ? st->on : -1, a->web);
 	}
-	for (int i = 0; i < n_music && k < (int)sizeof sig; i++)
-		k += snprintf(sig + k, sizeof sig - k, "m%d %s %s %d %s %d %d|", music[i].share, music[i].name, music[i].src, music[i].mounted, music[i].why, music[i].used_mb / 100, music[i].size_mb / 100);
-	if (k < (int)sizeof sig) k += snprintf(sig + k, sizeof sig - k, "%d", music_known);
-	if (!strcmp(sig, svc_sig)) return;
-	snprintf(svc_sig, sizeof svc_sig, "%s", sig);
+	for (int i = 0; i < n_music; i++)
+		sig = svc_hash(sig, "m%d %s %s %d %s %d %d", music[i].share, music[i].name, music[i].src, music[i].mounted, music[i].why, music[i].used_mb / 100, music[i].size_mb / 100);
+	sig = svc_hash(sig, "%d", music_known);
+	if (sig == 0) sig = 1;
+	if (sig == svc_sig) {
+		// the same but perhaps the memory: the status lines put right where they are
+		for (int i = 0; i < n_svc_lines; i++) {
+			char t[192];
+			svc_text(t, sizeof t, svc_find(svc_lines[i].app->id));
+			if (strcmp(lv_label_get_text(svc_lines[i].label), t)) lv_label_set_text(svc_lines[i].label, t);
+		}
+		return;
+	}
+	svc_sig = sig;
 	int32_t scrolled = lv_obj_get_scroll_y(svc_panel); // built again where it was scrolled to, not at the top
 	lv_obj_clean(svc_panel);
+	n_svc_lines = 0;
 	section(svc_panel, STR_SERVICES_HEAD);
 	lv_obj_set_style_margin_top(lv_obj_get_child(svc_panel, 0), 0, 0); // at the panel's top, as every first heading
 	if (!n) {
@@ -6279,8 +6344,9 @@ static void services_render(void) {
 	lv_obj_scroll_to_y(svc_panel, LV_MAX(0, LV_MIN(scrolled, most)), LV_ANIM_OFF);
 }
 
-static void services_show(void) {
-	services_render();
+// Asks the helper how the services and the music are (each reply builds what's changed)
+static void services_ask(void) {
+	svc_address(svc_ip, sizeof svc_ip); // (once a poll: it reads all About does)
 	if (!music_asking) {
 		music_asking = true;
 		helper_request("music-status\n", music_status_done, NULL);
@@ -6290,27 +6356,33 @@ static void services_show(void) {
 	helper_request("service-status\n", svc_status_done, NULL);
 }
 
+static void services_show(void) {
+	services_render();
+	services_ask();
+}
+
 /* the music: drives and shares, adding and removing shares */
 
 static void share_done(char *reply, void *data) {
 	const char *st = helper_reply_status(reply);
 	bool adding = data != NULL;
-	if (strcmp(st, "ok")) {
-		lv_obj_t *card = dialog_open(NULL, adding ? STR_MUSIC_NOT_ADDED : STR_MUSIC_NOT_REMOVED, reason_text(st), true);
-		dialog_button(card, STR_COMMON_OK, BUTTON_MAIN, dialog_cancel, NULL);
-	} else if (adding) show_toast(STR_MUSIC_ADDED, 3000);
-	svc_sig[0] = 0;
+	if (strcmp(st, "ok")) late_dialog(adding ? STR_MUSIC_NOT_ADDED : STR_MUSIC_NOT_REMOVED, reason_text(st));
+	else if (adding) show_toast(STR_MUSIC_ADDED, 3000);
+	svc_sig = 0;
 	services_show();
 }
 
 static void share_add_now(const char *password) {
 	static char req[600];
 	snprintf(req, sizeof req, "share-add\n%s\n%s\n%s\n", share_addr, share_user, password);
+	show_toast(STR_MUSIC_ADDING, 6000);
 	helper_request(req, share_done, (void *)1);
-	memset(req, 0, sizeof req); // (the helper has its copy)
+	explicit_bzero(req, sizeof req); // (the helper has its copy)
+	// back to Services, where it was scrolled to (the music is below the services, so not at the top)
+	int32_t scrolled = svc_panel ? lv_obj_get_scroll_y(svc_panel) : 0;
 	settings_show_tab(TAB_SERVICES);
 	show_page(page_settings);
-	show_toast(STR_MUSIC_ADDING, 6000);
+	if (svc_panel) lv_obj_scroll_to_y(svc_panel, scrolled, LV_ANIM_OFF);
 }
 
 static void share_add_clicked(lv_event_t *e) {

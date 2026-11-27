@@ -207,8 +207,8 @@ static bool wake_on_input(void) {
 	bool dark = !S.asleep && shell_dark();
 	if (!S.asleep && !dark) return false;
 	S.asleep = false;
+	if (!shell_wake()) return false; // dark, and no way to light it: the touch goes through
 	wlr_log(WLR_INFO, "%s", dark ? "lit: a touch in the dark" : "awake: a touch");
-	shell_wake();
 	return true;
 }
 
@@ -735,7 +735,8 @@ static void input_motion(double x, double y, uint32_t t) {
 		forward_to_app(x, y, t);
 		return;
 	default:
-		if (S.fg && !S.covered && !S.asleep) forward_to_app(x, y, t); // no hover under the screensaver
+		// no hover under the screensaver, or where the touch that lights the dark screen lands
+		if (S.fg && !S.covered && !S.asleep && !shell_dark()) forward_to_app(x, y, t);
 		else shell_pointer((int)x, (int)y, false);
 	}
 }
@@ -890,19 +891,23 @@ static void kb_key(struct wl_listener *l, void *data) {
 	const xkb_keysym_t *syms;
 	int n = xkb_state_key_get_syms(k->wlr->xkb_state, e->keycode + 8, &syms);
 	uint32_t mods = wlr_keyboard_get_modifiers(k->wlr);
-	// a key wakes the screen too, and goes no further (its release does, harmlessly)
-	if (e->state == WL_KEYBOARD_KEY_STATE_PRESSED && wake_on_input()) return;
-	if (e->state == WL_KEYBOARD_KEY_STATE_PRESSED && S.covered) { shell_screensaver_tap(); return; }
+	// Switching to a console, and Ctrl-Alt-Backspace, whatever the screen's doing: the way out
 	if (e->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
 		for (int i = 0; i < n; i++) {
 			if (syms[i] >= XKB_KEY_XF86Switch_VT_1 && syms[i] <= XKB_KEY_XF86Switch_VT_12) {
 				if (S.session) wlr_session_change_vt(S.session, syms[i] - XKB_KEY_XF86Switch_VT_1 + 1);
 				return;
 			}
-			if ((mods & WLR_MODIFIER_ALT) && syms[i] == XKB_KEY_Escape) { sprite_go_home(); return; }
 			if ((mods & (WLR_MODIFIER_ALT | WLR_MODIFIER_CTRL)) == (WLR_MODIFIER_ALT | WLR_MODIFIER_CTRL) &&
 			    syms[i] == XKB_KEY_BackSpace) { wl_display_terminate(S.display); return; }
 		}
+	}
+	// a key wakes the screen too, and goes no further (its release does, harmlessly)
+	if (e->state == WL_KEYBOARD_KEY_STATE_PRESSED && wake_on_input()) return;
+	if (e->state == WL_KEYBOARD_KEY_STATE_PRESSED && S.covered) { shell_screensaver_tap(); return; }
+	if (e->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+		for (int i = 0; i < n; i++)
+			if ((mods & WLR_MODIFIER_ALT) && syms[i] == XKB_KEY_Escape) { sprite_go_home(); return; }
 	}
 	if (!S.fg) return; // the shell has no text entry yet
 	wlr_seat_set_keyboard(S.seat, k->wlr);
