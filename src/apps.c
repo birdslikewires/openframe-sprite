@@ -15,7 +15,7 @@
 //   kind=screensaver     (a screensaver: no tile; chosen in Settings, Display, and shown over everything after a while untouched, until a touch)
 //   kind=service         (a service: no tile; it runs in the background, started by the helper at boot, and is switched on and off in Settings, Services)
 //   web=9000             (a service's own web page, on this port: Services shows its address, and a QR code to it)
-//   allow=network sound  (what a sandboxed app may have beyond the display: network, sound to play, microphone to record too; read by the helper)
+//   allow=network sound  (what a sandboxed app may have beyond the display: network, sound to play, microphone to record too, music, and lowports for a service; read by the helper)
 // Comments go on lines of their own.
 #define _GNU_SOURCE
 #include <dirent.h>

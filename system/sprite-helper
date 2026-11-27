@@ -45,7 +45,7 @@
 ##
 ##  Apps: each runs as a transient systemd unit, sprite-app-<id>.service, under a user of its own (DynamicUser), in the sprite-apps group, which can reach sprite's display sockets and nothing else of sprite's. What it runs comes only from its manifest (in one of sprite's app directories, all root's), never from the request. It has no sudo, no capabilities, a read-only system, no /home or /boot (where wifi.txt is), its own /tmp, no other processes to see, and one directory of its own to keep things in (/var/lib/sprite-apps/<id>, kept between runs). The manifest's allow= line names what more it may have: network (otherwise it has none), sound (/dev/snd to play: the capture devices there as it starts are hidden) and microphone (those too). It has less of the CPU than sprite, and is held to 192 MB of memory, 64 MB of swap and 64 processes (with MEMCG and CGROUP_PIDS in the kernel), past which the kernel ends it, not something else. It's bound to sprite.service, so it stops when sprite does.
 ##
-##  Services: an app whose manifest says kind=service runs in the background whatever's on the screen, in the same sandbox as an app, as sprite-service-<id>.service, which isn't bound to sprite (it carries on while sprite restarts) and has no display (nor the sprite-apps group, so it can't reach sprite's sockets). Each is started at boot unless it's been switched off (a file /var/lib/sprite-services/off/<id>, root's), and again 10 s after it fails, up to five times in ten minutes, after which it's left failed. openframe-scripts' of-update starts one again after an update changes its package. Its manifest may ask for more memory (memory=<MB>, 64 to 320; swap is 64 MB more), and allow=music lets it read /media, where openframe-scripts mounts USB drives and network shares, read-only; anything else (an app, too) can't see /media at all.
+##  Services: an app whose manifest says kind=service runs in the background whatever's on the screen, in the same sandbox as an app, as sprite-service-<id>.service, which isn't bound to sprite (it carries on while sprite restarts) and has no display (nor the sprite-apps group, so it can't reach sprite's sockets). Each is started at boot unless it's been switched off (a file /var/lib/sprite-services/off/<id>, root's), and again 10 s after it fails, up to five times in ten minutes, after which it's left failed. openframe-scripts' of-update starts one again after an update changes its package. Its manifest may ask for more memory (memory=<MB>, 64 to 320; swap is 64 MB more), and allow=music lets it read /media, where openframe-scripts mounts USB drives and network shares, read-only; anything else (an app, too) can't see /media at all. A service alone may ask for allow=lowports, the one capability of opening network ports below 1024 (AirPlay 2's clock, nqptp, listens on 319 and 320), as an ambient capability its programs pass on unless they drop it; nothing else of root's comes with it.
 
 SETTINGS="/boot/settings/interface.txt"
 OLDSETTINGS="/boot/settings/sprite.txt"   # its name until 26.11.122 (the postinst moves it)
@@ -223,6 +223,10 @@ sandbox_props() {
 	fi
 	# music: the USB drives and network shares mounted under /media, read-only (ProtectSystem), or nothing there at all
 	[[ " $M_ALLOW " == *" music "* ]] || P+=(-p InaccessiblePaths=-/media)
+	# lowports, a service's only: opening network ports below 1024, and no other capability (systemd here has no BPF, so it can't be held to particular ports: SocketBindAllow= needs it)
+	if [ "$M_KIND" = service ] && [[ " $M_ALLOW " == *" lowports "* ]]; then
+		P+=(-p CapabilityBoundingSet=CAP_NET_BIND_SERVICE -p AmbientCapabilities=CAP_NET_BIND_SERVICE)
+	fi
 }
 
 app_start() {

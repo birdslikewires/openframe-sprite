@@ -5741,6 +5741,7 @@ static void shop_page_render(void) {
 	if (snd) shop_bullet(shop_app_body, STR_SHOP_USES_SOUND);
 	if (mic) shop_bullet(shop_app_body, STR_SHOP_USES_MICROPHONE);
 	if (music) shop_bullet(shop_app_body, STR_SHOP_USES_MUSIC);
+	if (a->service && strstr(a->allow, "lowports")) shop_bullet(shop_app_body, STR_SHOP_USES_LOWPORTS);
 	if (a->service) shop_bullet(shop_app_body, STR_SHOP_USES_BACKGROUND);
 	if (!net && !snd && !music) shop_text(shop_app_body, STR_SHOP_USES_NOTHING, &lv_font_montserrat_20, C_TEXT);
 

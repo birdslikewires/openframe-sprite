@@ -129,6 +129,7 @@ shop.uses.network = This app can access the internet and the local network.
 shop.uses.sound = This app can play audio.
 shop.uses.microphone = This app can use audio inputs (if present).
 shop.uses.music = This app can read the music on USB drives and network shares.
+shop.uses.lowports = This app can open the network ports below 1024 that only the system usually can.
 shop.uses.background = This app keeps running in the background, whatever is on the screen.
 # An app's page: where to ask about it. %s is the app's name
 shop.head.help = HELP AND QUESTIONS

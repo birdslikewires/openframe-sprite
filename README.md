@@ -41,7 +41,7 @@ allow=network
 - `kind=service`: a service, which runs in the background whatever's on the screen, such as a music server. It has no tile. sprite-helper starts it at boot (`sprite-services.service`) in the same sandbox as an app, as `sprite-service-<id>.service`, which carries on while Sprite restarts, and again 10 s after it fails; Settings, Services switches it on and off, and says what it's doing and the memory it's using
 - `web=`: a service's own web page, on this port: Services shows its address and a QR code to it, while it runs, as it's set up from a phone or a computer
 - `memory=`: the memory a service needs, in MB, from 64 to 320 (otherwise 192, as an app has), past which it's ended rather than slowing the OpenFrame down (a service's only: an app always has 192)
-- `allow=`: what the app may have beyond the display, separated by spaces: `network`, `sound` (to play), `microphone` (to record as well) and `music` (to read `/media`, where openframe-scripts mounts USB drives and network shares, read-only); without it, an app has none of them, and can't see `/media` at all
+- `allow=`: what the app may have beyond the display, separated by spaces: `network`, `sound` (to play), `microphone` (to record as well), `music` (to read `/media`, where openframe-scripts mounts USB drives and network shares, read-only) and, for a service only, `lowports` (to open network ports below 1024, as AirPlay 2's clock does on 319 and 320, the one capability it then has); without it, an app has none of them, and can't see `/media` at all
 
 Comments go on lines of their own, starting with `#`. The package brings only Settings: every other app comes in its own package, as HamClock does. Sprite tells apps to draw through X11 for SDL (`SDL_VIDEODRIVER=x11`), because SDL's Wayland support needs EGL, which this hardware lacks.
 
@@ -49,7 +49,7 @@ Comments go on lines of their own, starting with `#`. The package brings only Se
 
 Each app runs in a sandbox: `sprite-helper` starts it as a systemd unit, `sprite-app-<id>.service`, under a user of its own (`DynamicUser=`) in the `sprite-apps` group. That group can reach Sprite's display sockets (`/run/sprite-apps/wayland-0`, and Xwayland's, which Sprite's X keeper opens to the group) and nothing else of Sprite's. What it runs comes from its manifest, never from sprite. It has:
 
-- no sudo, no capabilities, and no way to gain privileges (`NoNewPrivileges=`), with a seccomp filter (`@system-service`)
+- no sudo, no capabilities (but for a service's `lowports`, above), and no way to gain privileges (`NoNewPrivileges=`), with a seccomp filter (`@system-service`)
 - a read-only system, no `/home`, no `/boot` (where `wifi.txt` is, readable by anyone, as FAT has no permissions), its own `/tmp`, and no other processes to see
 - one directory of its own, `/var/lib/sprite-apps/<id>` (its `$HOME`, kept between runs)
 - no network unless `allow=network`, and no sound devices unless `allow=sound` (playing only: the capture devices there as it starts are hidden) or `allow=microphone` (those too)
