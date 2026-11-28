@@ -33,6 +33,7 @@ display=x11
 allow=network
 ```
 
+- `exec=`: what to run, a command and its arguments (the Shop's apps' are a program in their package): one command, which Sprite runs in place of a shell (`exec`), so no `&&`, `;`, pipes or `VAR=value` before it; a recipe needing more has a script of its own
 - `icon=`: a glyph, by its name in [Lucide](https://lucide.dev/icons) (those listed in `src/icons.txt`, which `scripts/make-icons.sh` makes into `src/icons_40.c`), or up to two letters
 - `color=`: the tile's colour
 - `display=x11`: for X11 and SDL apps; leave it out for native Wayland apps

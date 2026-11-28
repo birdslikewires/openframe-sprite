@@ -252,14 +252,15 @@ app_start() {
 		[[ "$DISP" =~ ^:[0-9]{1,2}$ ]] || answer "error: $ID needs X, which isn't there"
 		P+=(--setenv=DISPLAY="$DISP" -p BindPaths=/tmp/.X11-unix)
 	fi
+	# (exec=, a command and its arguments, is run by sh, which hands over to it with exec: the app is the unit's main process, with no shell left waiting above it, holding what the unit gives, lowports included)
 	# Straight to systemd-run, which refuses if the unit is still there: only then is it worth asking systemd (about 0.1 s a time) whether it's running or stopping.
-	if ! systemd-run "${P[@]}" /bin/sh -c "$M_EXEC" >/dev/null 2>&1; then
+	if ! systemd-run "${P[@]}" /bin/sh -c "exec $M_EXEC" >/dev/null 2>&1; then
 		app_settle "$ID" || answer "error: $ID is still stopping"
 		if [ "$(systemctl show -P ActiveState "$UNIT")" = active ] && PID=$(app_pid "$ID"); then
 			echo "pid $PID"
 			answer ok
 		fi
-		systemd-run "${P[@]}" /bin/sh -c "$M_EXEC" >/dev/null 2>&1 || answer "error: $ID didn't start"
+		systemd-run "${P[@]}" /bin/sh -c "exec $M_EXEC" >/dev/null 2>&1 || answer "error: $ID didn't start"
 	fi
 	PID=$(app_pid "$ID") || answer "error: $ID ended as it started"
 	echo "pid $PID"
@@ -296,7 +297,7 @@ service_start() {
 		# (five failures in ten minutes, and it's left failed, which the Services tab shows, rather than started again every 10 s for ever, each a heavy start on an Atom)
 		-p StartLimitIntervalSec=600 -p StartLimitBurst=5
 	)
-	systemd-run "${P[@]}" /bin/sh -c "$M_EXEC" >/dev/null 2>&1
+	systemd-run "${P[@]}" /bin/sh -c "exec $M_EXEC" >/dev/null 2>&1
 }
 
 service_status() {

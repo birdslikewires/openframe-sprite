@@ -447,7 +447,9 @@ void apps_launch(struct sprite_app *app) {
 		unsetenv("WLR_RENDERER");
 		int fd = open("/dev/null", O_RDWR);
 		if (fd >= 0) { dup2(fd, 0); close(fd); }
-		execl("/bin/sh", "/bin/sh", "-c", app->exec, (char *)NULL);
+		char cmd[sizeof app->exec + 8];
+		snprintf(cmd, sizeof cmd, "exec %s", app->exec); // (sh hands over to it, as sprite-helper has it: no shell left waiting)
+		execl("/bin/sh", "/bin/sh", "-c", cmd, (char *)NULL);
 		_exit(127);
 	}
 	app->pid = pid;
