@@ -15,6 +15,6 @@ apt-get install -y -q --no-install-recommends \
 	libxcb-errors-dev glslang-tools xutils-dev libxfont-dev libxkbfile-dev libxshmfence-dev libxcvt-dev \
 	libtirpc-dev libxau-dev libxdmcp-dev x11proto-dev xtrans-dev libbsd-dev libmd-dev nettle-dev \
 	libssl-dev libsystemd-dev libpciaccess-dev libasound2-dev libx11-dev libxext-dev libxrandr-dev \
-	libxcursor-dev libxfixes-dev libxi-dev libxss-dev libsamplerate0-dev
+	libxcursor-dev libxfixes-dev libxi-dev libxss-dev libsamplerate0-dev libjpeg62-turbo-dev libpng-dev
 sh "$here/stack.sh"
 rm -rf /var/lib/apt/lists/*

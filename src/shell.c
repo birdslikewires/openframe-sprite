@@ -90,6 +90,7 @@ static int ptr_x, ptr_y;
 static bool ptr_pressed;
 static lv_obj_t *bar_clock, *bar_date, *bar_title, *net_eth, *net_wifi, *net_warn, *net_box, *net_tab_dot, *upd_box, *upd_tab_dot;
 static lv_obj_t *bar_left, *aud_box, *bar_vol, *bar_vol_slider; // the bar's speaker, and its volume slider
+static lv_obj_t *np_box; // the bar's music note, while something's playing (Now Playing)
 static lv_obj_t *page_home, *pager, *strip, *page_settings, *page_wifi, *page_entry, *page_netinfo, *page_news, *toast;
 static lv_obj_t *page_shop, *page_shopapp; // the Shop, and an app's page in it (see shop_open)
 enum { NETINFO_ETH, NETINFO_WIFI };
@@ -730,6 +731,13 @@ static void update_net(lv_timer_t *t) {
 		lv_obj_update_layout(aud_box);
 		edge = aud_box;
 	}
+	// ... and left of that, the music note (shell_nowplaying_changed shows it)
+	if (np_box && !lv_obj_has_flag(np_box, LV_OBJ_FLAG_HIDDEN)) {
+		if (edge) lv_obj_align_to(np_box, edge, LV_ALIGN_OUT_LEFT_MID, 0, 0);
+		else lv_obj_align(np_box, LV_ALIGN_RIGHT_MID, -GEAR_W - BAR_EDGE, 0);
+		lv_obj_update_layout(np_box);
+		edge = np_box;
+	}
 	// While updates are checked for, downloaded or installed: a spinner left of the network
 	// icons (opening Settings at Updates), so nobody's surprised it's busy, or switches it off
 	// without thinking.
@@ -768,6 +776,8 @@ static void dots_clicked(lv_event_t *e);
 static void net_clicked(lv_event_t *e);
 static void upd_box_clicked(lv_event_t *e);
 static void aud_box_clicked(lv_event_t *e);
+static void bar_vol_hide(void);
+static void np_box_clicked(lv_event_t *e) { bar_vol_hide(); pull_dismiss(); nowplaying_open(); }
 static void bar_vol_slid(lv_event_t *e);
 static void bar_vol_pressed(lv_event_t *e);
 static void bar_vol_released(lv_event_t *e);
@@ -924,6 +934,23 @@ static void build_bar(lv_obj_t *scr) {
 	lv_obj_set_style_bg_opa(aud_box, LV_OPA_20, LV_STATE_PRESSED);
 	rounded(aud_box);
 	lv_obj_add_event_cb(aud_box, aud_box_clicked, LV_EVENT_CLICKED, NULL);
+	// The music note, as tall a target as the bar, put in place by update_net and shown while
+	// something's playing: Now Playing, full screen, till a touch
+	np_box = lv_obj_create(bar);
+	lv_obj_remove_style_all(np_box);
+	lv_obj_set_size(np_box, NET_ICON + 2 * NET_PAD, BAR_H);
+	lv_obj_add_flag(np_box, LV_OBJ_FLAG_CLICKABLE);
+	lv_obj_remove_flag(np_box, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_set_style_bg_color(np_box, lv_color_white(), LV_STATE_PRESSED);
+	lv_obj_set_style_bg_opa(np_box, LV_OPA_20, LV_STATE_PRESSED);
+	rounded(np_box);
+	lv_obj_add_event_cb(np_box, np_box_clicked, LV_EVENT_CLICKED, NULL);
+	lv_obj_t *nl = lv_label_create(np_box);
+	lv_label_set_text(nl, LV_SYMBOL_AUDIO);
+	lv_obj_set_style_text_font(nl, &lv_font_montserrat_20, 0);
+	lv_obj_set_style_text_color(nl, lv_color_hex(C_TEXT), 0);
+	lv_obj_center(nl);
+	lv_obj_add_flag(np_box, LV_OBJ_FLAG_HIDDEN);
 	lv_obj_t *al = lv_image_create(aud_box);
 	lv_image_set_src(al, &speaker_img[2]);
 	lv_obj_set_style_image_recolor(al, lv_color_hex(C_TEXT), 0);
@@ -4507,6 +4534,10 @@ static const int idle_steps[] = { 0, 1, 2, 5, 10, 15, 30, 60 }; // minutes; 0: n
 static int ss_min = 5, sleep_min;
 static bool sleeping;
 static char saver_id[64]; // the screensaver app chosen (interface.txt's saver=), or "": the flip clock
+static bool np_on = true; // Now Playing in place of the screensaver while something plays, and by itself as it starts (interface.txt's nowplaying=, yes unless no)
+static lv_obj_t *np_hint; // (under its switch, in Display)
+
+static bool saver_np(void) { return np_on; }
 static lv_obj_t *saver_head, *saver_list;
 
 static struct sprite_app *saver_app(void) {
@@ -4593,8 +4624,9 @@ static void idle_tick(lv_timer_t *t) {
 	if (ss_min && !sleeping && !screensaver_active() && idle >= (uint64_t)ss_min * 60000) {
 		bar_vol_hide();
 		pull_dismiss();
-		screensaver_start(); // the flip clock, and over it the app chosen, once it shows
-		sprite_saver_start(saver_app());
+		screensaver_start(); // the flip clock, and over it Now Playing while something plays, or else the app chosen, once it shows
+		if (saver_np()) nowplaying_saver(true);
+		if (!nowplaying_shown()) sprite_saver_start(saver_app());
 	}
 	if (sleep_min && !sleeping && idle >= (uint64_t)sleep_min * 60000) sleep_now();
 }
@@ -4605,10 +4637,13 @@ static bool sleep_now(void) {
 	sleeping = true;
 	sprite_set_asleep(true);
 	sprite_saver_end(); // nothing to draw for in the dark (the flip clock costs nothing)
+	nowplaying_asleep(true);
 	bar_vol_hide();
 	pull_dismiss();
 	return true;
 }
+
+static void np_woken(void);
 
 // A touch on the dark screen. Asleep (display sleep): it lights again at what it went off
 // from. The screensaver, if it was up (the touch is a glance at the clock: another ends it),
@@ -4616,13 +4651,19 @@ static bool sleep_now(void) {
 // the dark: lit for a glance. True if the touch is taken for that (false: dark, but nothing
 // could light it, so it goes through).
 bool shell_wake(void) {
-	if (!sleeping) return glance();
+	if (!sleeping) {
+		if (!glance()) return false;
+		np_woken();
+		return true;
+	}
 	sleeping = false;
 	sysinfo_backlight_request("wake");
 	// of-backlight takes a wake in the dark as a glance, so it's asked again while the screen's used, as for one
 	glancing = true;
 	glance_asked = lv_tick_get();
-	if (screensaver_active()) sprite_saver_start(saver_app());
+	nowplaying_asleep(false);
+	np_woken();
+	if (screensaver_active() && !nowplaying_shown()) sprite_saver_start(saver_app());
 	sprite_request_frame();
 	return true;
 }
@@ -4630,6 +4671,51 @@ bool shell_wake(void) {
 void shell_screensaver_tap(void) {
 	sprite_saver_end();
 	screensaver_stop();
+	nowplaying_close();
+}
+
+// Now Playing's come up over the screensaver, or gone: a screensaver app stops meanwhile (it
+// would only be hidden under it, and costs the CPU), and starts again once it's gone
+void shell_nowplaying_shown(bool shown) {
+	if (!screensaver_active() || sleeping) return;
+	if (shown) sprite_saver_end();
+	else sprite_saver_start(saver_app());
+}
+
+// Something's started or stopped playing (nowplaying.c): the bar's note shows while it does.
+// As it starts, Now Playing comes up by itself (closing again as it ends) if the OpenFrame's
+// been left alone a while and Now Playing is its screensaver, unless something's holding the
+// screen awake (a video), or an app's showing and the screensaver's set never to cover it (a
+// radio amateur's HamClock, say). With the screen off, or dark, it stays so, and the touch
+// that lights it shows Now Playing.
+#define NP_AUTO_IDLE_MS 30000
+static bool np_pending;
+
+static void np_started(void) {
+	np_pending = false;
+	if (!saver_np() || cal || screensaver_active()) return; // (the screensaver shows it already)
+	if (sleeping || shell_dark()) { np_pending = true; return; }
+	if (sprite_sleep_inhibited() || sprite_idle_ms() < NP_AUTO_IDLE_MS) return;
+	if (sprite_foreground() && !ss_min) return;
+	bar_vol_hide();
+	pull_dismiss();
+	nowplaying_open();
+}
+
+static void np_woken(void) {
+	if (np_pending && nowplaying_active() && !screensaver_active()) nowplaying_open();
+	np_pending = false;
+}
+
+void shell_nowplaying_changed(void) {
+	if (!np_box) return;
+	bool on = nowplaying_active();
+	if (on == !lv_obj_has_flag(np_box, LV_OBJ_FLAG_HIDDEN)) return;
+	if (on) lv_obj_remove_flag(np_box, LV_OBJ_FLAG_HIDDEN);
+	else lv_obj_add_flag(np_box, LV_OBJ_FLAG_HIDDEN);
+	update_net(NULL);
+	if (on) np_started();
+	else np_pending = false;
 }
 
 bool shell_clock_24(void) { return clock_24; }
@@ -4682,12 +4768,19 @@ static void idle_build(lv_obj_t *parent) {
 }
 
 // Which screensaver: the flip clock or an app that's one (kind=screensaver), a list with the
-// chosen one ticked; only there when such an app's installed
+// chosen one ticked, only there when such an app's installed; then whether Now Playing takes
+// its place while something plays
 static void saver_choose(lv_event_t *e) {
 	struct sprite_app *a = lv_event_get_user_data(e);
 	snprintf(saver_id, sizeof saver_id, "%s", a ? a->id : "");
 	settings_set("saver", saver_id);
 	saver_show();
+}
+
+static void np_switched(lv_event_t *e) {
+	np_on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+	settings_set("nowplaying", np_on ? "yes" : "no");
+	if (screensaver_active()) nowplaying_saver(np_on);
 }
 
 static void saver_row(struct sprite_app *a, bool on) {
@@ -4719,7 +4812,6 @@ static void saver_show(void) {
 	struct sprite_app *chosen = saver_app();
 	int n = 0;
 	for (int i = 0; i < apps_count(); i++) n += apps_get(i)->saver && !apps_get(i)->gone;
-	show_if(saver_head, n);
 	show_if(saver_list, n);
 	if (!n) return;
 	saver_row(NULL, !chosen);
@@ -4738,6 +4830,16 @@ static void saver_build(lv_obj_t *parent) {
 	lv_obj_set_flex_flow(saver_list, LV_FLEX_FLOW_COLUMN);
 	lv_obj_remove_flag(saver_list, LV_OBJ_FLAG_SCROLLABLE);
 	saver_show();
+	v = settings_get("nowplaying");
+	np_on = !v || strcmp(v, "no");
+	// (its switch under Auto's, as the others)
+	lv_obj_set_style_pad_right(switch_row(parent, STR_DISPLAY_NOWPLAYING, np_on, np_switched), BL_SLIDER_H / 2 + SLIDER_KNOB_PAD, 0);
+	np_hint = lv_label_create(parent);
+	lv_label_set_text(np_hint, STR_DISPLAY_NOWPLAYING_NOTE);
+	lv_obj_set_width(np_hint, LV_PCT(100));
+	lv_obj_set_style_margin_top(np_hint, -HINT_GAP, 0);
+	lv_obj_set_style_text_font(np_hint, &lv_font_montserrat_16, 0);
+	lv_obj_set_style_text_color(np_hint, lv_color_hex(C_DIM), 0);
 }
 
 /* ---- About's details: a card with a row each, an icon, its name, and what it is ---- */
@@ -6084,6 +6186,7 @@ void shell_init(void *pixels) {
 	build_shop(scr);
 	build_entry(scr);
 	screensaver_build();
+	nowplaying_init(); // (over the flip clock, on the same layer)
 	updating_resume();
 	if (access(state_path("welcomed"), F_OK)) {
 		lv_timer_t *w = lv_timer_create(welcome_show, 1500, NULL);

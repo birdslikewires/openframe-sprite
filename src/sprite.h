@@ -165,6 +165,16 @@ void screensaver_build(void);
 void screensaver_start(void);
 void screensaver_stop(void);
 bool screensaver_active(void);
+// nowplaying.c: Now Playing, what a service is playing (Shairport Sync's metadata), full screen
+void nowplaying_init(void);
+bool nowplaying_active(void);                 // something's playing (or paused, in a session)
+bool nowplaying_shown(void);
+void nowplaying_saver(bool on);               // shown in place of the screensaver while it's up (Display's Now Playing switch)
+void nowplaying_asleep(bool asleep);          // the screen's off: nothing to draw for
+void nowplaying_open(void);                   // from the bar's note: over everything, till a touch
+void nowplaying_close(void);                  // a touch: it goes (and the screensaver with it)
+void shell_nowplaying_changed(void);          // shell.c: the bar's note shows while something's playing
+void shell_nowplaying_shown(bool shown);      // shell.c: it's come up over the screensaver, or gone (a screensaver app stops meanwhile)
 // main.c, for display sleep: how long since a touch or key, whether a surface asks for no
 // sleep (idle-inhibit), and marking the screen asleep (the next touch only wakes it)
 uint64_t sprite_idle_ms(void);

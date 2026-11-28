@@ -248,10 +248,13 @@ display.sleep = Screen off after
 display.sleep.never = Never
 display.sleep.min = %d min
 display.sleep.hour = 1 hour
-# A heading over the choice of screensaver (only when one's been installed from the Shop),
-# and the built-in one, first in the list
+# A heading over the choice of screensaver (only when one's been installed from the Shop) and
+# Now Playing's switch, and the built-in screensaver, first in the list
 display.head.saver = SCREENSAVER
 display.saver.clock = Flip clock
+# Switch, under the screensaver's choice, and its note
+display.nowplaying = Now Playing
+display.nowplaying.note = While music plays from a service such as Shairport Sync, what's playing shows in place of the screensaver. It also comes up by itself as the music starts, if the OpenFrame has been left alone for half a minute.
 # Title when brightness couldn't be changed
 display.not_changed = Brightness not changed
 # Heading
@@ -777,3 +780,13 @@ helper.shop_takes_others = Removing it would take other things with it, so it wa
 helper.shop_failed = Something went wrong along the way.
 # When Sprite can't reach its helper at all
 helper.not_running = The OpenFrame's helper isn't running.
+
+
+## Now Playing
+# What the OpenFrame's playing, full screen (as the screensaver, or from the music note in the status bar)
+# Where it's coming from, over the title: %s is the iPhone's or Mac's name
+nowplaying.airplay_from = AirPlay from %s
+# ... when the sender's name isn't known, and the title, when that isn't
+nowplaying.airplay = AirPlay
+# Under the progress bar, while it's paused
+nowplaying.paused = Paused
