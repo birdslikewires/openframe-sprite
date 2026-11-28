@@ -2,7 +2,7 @@
 # Makes src/icons_40.c (the tile glyphs, a 40 px 4-bit LVGL font) and src/icons_table.h
 # (their names, and the aliases) from the list in src/icons.txt, using Lucide's icon font;
 # src/ui_icons.c and src/ui_icons.h, the few glyphs sprite's own screens use (UI_ICONS
-# below), at 24 px; and puts Lucide's licence in src/icons-lucide-LICENSE.
+# below), at 24 px (and src/ui_icons_16.c, at 16 px); and puts Lucide's licence in src/icons-lucide-LICENSE.
 # Run it after changing the list; its output is committed, so building sprite needs neither
 # the font nor FreeType. It needs curl, python3, openssl, a C compiler and FreeType
 # (pkg-config freetype2): scripts/icon-font.c renders the glyphs.
@@ -10,7 +10,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 LUCIDE=0.460.0
-UI_ICONS="volume-2 sun wifi refresh-cw info power monitor monitor-off server microchip cpu memory-stick hard-drive network clock layout-grid package terminal clapperboard flask-conical" # Settings' tabs, then About's details
+UI_ICONS="volume-2 sun wifi refresh-cw info power monitor monitor-off server microchip cpu memory-stick hard-drive network clock layout-grid package terminal clapperboard flask-conical airplay radio" # Settings' tabs, then About's details, then Now Playing's sources
 # npm's published integrity for that version (npm view lucide-static@0.460.0 dist.integrity)
 LUCIDE_INTEGRITY=sha512-X6pIdg7jVxv7YQ/uR241hwhNiztcAfmj181TbcX7HCxxk/3mGaRtAc6b2ftUvQBufbJE6ehgyzO2uVsa604tWg==
 
@@ -84,5 +84,8 @@ with_licence() {
 with_licence "$work/f.c" > src/icons_40.c
 "$work/icon-font" "$work/package/font/lucide.ttf" 24 sprite_ui_24 $(cat "$work/ui-range") > "$work/f.c"
 with_licence "$work/f.c" > src/ui_icons.c
+# ... and the same at 16 px, for small text beside them (Now Playing's source)
+"$work/icon-font" "$work/package/font/lucide.ttf" 16 sprite_ui_16 $(cat "$work/ui-range") > "$work/f.c"
+with_licence "$work/f.c" > src/ui_icons_16.c
 cp "$work/package/LICENSE" src/icons-lucide-LICENSE # for the package's copyright file
-ls -l src/icons_40.c src/icons_table.h src/ui_icons.c src/ui_icons.h
+ls -l src/icons_40.c src/icons_table.h src/ui_icons.c src/ui_icons_16.c src/ui_icons.h

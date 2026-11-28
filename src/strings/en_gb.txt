@@ -784,9 +784,9 @@ helper.not_running = The OpenFrame's helper isn't running.
 
 ## Now Playing
 # What the OpenFrame's playing, full screen (as the screensaver, or from the music note in the status bar)
-# Where it's coming from, over the title: %s is the iPhone's or Mac's name
-nowplaying.airplay_from = AirPlay from %s
-# ... when the sender's name isn't known, and the title, when that isn't
+# Where it's coming from, beside AirPlay's glyph, when the iPhone's or Mac's name isn't known; and the title, when that isn't
 nowplaying.airplay = AirPlay
+# In place of the times, for a live stream (radio), where they'd mean nothing
+nowplaying.live = Live
 # Under the progress bar, while it's paused
 nowplaying.paused = Paused

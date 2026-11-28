@@ -20,3 +20,5 @@
 #define UI_ICON_TERMINAL "\xee\x86\x85"
 #define UI_ICON_CLAPPERBOARD "\xee\x8a\x9b"
 #define UI_ICON_FLASK_CONICAL "\xee\x83\x9a"
+#define UI_ICON_AIRPLAY "\xee\x80\xb9"
+#define UI_ICON_RADIO "\xee\x85\x86"

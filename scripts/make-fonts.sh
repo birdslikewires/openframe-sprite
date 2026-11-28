@@ -4,8 +4,8 @@
 # scripts/icon-font.c, as LVGL fonts (4 bits a pixel):
 #   src/font_clock_180.c  sprite_clock_180: the flaps' digits, 180 px
 #   src/font_clock_56.c   sprite_clock_56: the date's number and month, 56 px (printable ASCII)
-#   src/font_text_32.c, _24.c, _20.c  sprite_text_32/24/20: Now Playing's titles, artists and
-#     albums, in Latin with its accents (printable ASCII, Latin-1, Latin Extended-A, and the
+#   src/font_text_32.c, _24.c, _20.c, _14.c  sprite_text_32/24/20/14: Now Playing's titles,
+#     artists, albums and sources, in Latin with its accents (printable ASCII, Latin-1, Latin Extended-A, and the
 #     typographic quotes, dashes and ellipsis), as LVGL's own Montserrat has ASCII only
 # Their output is committed, so building sprite needs neither the font nor FreeType. Run in
 # Debian Trixie (docker run --rm -v "$PWD:/w" -w /w debian:trixie bash scripts/make-fonts.sh):
@@ -31,7 +31,7 @@ with_licence "$work/a.c" > src/font_clock_180.c
 with_licence "$work/b.c" > src/font_clock_56.c
 # Now Playing's text: what tracks are called
 text=$( { seq 32 126; seq 160 383; printf '%d\n' 0x2013 0x2014 0x2018 0x2019 0x201c 0x201d 0x2022 0x2026; } | while read -r c; do printf '%x ' "$c"; done)
-for px in 32 24 20; do
+for px in 32 24 20 14; do
 	# shellcheck disable=SC2086
 	"$work/icon-font" "$TTF" "$px" "sprite_text_$px" $text > "$work/t$px.c"
 	with_licence "$work/t$px.c" > "src/font_text_$px.c"

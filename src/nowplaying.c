@@ -31,14 +31,17 @@
 #include "lvgl.h"
 #include "sprite.h"
 
-extern const lv_font_t sprite_text_32, sprite_text_24, sprite_text_20;
+extern const lv_font_t sprite_text_32, sprite_text_24, sprite_text_20, sprite_text_14, sprite_ui_16;
+#include "ui_icons.h"
 
 #define NP_PORT 5555
 #define NP_ITEM_MAX (2 * 1024 * 1024) // the biggest item put together from chunks (artwork, in a plist)
 #define NP_ART 360                    // the artwork's side on screen
-#define NP_MARGIN 60                  // the artwork from the screen's top and left
+#define NP_MARGIN 60                  // the artwork from the screen's top (and foot)
+#define NP_LEFT 44                    // ... and from its left, as the text's room is from its right (text seldom fills its width, so with even margins everything looked shifted right)
 #define NP_GAP 40                     // between it and the text
-#define NP_TEXT_W (SPRITE_W - NP_MARGIN - NP_ART - NP_GAP - 44)
+#define NP_TEXT_W (SPRITE_W - NP_LEFT - NP_ART - NP_GAP - 44)
+#define NP_INSET 16                   // the text's top and the times' foot, in from the artwork's
 
 #define C_NP_BG 0x131920
 #define C_NP_TEXT 0xe8edf2
@@ -52,6 +55,9 @@ static struct {
 	bool active;            // a session's going (shairport-sync's active state: from playing till a while after it stops)
 	bool playing;           // ... and not paused
 	char title[256], artist[256], album[256], sender[128];
+	char playlist[128];     // the playlist it's playing from (an AirPlay 2 sender's collection, when it isn't the album)
+	bool live;              // a live stream (radio): no times, which mean nothing for one
+	char item[96];          // the sender's id for what's playing (AirPlay 2's ContentItemIdentifier), to know a new one
 	double duration;        // seconds, 0 if not known
 	double elapsed;         // seconds into it, at 'at'
 	uint32_t at;            // lv_tick when elapsed was so
@@ -108,20 +114,25 @@ static void set_playing(bool on) {
 }
 
 static void clear_track(void) {
-	np.title[0] = np.artist[0] = np.album[0] = 0;
+	np.title[0] = np.artist[0] = np.album[0] = np.playlist[0] = 0;
+	np.live = false;
 	np.duration = 0;
 	progress_at(0, 0);
 }
 
+static void drop_art(void) {
+	if (!np.art) return;
+	lv_image_cache_drop(np.art);
+	lv_draw_buf_destroy(np.art);
+	np.art = NULL;
+	np.art_hash = 0;
+}
+
 static void clear_all(void) {
 	clear_track();
+	np.item[0] = 0;
 	np.active = np.playing = false;
-	if (np.art) {
-		lv_image_cache_drop(np.art);
-		lv_draw_buf_destroy(np.art);
-		np.art = NULL;
-	}
-	np.art_hash = 0;
+	drop_art();
 }
 
 /* ---- artwork: JPEG or PNG, decoded (JPEG scaled down as it's decoded), then cropped to a
@@ -355,9 +366,24 @@ static bool now_playing_plist(const uint8_t *d, size_t n) {
 	if (strcmp(s, "updateMRNowPlayingInfo") || !bp_get(&b, top, "params", &params) || !bp_get(&b, params, "params", &info)) return false;
 	// "replace" starts a new track's details; "update" changes some of them
 	if (bp_get(&b, params, "mergePolicy", &o) && bp_str(&b, o, s, sizeof s) && !strcmp(s, "replace")) clear_track();
+	// a different item, without a picture of its own: not the last one's
+	char item[sizeof np.item];
+	if (bp_get(&b, info, MR "ContentItemIdentifier", &o) && bp_str(&b, o, item, sizeof item) && strcmp(item, np.item)) {
+		if (np.item[0] && !bp_get(&b, info, MR "ArtworkData", &o)) drop_art();
+		snprintf(np.item, sizeof np.item, "%s", item);
+	}
 	if (bp_get(&b, info, MR "Title", &o)) bp_str(&b, o, np.title, sizeof np.title);
 	if (bp_get(&b, info, MR "Artist", &o)) bp_str(&b, o, np.artist, sizeof np.artist);
 	if (bp_get(&b, info, MR "Album", &o)) bp_str(&b, o, np.album, sizeof np.album);
+	uint64_t coll;
+	if (bp_get(&b, info, MR "CollectionInfo", &coll) && bp_get(&b, coll, "kMRMediaRemoteNowPlayingCollectionInfoKeyTitle", &o)) {
+		bp_str(&b, o, np.playlist, sizeof np.playlist);
+		if (!strcmp(np.playlist, np.album)) np.playlist[0] = 0; // (an album's own: nothing to add)
+	}
+	if (bp_get(&b, info, MR "IsAlwaysLive", &o)) {
+		size_t at = bp_at(&b, o);
+		if (at) np.live = b.d[at] == 0x09; // (bplist's true)
+	}
 	double v, rate = -1, el = -1, ts = 0;
 	if (bp_get(&b, info, MR "Duration", &o) && bp_num(&b, o, &v) && v > 0 && v < 86400) np.duration = v;
 	if (bp_get(&b, info, MR "PlaybackRate", &o) && bp_num(&b, o, &v)) rate = v;
@@ -390,6 +416,20 @@ static bool now_playing_plist(const uint8_t *d, size_t n) {
 
 /* ---- shairport-sync's items ---- */
 
+// The sender's name comes once, as it connects, so it's kept where a restart of Sprite finds it (its runtime folder, gone at the next boot)
+static void sender_path(char *p, size_t n) {
+	const char *d = getenv("XDG_RUNTIME_DIR");
+	snprintf(p, n, "%s/sprite-nowplaying-sender", d ? d : "/tmp");
+}
+
+static void sender_keep(void) {
+	char p[256];
+	sender_path(p, sizeof p);
+	if (!np.sender[0]) { unlink(p); return; }
+	FILE *f = fopen(p, "w");
+	if (f) { fputs(np.sender, f); fclose(f); }
+}
+
 static void item(uint32_t type, uint32_t code, const uint8_t *d, size_t n) {
 	bool starts = false; // it says something's playing: a session starts, if one hasn't
 	if (np_log) fprintf(stderr, "sprite: now playing: %.4s %.4s, %zu bytes\n", (const char *)&(uint32_t){ __builtin_bswap32(type) }, (const char *)&(uint32_t){ __builtin_bswap32(code) }, n);
@@ -415,9 +455,11 @@ static void item(uint32_t type, uint32_t code, const uint8_t *d, size_t n) {
 			set_playing(true);
 		} else if (code == code4("disc")) {
 			np.sender[0] = 0; // (its name came as it connected, not with each session: kept till it goes)
+			sender_keep();
 			return;
 		} else if (code == code4("snam")) {
 			set_str(np.sender, sizeof np.sender, d, n);
+			sender_keep();
 		} else if (code == code4("PICT")) {
 			set_art(d, n);
 		} else if (code == code4("prgr") && n < 64) {
@@ -482,7 +524,7 @@ static int np_readable(int fd, uint32_t mask, void *data) {
 
 /* ---- the screen ---- */
 
-static lv_obj_t *scr, *art_box, *art_img, *art_none, *l_from, *l_title, *l_artist, *l_album, *bar, *l_el, *l_left, *l_paused;
+static lv_obj_t *scr, *art_box, *art_img, *art_none, *src_row, *l_from, *l_title, *l_artist, *l_album, *bar, *l_el, *l_left, *l_paused;
 static lv_timer_t *tick;
 
 static void fmt_time(char *o, size_t n, double s) {
@@ -498,7 +540,7 @@ static void set_label(lv_obj_t *l, const char *s) {
 }
 
 static void np_progress(void) {
-	bool known = np.duration > 0;
+	bool known = np.duration > 0 && !np.live;
 	double e = elapsed_now();
 	char a[16] = "", b[20] = "";
 	if (known) {
@@ -509,6 +551,7 @@ static void np_progress(void) {
 	}
 	if (known) lv_obj_remove_flag(bar, LV_OBJ_FLAG_HIDDEN);
 	else lv_obj_add_flag(bar, LV_OBJ_FLAG_HIDDEN);
+	if (np.live) snprintf(a, sizeof a, "%s", STR_NOWPLAYING_LIVE);
 	set_label(l_el, a);
 	set_label(l_left, b);
 	set_label(l_paused, np.playing || lv_tick_elaps(np.stopped) < NP_PAUSED_MS ? "" : STR_NOWPLAYING_PAUSED);
@@ -525,9 +568,11 @@ static void np_tick(lv_timer_t *t) {
 }
 
 static void np_fill(void) {
-	char from[200];
-	if (np.sender[0]) snprintf(from, sizeof from, STR_NOWPLAYING_AIRPLAY_FROM, np.sender);
-	else snprintf(from, sizeof from, "%s", STR_NOWPLAYING_AIRPLAY);
+	// where it's from, by its glyph: AirPlay's, with the sender's name (or AirPlay's, unknown), and the playlist, if there's room (else it's cut short)
+	char from[300];
+	const char *who = np.sender[0] ? np.sender : STR_NOWPLAYING_AIRPLAY;
+	if (np.playlist[0]) snprintf(from, sizeof from, "%s  \xc2\xb7  %s", who, np.playlist);
+	else snprintf(from, sizeof from, "%s", who);
 	set_label(l_from, from);
 	set_label(l_title, np.title[0] ? np.title : STR_NOWPLAYING_AIRPLAY);
 	set_label(l_artist, np.artist);
@@ -572,7 +617,7 @@ static void np_build(void) {
 	art_box = lv_obj_create(scr);
 	lv_obj_remove_style_all(art_box);
 	lv_obj_set_size(art_box, NP_ART, NP_ART);
-	lv_obj_set_pos(art_box, NP_MARGIN, NP_MARGIN);
+	lv_obj_set_pos(art_box, NP_LEFT, NP_MARGIN);
 	lv_obj_set_style_radius(art_box, 14, 0);
 	lv_obj_set_style_clip_corner(art_box, true, 0);
 	lv_obj_set_style_bg_color(art_box, lv_color_hex(C_NP_CARD), 0);
@@ -586,16 +631,17 @@ static void np_build(void) {
 	lv_obj_set_style_text_color(art_none, lv_color_hex(C_NP_DIM), 0);
 	lv_obj_center(art_none);
 
-	// the text, top to bottom beside it: where it's from, then the title, artist and album
+	// Beside it, a little in from its top and foot: the title, artist and album, from the top;
+	// and from the foot up, the times (gone, and left), the bar, and where it's coming from
+	int x = NP_LEFT + NP_ART + NP_GAP, foot = NP_MARGIN + NP_ART - NP_INSET;
+	int times_y = foot - lv_font_get_line_height(&sprite_text_20), bar_y = times_y - 14, src_y = bar_y - 14 - 20;
 	lv_obj_t *col = lv_obj_create(scr);
 	lv_obj_remove_style_all(col);
-	lv_obj_set_size(col, NP_TEXT_W, NP_ART);
-	lv_obj_set_pos(col, NP_MARGIN + NP_ART + NP_GAP, NP_MARGIN);
+	lv_obj_set_size(col, NP_TEXT_W, src_y - 16 - (NP_MARGIN + NP_INSET));
+	lv_obj_set_pos(col, x, NP_MARGIN + NP_INSET);
 	lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_style_pad_row(col, 10, 0);
 	lv_obj_remove_flag(col, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-	l_from = text(col, &sprite_text_20, C_NP_DIM, 1);
-	lv_obj_set_style_margin_bottom(l_from, 8, 0);
 	l_title = text(col, &sprite_text_32, C_NP_TEXT, 3);
 	lv_obj_set_height(l_title, LV_SIZE_CONTENT); // up to three lines, and only as tall as it is
 	lv_obj_set_style_max_height(l_title, lv_font_get_line_height(&sprite_text_32) * 3 + 4, 0);
@@ -606,11 +652,28 @@ static void np_build(void) {
 	lv_obj_set_height(l_album, LV_SIZE_CONTENT);
 	lv_obj_set_style_max_height(l_album, lv_font_get_line_height(&sprite_text_20) * 2 + 2, 0);
 
-	// how far through, level with the artwork's foot: a bar, the time gone and the time left
-	int x = NP_MARGIN + NP_ART + NP_GAP, foot = NP_MARGIN + NP_ART;
+	src_row = lv_obj_create(scr);
+	lv_obj_remove_style_all(src_row);
+	lv_obj_set_size(src_row, NP_TEXT_W, 20);
+	lv_obj_set_pos(src_row, x, src_y);
+	lv_obj_set_flex_flow(src_row, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(src_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_column(src_row, 7, 0);
+	lv_obj_remove_flag(src_row, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+	lv_obj_t *glyph = lv_label_create(src_row);
+	lv_label_set_text(glyph, UI_ICON_AIRPLAY);
+	lv_obj_set_style_text_font(glyph, &sprite_ui_16, 0);
+	lv_obj_set_style_text_color(glyph, lv_color_hex(C_NP_DIM), 0);
+	l_from = lv_label_create(src_row);
+	lv_obj_set_style_text_font(l_from, &sprite_text_14, 0);
+	lv_obj_set_style_text_color(l_from, lv_color_hex(C_NP_DIM), 0);
+	lv_label_set_long_mode(l_from, LV_LABEL_LONG_DOT);
+	lv_obj_set_width(l_from, NP_TEXT_W - 24);
+	lv_label_set_text(l_from, "");
+
 	bar = lv_bar_create(scr);
 	lv_obj_set_size(bar, NP_TEXT_W, 6);
-	lv_obj_set_pos(bar, x, foot - 34);
+	lv_obj_set_pos(bar, x, bar_y);
 	lv_bar_set_range(bar, 0, 1000);
 	lv_obj_set_style_bg_color(bar, lv_color_hex(C_NP_TRACK), LV_PART_MAIN);
 	lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_MAIN);
@@ -620,19 +683,19 @@ static void np_build(void) {
 	l_el = lv_label_create(scr);
 	lv_obj_set_style_text_font(l_el, &sprite_text_20, 0);
 	lv_obj_set_style_text_color(l_el, lv_color_hex(C_NP_DIM), 0);
-	lv_obj_set_pos(l_el, x, foot - 22);
+	lv_obj_set_pos(l_el, x, times_y);
 	l_left = lv_label_create(scr);
 	lv_obj_set_style_text_font(l_left, &sprite_text_20, 0);
 	lv_obj_set_style_text_color(l_left, lv_color_hex(C_NP_DIM), 0);
 	lv_obj_set_width(l_left, NP_TEXT_W);
 	lv_obj_set_style_text_align(l_left, LV_TEXT_ALIGN_RIGHT, 0);
-	lv_obj_set_pos(l_left, x, foot - 22);
+	lv_obj_set_pos(l_left, x, times_y);
 	l_paused = lv_label_create(scr);
 	lv_obj_set_style_text_font(l_paused, &sprite_text_20, 0);
 	lv_obj_set_style_text_color(l_paused, lv_color_hex(C_NP_TEXT), 0);
 	lv_obj_set_width(l_paused, NP_TEXT_W);
 	lv_obj_set_style_text_align(l_paused, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_pos(l_paused, x, foot - 22);
+	lv_obj_set_pos(l_paused, x, times_y);
 	lv_obj_add_flag(scr, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -675,6 +738,15 @@ static void np_refresh(void) {
 
 void nowplaying_init(void) {
 	np_log = getenv("SPRITE_NP_LOG") && !strcmp(getenv("SPRITE_NP_LOG"), "1");
+	char p[256];
+	sender_path(p, sizeof p);
+	FILE *f = fopen(p, "r");
+	if (f) {
+		uint8_t b[sizeof np.sender];
+		size_t n = fread(b, 1, sizeof b - 1, f);
+		fclose(f);
+		set_str(np.sender, sizeof np.sender, b, n);
+	}
 	np_build();
 	np_fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
 	if (np_fd < 0) return;
