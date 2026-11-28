@@ -3756,6 +3756,31 @@ static void bar_vol_slid(lv_event_t *e) {
 static void bar_vol_pressed(lv_event_t *e) { timer_cancel(&bar_vol_timer); aud_pressed(e); }
 static void bar_vol_released(lv_event_t *e) { aud_released(e); bar_vol_later(); }
 
+// The volume changed elsewhere (an iPhone through Shairport Sync, amixer): the speaker's waves,
+// and either slider that's showing, follow it, unless a finger's on that one. Looked at about
+// four times a second while a slider shows, every two seconds otherwise (for the waves); not
+// at all while nobody would see it.
+#define VOL_WATCH_MS 250
+#define VOL_IDLE_MS 2000
+static void vol_watch(lv_timer_t *t) {
+	static int last = -2;
+	static uint32_t idle_at;
+	bool bar_open = bar_vol && !lv_obj_has_flag(bar_vol, LV_OBJ_FLAG_HIDDEN);
+	bool tab_open = visible && showing(page_settings) && settings_tab == TAB_AUDIO;
+	if (!bar_open && !tab_open && lv_tick_elaps(idle_at) < VOL_IDLE_MS) return;
+	idle_at = lv_tick_get();
+	if (unseen() || !aud_can_slide()) return;
+	int v = audio_volume(aud_out, aud_mixer);
+	if (v < 0 || v == last) return;
+	last = v;
+	bar_aud_icon(v);
+	if (bar_open && !lv_obj_has_state(bar_vol_slider, LV_STATE_PRESSED)) lv_slider_set_value(bar_vol_slider, v, LV_ANIM_OFF);
+	if (aud_slider && !lv_obj_has_state(aud_slider, LV_STATE_PRESSED)) {
+		lv_slider_set_value(aud_slider, v, LV_ANIM_OFF);
+		aud_now_show(v);
+	}
+}
+
 // The test sound (audio.c): its button says what's playing while it plays.
 static lv_obj_t *aud_test_btn;
 static lv_timer_t *aud_test_timer;
@@ -5149,6 +5174,7 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_text_line_space(aud_dac_label, 2, 0);
 	lv_obj_add_flag(aud_dac_label, LV_OBJ_FLAG_HIDDEN);
 	lv_timer_create(aud_dac_tick, 1000, NULL);
+	lv_timer_create(vol_watch, VOL_WATCH_MS, NULL);
 	// on: the audio straight to the DAC as it is (of-audio direct=yes), the OpenFrame's volume
 	// control out of its way
 	aud_direct_row = switch_row(pa_, STR_AUDIO_DIRECT, false, aud_direct_changed);
