@@ -254,7 +254,7 @@ display.head.saver = SCREENSAVER
 display.saver.clock = Flip clock
 # Switch, under the screensaver's choice, and its note
 display.nowplaying = Now Playing
-display.nowplaying.note = While music plays from a service such as Shairport Sync, what's playing shows in place of the screensaver. It also comes up by itself as the music starts, if the OpenFrame has been left alone for half a minute.
+display.nowplaying.note = While audio is being played, show details in place of the screensaver.
 # Title when brightness couldn't be changed
 display.not_changed = Brightness not changed
 # Heading
