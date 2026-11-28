@@ -710,7 +710,42 @@ static void np_build(void) {
 	lv_obj_add_flag(scr, LV_OBJ_FLAG_HIDDEN);
 }
 
-static bool shown(void) { return scr && !lv_obj_has_flag(scr, LV_OBJ_FLAG_HIDDEN); }
+// It fades in over what's under it (the screensaver's flip clock, the home screen, Settings,
+// an app), and out again, rather than cutting; at once only with the screen off, where nobody
+// would see it. Over an app, the shell keeps covering it till it's faded out.
+#define NP_FADE_MS 300
+static bool np_vis;        // showing, or fading in (what the rest goes by)
+static bool cover_release; // the shell's cover to be let go once it's faded out
+
+static bool shown(void) { return np_vis; }
+
+static void fade_cb(void *o, int32_t v) { lv_obj_set_style_opa(o, (lv_opa_t)v, 0); }
+
+static void faded_out(void) {
+	lv_obj_add_flag(scr, LV_OBJ_FLAG_HIDDEN);
+	shell_nowplaying_shown(false);
+	if (cover_release) {
+		cover_release = false;
+		if (!np_vis && !screensaver_active()) sprite_set_covered(false);
+	}
+}
+
+static void fade_done(lv_anim_t *a) { if (!np_vis) faded_out(); }
+
+static void fade(bool in) {
+	lv_anim_delete(scr, fade_cb);
+	lv_opa_t from = lv_obj_get_style_opa(scr, 0), to = in ? LV_OPA_COVER : LV_OPA_TRANSP;
+	if (from == to) { if (!in) faded_out(); return; }
+	lv_anim_t a;
+	lv_anim_init(&a);
+	lv_anim_set_var(&a, scr);
+	lv_anim_set_exec_cb(&a, fade_cb);
+	lv_anim_set_values(&a, from, to);
+	lv_anim_set_duration(&a, NP_FADE_MS * abs(to - from) / 255);
+	lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+	lv_anim_set_completed_cb(&a, fade_done);
+	lv_anim_start(&a);
+}
 
 // Shown while there's something to show and it's asked for (the screensaver, or the bar's
 // note), and the screen's on; the screensaver's flip clock under it when that's what it is
@@ -718,26 +753,39 @@ static void np_refresh(void) {
 	if (!scr) return;
 	bool want = np.active && (np_saver || np_opened) && !np_asleep;
 	if (!want) {
-		if (shown()) {
-			lv_obj_add_flag(scr, LV_OBJ_FLAG_HIDDEN);
+		if (np_vis) {
+			np_vis = false;
 			if (tick) lv_timer_delete(tick);
 			tick = NULL;
-			shell_nowplaying_shown(false);
+			if (np_asleep) { // (the screen's off: at once)
+				lv_anim_delete(scr, fade_cb);
+				lv_obj_set_style_opa(scr, LV_OPA_TRANSP, 0);
+				faded_out();
+			} else {
+				fade(false);
+			}
 		}
 		// opened from the bar, and the session's over: back to what was showing (but still the
-		// screensaver, if it's that too, for when something plays again)
+		// screensaver, if it's that too, for when something plays again), once it's faded
 		if (np_opened && !np.active) {
 			np_opened = false;
-			if (!screensaver_active()) sprite_set_covered(false);
+			if (!screensaver_active()) {
+				if (lv_obj_has_flag(scr, LV_OBJ_FLAG_HIDDEN)) sprite_set_covered(false);
+				else cover_release = true;
+			}
 		}
 		return;
 	}
 	np_fill();
-	if (!shown()) {
+	if (!np_vis) {
+		np_vis = true;
+		cover_release = false;
+		if (lv_obj_has_flag(scr, LV_OBJ_FLAG_HIDDEN)) lv_obj_set_style_opa(scr, LV_OPA_TRANSP, 0);
 		lv_obj_move_foreground(scr);
 		lv_obj_remove_flag(scr, LV_OBJ_FLAG_HIDDEN);
 		tick = lv_timer_create(np_tick, 1000, NULL);
 		shell_nowplaying_shown(true);
+		fade(true);
 	}
 	// (the time's turning over from where it is now)
 	np_tick(tick);
@@ -795,8 +843,14 @@ void nowplaying_open(void) {
 }
 
 void nowplaying_close(void) {
-	bool was = np_opened;
+	bool was = np_opened, vis = np_vis;
 	np_opened = np_saver = false;
 	np_refresh();
-	if (was && !screensaver_active()) sprite_set_covered(false);
+	// fading out: the shell covers what's under it (an app) till it's gone, though the screensaver's just let go
+	if (vis && !np_asleep) {
+		sprite_set_covered(true);
+		cover_release = true;
+	} else if (was && !screensaver_active()) {
+		sprite_set_covered(false);
+	}
 }
