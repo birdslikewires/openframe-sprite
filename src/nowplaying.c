@@ -61,7 +61,7 @@ static struct {
 	uint32_t stopped;       // lv_tick when it stopped playing (Paused shows only once it's lasted: a track change stops it for a moment)
 } np;
 
-#define NP_PAUSED_MS 3000
+#define NP_PAUSED_MS 1500
 static bool np_log; // SPRITE_NP_LOG=1: each item that arrives, in the journal
 
 static bool np_saver, np_opened, np_asleep; // shown as the screensaver; opened from the bar; the screen off
@@ -369,8 +369,18 @@ static bool now_playing_plist(const uint8_t *d, size_t n) {
 		struct timespec now;
 		clock_gettime(CLOCK_REALTIME, &now);
 		double since = now.tv_sec + now.tv_nsec / 1e9 - 978307200.0 - ts;
+		if (np_log) fprintf(stderr, "sprite: now playing: elapsed %.3f at %.3f s ago, rate %.3f\n", el, ts > 0 ? since : -1, rate);
 		if (ts > 0 && since > 0 && since < 60 && np.playing) el += since;
 		progress_at(el, 0);
+	} else if (rate > 0 && ts > 0 && np.playing && lv_tick_elaps(np.at) < 3000) {
+		// playing again, from where it stopped (an iPad says when, but not where): from when it says, rather than when the word came
+		struct timespec now;
+		clock_gettime(CLOCK_REALTIME, &now);
+		double since = now.tv_sec + now.tv_nsec / 1e9 - 978307200.0 - ts;
+		if (since > 0 && since < 5) {
+			np.at = lv_tick_get() - (uint32_t)(since * 1000);
+			if (np_log) fprintf(stderr, "sprite: now playing: started %.3f s ago\n", since);
+		}
 	}
 	const uint8_t *art;
 	size_t an;
@@ -418,6 +428,13 @@ static void item(uint32_t type, uint32_t code, const uint8_t *d, size_t n) {
 			unsigned long a, c, e;
 			if (sscanf(s, "%lu/%lu/%lu", &a, &c, &e) == 3 && e > a) progress_at((double)(uint32_t)(c - a) / 44100, (double)(uint32_t)(e - a) / 44100);
 		} else if (code == code4("copl")) {
+			if (np_log && getenv("XDG_RUNTIME_DIR")) { // (each kept, to read)
+				static int k;
+				char path[256];
+				snprintf(path, sizeof path, "%s/np-copl-%03d.bin", getenv("XDG_RUNTIME_DIR"), k++ % 200);
+				FILE *f = fopen(path, "wb");
+				if (f) { fwrite(d, 1, n, f); fclose(f); }
+			}
 			starts = now_playing_plist(d, n);
 		} else {
 			return;
@@ -497,7 +514,15 @@ static void np_progress(void) {
 	set_label(l_paused, np.playing || lv_tick_elaps(np.stopped) < NP_PAUSED_MS ? "" : STR_NOWPLAYING_PAUSED);
 }
 
-static void np_tick(lv_timer_t *t) { np_progress(); }
+// Each second as the time shown turns over (a timer of a fixed second, started whenever, showed
+// it up to a second late), so the next one is set from where it's got to; stopped, as Paused is due
+static void np_tick(lv_timer_t *t) {
+	np_progress();
+	double e = elapsed_now();
+	uint32_t ms = np.playing ? (uint32_t)((1.0 - (e - floor(e))) * 1000) + 15 :
+		lv_tick_elaps(np.stopped) < NP_PAUSED_MS ? NP_PAUSED_MS - lv_tick_elaps(np.stopped) + 15 : 1000; // (stopped: Paused, as soon as it's due)
+	lv_timer_set_period(t, ms < 50 ? 50 : ms);
+}
 
 static void np_fill(void) {
 	char from[200];
@@ -640,6 +665,9 @@ static void np_refresh(void) {
 		tick = lv_timer_create(np_tick, 1000, NULL);
 		shell_nowplaying_shown(true);
 	}
+	// (the time's turning over from where it is now)
+	np_tick(tick);
+	lv_timer_reset(tick);
 	sprite_request_frame();
 }
 
