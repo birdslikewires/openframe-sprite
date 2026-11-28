@@ -788,5 +788,3 @@ helper.not_running = The OpenFrame's helper isn't running.
 nowplaying.airplay = AirPlay
 # In place of the times, for a live stream (radio), where they'd mean nothing
 nowplaying.live = Live
-# Under the progress bar, while it's paused
-nowplaying.paused = Paused

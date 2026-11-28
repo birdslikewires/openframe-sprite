@@ -554,7 +554,8 @@ static void np_progress(void) {
 	if (np.live) snprintf(a, sizeof a, "%s", STR_NOWPLAYING_LIVE);
 	set_label(l_el, a);
 	set_label(l_left, b);
-	set_label(l_paused, np.playing || lv_tick_elaps(np.stopped) < NP_PAUSED_MS ? "" : STR_NOWPLAYING_PAUSED);
+	if (np.playing || lv_tick_elaps(np.stopped) < NP_PAUSED_MS) lv_obj_add_flag(l_paused, LV_OBJ_FLAG_HIDDEN);
+	else lv_obj_remove_flag(l_paused, LV_OBJ_FLAG_HIDDEN);
 }
 
 // Each second as the time shown turns over (a timer of a fixed second, started whenever, showed
@@ -690,12 +691,22 @@ static void np_build(void) {
 	lv_obj_set_width(l_left, NP_TEXT_W);
 	lv_obj_set_style_text_align(l_left, LV_TEXT_ALIGN_RIGHT, 0);
 	lv_obj_set_pos(l_left, x, times_y);
-	l_paused = lv_label_create(scr);
-	lv_obj_set_style_text_font(l_paused, &sprite_text_20, 0);
-	lv_obj_set_style_text_color(l_paused, lv_color_hex(C_NP_TEXT), 0);
-	lv_obj_set_width(l_paused, NP_TEXT_W);
-	lv_obj_set_style_text_align(l_paused, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_pos(l_paused, x, times_y);
+	// while it's paused, a pause sign between the times: two solid bars, their corners rounded (Lucide's is an outline)
+	l_paused = lv_obj_create(scr);
+	lv_obj_remove_style_all(l_paused);
+	lv_obj_set_size(l_paused, 18, 20);
+	lv_obj_set_pos(l_paused, x + (NP_TEXT_W - 18) / 2, times_y + (lv_font_get_line_height(&sprite_text_20) - 20) / 2);
+	lv_obj_remove_flag(l_paused, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+	for (int i = 0; i < 2; i++) {
+		lv_obj_t *b = lv_obj_create(l_paused);
+		lv_obj_remove_style_all(b);
+		lv_obj_set_size(b, 6, 20);
+		lv_obj_set_pos(b, i * 12, 0);
+		lv_obj_set_style_radius(b, 2, 0);
+		lv_obj_set_style_bg_color(b, lv_color_hex(C_NP_TEXT), 0);
+		lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+	}
+	lv_obj_add_flag(l_paused, LV_OBJ_FLAG_HIDDEN);
 	lv_obj_add_flag(scr, LV_OBJ_FLAG_HIDDEN);
 }
 
