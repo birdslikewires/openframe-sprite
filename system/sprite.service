@@ -48,6 +48,12 @@ ExecStartPre=-+/usr/bin/plymouth deactivate
 # still loading (before it ignores it), which systemd took for a clean exit: no Sprite.
 ExecStartPre=-+/usr/bin/systemd-run --quiet --no-block --on-active=60 --unit=sprite-splash-backstop --description="Boot splash quit if Sprite hasn't" /bin/sh -c "plymouth --ping && plymouth quit --retain-splash; exit 0"
 ExecStart=/opt/sprite/bin/sprite
+# tty1 cleared as Sprite stops, before it lets the display go: the console shows the moment it
+# does, until Plymouth's shutdown splash draws, and a reboot or power-off asked for anywhere
+# (Settings, the updates, of-reset) has logind broadcast "The system will reboot now!" to every
+# session's terminal, Sprite's tty1 among them (logind's sessions, not utmp: UtmpIdentifier= has
+# no say in it)
+ExecStop=-+/bin/sh -c 'printf "\\033[H\\033[2J\\033[3J" > /dev/tty1'
 Restart=on-failure
 # (SIGHUP is a clean exit to systemd: restarted all the same, should one ever get through)
 RestartForceExitStatus=SIGHUP
