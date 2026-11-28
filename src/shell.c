@@ -3430,6 +3430,7 @@ static int aud_n;
 static char aud_out[32], aud_kind[8], aud_mixer[64];
 static bool aud_direct, aud_managed = true, aud_known;
 static bool aud_rate48, aud_rate_known; // the mixer at 48 kHz (of-audio's mixer_rate), and whether it says
+static lv_obj_t *aud_src; // what AirPlay's sending, under the outputs, while it plays
 static lv_obj_t *aud_list, *aud_vol_head, *aud_now, *aud_slider_row, *aud_slider, *aud_direct_row, *aud_note;
 static lv_obj_t *aud_rate_row, *aud_rate_note;
 static lv_obj_t *aud_dac_head, *aud_dac_label; // a USB DAC's section: its name; how it's connected,
@@ -3499,8 +3500,17 @@ static void aud_dac_show(void) {
 	set_text(aud_dac_label, t);
 }
 
+// While AirPlay plays: what it's sending, and the rate it's played at (the mixer's, mixed), whichever the output
+static void aud_src_show(void) {
+	if (!aud_src) return;
+	char t[160];
+	bool on = nowplaying_format(t, sizeof t, aud_direct || !aud_rate_known ? 0 : aud_rate48 ? 48000 : 44100, rate_text);
+	show_if(aud_src, on);
+	if (on) set_text(aud_src, t);
+}
+
 static void aud_dac_tick(lv_timer_t *t) {
-	if (visible && !unseen() && showing(page_settings) && settings_tab == TAB_AUDIO) aud_dac_show();
+	if (visible && !unseen() && showing(page_settings) && settings_tab == TAB_AUDIO) { aud_dac_show(); aud_src_show(); }
 }
 
 static void aud_show(void) {
@@ -5123,6 +5133,12 @@ static void build_settings(lv_obj_t *scr) {
 	lv_obj_set_style_translate_x(aud_list, -LIST_ROW_PAD, 0);
 	lv_obj_set_flex_flow(aud_list, LV_FLEX_FLOW_COLUMN);
 	lv_obj_remove_flag(aud_list, LV_OBJ_FLAG_SCROLLABLE);
+	aud_src = lv_label_create(pa_);
+	lv_label_set_text(aud_src, "");
+	lv_obj_set_width(aud_src, LV_PCT(100));
+	lv_obj_set_style_text_font(aud_src, &lv_font_montserrat_16, 0);
+	lv_obj_set_style_text_color(aud_src, lv_color_hex(C_DIM), 0);
+	lv_obj_add_flag(aud_src, LV_OBJ_FLAG_HIDDEN);
 	aud_dac_head = section(pa_, "");
 	lv_obj_add_flag(aud_dac_head, LV_OBJ_FLAG_HIDDEN);
 	aud_dac_label = lv_label_create(pa_);

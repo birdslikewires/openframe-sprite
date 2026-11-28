@@ -58,6 +58,7 @@ static struct {
 	char playlist[128];     // the playlist it's playing from (an AirPlay 2 sender's collection, when it isn't the album)
 	bool live;              // a live stream (radio): no times, which mean nothing for one
 	char item[96];          // the sender's id for what's playing (AirPlay 2's ContentItemIdentifier), to know a new one
+	char in_fmt[32], out_fmt[32]; // what shairport-sync receives (sdsc: "AAC/48000/F24/2") and sends on (odsc: "44100/S32_LE/2"), told as a sender connects: kept till it goes
 	double duration;        // seconds, 0 if not known
 	double elapsed;         // seconds into it, at 'at'
 	uint32_t at;            // lv_tick when elapsed was so
@@ -416,7 +417,7 @@ static bool now_playing_plist(const uint8_t *d, size_t n) {
 
 /* ---- shairport-sync's items ---- */
 
-// The sender's name comes once, as it connects, so it's kept where a restart of Sprite finds it (its runtime folder, gone at the next boot)
+// The sender's name and the stream's description come once, as it connects (to shairport-sync, which a restart of Sprite doesn't end), so they're kept where Sprite finds them again: its runtime folder, gone at the next boot. A line each.
 static void sender_path(char *p, size_t n) {
 	const char *d = getenv("XDG_RUNTIME_DIR");
 	snprintf(p, n, "%s/sprite-nowplaying-sender", d ? d : "/tmp");
@@ -425,9 +426,24 @@ static void sender_path(char *p, size_t n) {
 static void sender_keep(void) {
 	char p[256];
 	sender_path(p, sizeof p);
-	if (!np.sender[0]) { unlink(p); return; }
+	if (!np.sender[0] && !np.in_fmt[0]) { unlink(p); return; }
 	FILE *f = fopen(p, "w");
-	if (f) { fputs(np.sender, f); fclose(f); }
+	if (f) { fprintf(f, "%s\n%s\n%s\n", np.sender, np.in_fmt, np.out_fmt); fclose(f); }
+}
+
+static void sender_load(void) {
+	char p[256], line[3][160];
+	sender_path(p, sizeof p);
+	FILE *f = fopen(p, "r");
+	if (!f) return;
+	for (int i = 0; i < 3; i++) {
+		if (!fgets(line[i], sizeof line[i], f)) line[i][0] = 0;
+		line[i][strcspn(line[i], "\n")] = 0;
+	}
+	fclose(f);
+	set_str(np.sender, sizeof np.sender, (const uint8_t *)line[0], strlen(line[0]));
+	set_str(np.in_fmt, sizeof np.in_fmt, (const uint8_t *)line[1], strlen(line[1]));
+	set_str(np.out_fmt, sizeof np.out_fmt, (const uint8_t *)line[2], strlen(line[2]));
 }
 
 static void item(uint32_t type, uint32_t code, const uint8_t *d, size_t n) {
@@ -454,9 +470,14 @@ static void item(uint32_t type, uint32_t code, const uint8_t *d, size_t n) {
 			if (!np.playing) np.at = lv_tick_get();
 			set_playing(true);
 		} else if (code == code4("disc")) {
-			np.sender[0] = 0; // (its name came as it connected, not with each session: kept till it goes)
+			np.sender[0] = np.in_fmt[0] = np.out_fmt[0] = 0; // (its name and the stream's description came as it connected, not with each session: kept till it goes)
 			sender_keep();
 			return;
+		} else if (code == code4("sdsc") || code == code4("odsc")) {
+			if (code == code4("sdsc")) set_str(np.in_fmt, sizeof np.in_fmt, d, n);
+			else set_str(np.out_fmt, sizeof np.out_fmt, d, n);
+			sender_keep();
+			return; // (Settings, Audio, shows it, as it looks each second)
 		} else if (code == code4("snam")) {
 			set_str(np.sender, sizeof np.sender, d, n);
 			sender_keep();
@@ -795,17 +816,28 @@ static void np_refresh(void) {
 
 /* ---- for the shell ---- */
 
+// What AirPlay's sending and the rate it's played at, for Settings, Audio: "AAC at 48 kHz, converted to 44.1 kHz" (rates in rate(), the shell's way of saying them). mixed: the mixer's rate, which it ends up at whatever shairport-sync passes on (it sends 48 kHz on, and the mixer converts it, now it sets the OpenFrame's volume rather than its own); 0 (direct) for what shairport-sync sends the DAC. False if nothing's playing.
+bool nowplaying_format(char *o, size_t n, int mixed, void (*rate)(int, char *, size_t)) {
+	char codec[16];
+	int in = 0, out = 0;
+	if (!np.active || sscanf(np.in_fmt, "%15[^/]/%d", codec, &in) != 2 || in <= 0) return false;
+	if (np.out_fmt[0]) sscanf(np.out_fmt, "%d", &out);
+	if (mixed > 0) out = mixed;
+	char a[16], b[16];
+	rate(in, a, sizeof a);
+	const char *name = !strcmp(codec, "ALAC") ? STR_AUDIO_AIRPLAY_ALAC : codec;
+	if (out > 0 && out != in) {
+		rate(out, b, sizeof b);
+		snprintf(o, n, STR_AUDIO_AIRPLAY_CONVERTED, name, a, b);
+	} else {
+		snprintf(o, n, STR_AUDIO_AIRPLAY, name, a);
+	}
+	return true;
+}
+
 void nowplaying_init(void) {
 	np_log = getenv("SPRITE_NP_LOG") && !strcmp(getenv("SPRITE_NP_LOG"), "1");
-	char p[256];
-	sender_path(p, sizeof p);
-	FILE *f = fopen(p, "r");
-	if (f) {
-		uint8_t b[sizeof np.sender];
-		size_t n = fread(b, 1, sizeof b - 1, f);
-		fclose(f);
-		set_str(np.sender, sizeof np.sender, b, n);
-	}
+	sender_load();
 	np_build();
 	np_fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
 	if (np_fd < 0) return;

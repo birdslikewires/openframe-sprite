@@ -226,6 +226,11 @@ audio.dac.now = %d-bit at %s, %s
 audio.dac.direct = direct to the DAC, unchanged
 audio.dac.mixed = mixed
 audio.dac.not_playing = not playing
+# Under the outputs while AirPlay plays: what the iPhone or Mac sends (the codec, then its rate), and the rate it's played at (the mixer's, or what goes direct to the DAC), when that differs
+audio.airplay = AirPlay: %s at %s
+audio.airplay.converted = AirPlay: %s at %s, converted to %s
+# AirPlay's lossless codec, by name
+audio.airplay.alac = ALAC (lossless)
 # A rate such as 44.1 kHz. %.1f is the number
 audio.rate.khz_frac = %.1f kHz
 # A rate such as 48 kHz. %d is the number

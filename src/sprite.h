@@ -173,6 +173,7 @@ void nowplaying_saver(bool on);               // shown in place of the screensav
 void nowplaying_asleep(bool asleep);          // the screen's off: nothing to draw for
 void nowplaying_open(void);                   // from the bar's note: over everything, till a touch
 void nowplaying_close(void);                  // a touch: it goes (and the screensaver with it)
+bool nowplaying_format(char *o, size_t n, int mixed, void (*rate)(int, char *, size_t)); // what AirPlay's sending, and the rate it's played at (mixed: the mixer's; 0: direct) (Settings, Audio)
 void shell_nowplaying_changed(void);          // shell.c: the bar's note shows while something's playing
 void shell_nowplaying_shown(bool shown);      // shell.c: it's come up over the screensaver, or gone (a screensaver app stops meanwhile)
 // main.c, for display sleep: how long since a touch or key, whether a surface asks for no
