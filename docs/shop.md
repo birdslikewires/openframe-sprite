@@ -34,7 +34,7 @@ CI (one workflow, as `openframe-linux`'s `package.yml`) builds each recipe that 
 - no `preinst`, `postinst`, `prerm`, `postrm` or `triggers`: the package is files only
 - files only under `/usr/share/sprite/apps/<id>.app`, `/usr/lib/ofapp-<id>/`, `/usr/share/ofapp-<id>/` and `/usr/share/doc/ofapp-<id>/`; nothing setuid, no devices, no symlinks out of those
 - `Depends` only on Debian's own packages (resolved from Debian's mirrors, never ours) and `openframe-sprite (>= the version that understands its manifest)`
-- the manifest parses, its `icon=` is one Sprite has, and `exec=` points into the package or at a Debian binary it depends on; `exec=` is one command and its arguments, with nothing a shell would read as more (Sprite runs it with `exec`)
+- the manifest parses, its `icon=` is one Sprite has, and `exec=` is one command and its arguments, with nothing a shell would read as more (Sprite runs it with `exec`)
 
 A recipe that builds from someone else's source pins a release and its SHA-256, as `openframe-hamclock` does now.
 
