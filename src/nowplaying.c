@@ -66,6 +66,8 @@ static struct {
 	uint32_t art_hash;      // of the encoded artwork shown, so the same picture twice is decoded once
 	uint32_t tint;          // the background's colour, from the artwork
 	uint32_t stopped;       // lv_tick when it stopped playing (Paused shows only once it's lasted: a track change stops it for a moment)
+	uint32_t heard;         // lv_tick when anything last came
+	bool heartbeat;         // shairport-sync sends one while playing (phbt: its progress_interval), so silence means it's gone
 } np;
 
 #define NP_PAUSED_MS 1500
@@ -76,6 +78,7 @@ static int np_fd = -1;
 static uint8_t *chunk_buf;
 static size_t chunk_len;
 static uint32_t chunk_next, chunk_count, chunk_type, chunk_code;
+static bool chunk_ok; // an item's chunks are coming, in turn
 
 static void np_refresh(void);
 
@@ -109,8 +112,14 @@ static double elapsed_now(void) {
 	return np.duration > 0 && e > np.duration ? np.duration : e;
 }
 
+// Playing or not: the time so far kept as it stops, and counted on from now as it starts again, whichever item says so first
 static void set_playing(bool on) {
-	if (np.playing && !on) np.stopped = lv_tick_get();
+	if (np.playing == on) return;
+	if (!on) {
+		np.elapsed = elapsed_now();
+		np.stopped = lv_tick_get();
+	}
+	np.at = lv_tick_get();
 	np.playing = on;
 }
 
@@ -121,10 +130,39 @@ static void clear_track(void) {
 	progress_at(0, 0);
 }
 
+// A picture that's done with. The screen may still be drawing it (fading out, or until np_fill
+// gives it the next), so while it's showing it's kept till then (art_unused), else freed now.
+static lv_obj_t *scr, *art_img; // (the screen's, below)
+static lv_draw_buf_t *art_retired;
+
+static void art_free(lv_draw_buf_t *b) {
+	lv_image_cache_drop(b);
+	lv_draw_buf_destroy(b);
+}
+
+static void art_retire(lv_draw_buf_t *b) {
+	if (!b) return;
+	if (art_img && lv_image_get_src(art_img) == b) {
+		if (!lv_obj_has_flag(scr, LV_OBJ_FLAG_HIDDEN)) { // (drawn: kept till it isn't)
+			if (art_retired) art_free(art_retired);
+			art_retired = b;
+			return;
+		}
+		lv_image_set_src(art_img, NULL);
+	}
+	art_free(b);
+}
+
+// The kept one, once the screen no longer shows it
+static void art_unused(void) {
+	if (!art_retired || (art_img && lv_image_get_src(art_img) == art_retired && !lv_obj_has_flag(scr, LV_OBJ_FLAG_HIDDEN))) return;
+	if (art_img && lv_image_get_src(art_img) == art_retired) lv_image_set_src(art_img, NULL);
+	art_free(art_retired);
+	art_retired = NULL;
+}
+
 static void drop_art(void) {
-	if (!np.art) return;
-	lv_image_cache_drop(np.art);
-	lv_draw_buf_destroy(np.art);
+	art_retire(np.art);
 	np.art = NULL;
 	np.art_hash = 0;
 }
@@ -132,6 +170,7 @@ static void drop_art(void) {
 static void clear_all(void) {
 	clear_track();
 	np.item[0] = 0;
+	np.heartbeat = false;
 	np.active = np.playing = false;
 	drop_art();
 }
@@ -155,8 +194,11 @@ static uint8_t *decode_jpeg(const uint8_t *d, size_t n, int *w, int *h) {
 		return NULL;
 	}
 	jpeg_create_decompress(&c);
+	c.mem->max_memory_to_use = 64L << 20; // (a progressive one reads all of itself first, at full size)
 	jpeg_mem_src(&c, d, n);
 	jpeg_read_header(&c, TRUE);
+	// artwork is 3000 a side at most: bigger is a picture made to cost (and progressive, to fill memory)
+	if (c.image_width > 4096 || c.image_height > 4096) longjmp(e.jb, 1);
 	// scaled by M/8 as it's decoded, to the smallest that still covers NP_ART
 	unsigned side = c.image_width < c.image_height ? c.image_width : c.image_height;
 	unsigned m = side ? (NP_ART * 8 + side - 1) / side : 8;
@@ -181,7 +223,7 @@ static uint8_t *decode_jpeg(const uint8_t *d, size_t n, int *w, int *h) {
 static uint8_t *decode_png(const uint8_t *d, size_t n, int *w, int *h) {
 	png_image im = { .version = PNG_IMAGE_VERSION };
 	if (!png_image_begin_read_from_memory(&im, d, n)) return NULL;
-	if (im.width > 4096 || im.height > 4096) { png_image_free(&im); return NULL; }
+	if (im.width > 2048 || im.height > 2048) { png_image_free(&im); return NULL; } // (16 MB decoded, and averaged on the UI's own thread)
 	im.format = PNG_FORMAT_BGRA;
 	uint8_t *px = malloc(PNG_IMAGE_SIZE(im));
 	if (!px || !png_image_finish_read(&im, NULL, px, 0, NULL)) { free(px); png_image_free(&im); return NULL; }
@@ -221,10 +263,7 @@ static void set_art(const uint8_t *d, size_t n) {
 		}
 	}
 	free(px);
-	if (np.art) {
-		lv_image_cache_drop(np.art);
-		lv_draw_buf_destroy(np.art);
-	}
+	art_retire(np.art);
 	np.art = b;
 	np.art_hash = hash;
 	// the background: the picture's average colour, darkened well under the text
@@ -303,6 +342,7 @@ static bool bp_str(const struct bp *b, uint64_t i, char *out, size_t n) {
 				uint32_t lo = b->d[p + 2 * k + 2] << 8 | b->d[p + 2 * k + 3];
 				if (lo >= 0xdc00 && lo < 0xe000) { u = 0x10000 + ((u - 0xd800) << 10) + (lo - 0xdc00); k++; }
 			}
+			if (u >= 0xd800 && u < 0xe000) u = 0xfffd; // (half a pair, alone: not a character)
 			char e[4];
 			int m = u < 0x80 ? (e[0] = u < 0x20 ? ' ' : u, 1) :
 				u < 0x800 ? (e[0] = 0xc0 | u >> 6, e[1] = 0x80 | (u & 63), 2) :
@@ -345,7 +385,8 @@ static bool bp_data(const struct bp *b, uint64_t i, const uint8_t **d, size_t *n
 static bool bp_get(const struct bp *b, uint64_t dict, const char *key, uint64_t *val) {
 	uint64_t c;
 	size_t p;
-	if (bp_head(b, dict, &c, &p) != 13 || c > (b->n - p) / (2 * b->rsize)) return false;
+	// (Apple's have a few dozen keys: one of thousands is made to cost, as each lookup reads them all)
+	if (bp_head(b, dict, &c, &p) != 13 || c > 512 || c > (b->n - p) / (2 * b->rsize)) return false;
 	char k[96];
 	for (uint64_t j = 0; j < c; j++) {
 		if (!bp_str(b, be_n(b->d + p + j * b->rsize, b->rsize), k, sizeof k) || strcmp(k, key)) continue;
@@ -418,14 +459,16 @@ static bool now_playing_plist(const uint8_t *d, size_t n) {
 /* ---- shairport-sync's items ---- */
 
 // The sender's name and the stream's description come once, as it connects (to shairport-sync, which a restart of Sprite doesn't end), so they're kept where Sprite finds them again: its runtime folder, gone at the next boot. A line each.
-static void sender_path(char *p, size_t n) {
+static bool sender_path(char *p, size_t n) {
 	const char *d = getenv("XDG_RUNTIME_DIR");
-	snprintf(p, n, "%s/sprite-nowplaying-sender", d ? d : "/tmp");
+	if (!d || !d[0]) return false; // (nowhere of Sprite's own: not kept)
+	snprintf(p, n, "%s/sprite-nowplaying-sender", d);
+	return true;
 }
 
 static void sender_keep(void) {
 	char p[256];
-	sender_path(p, sizeof p);
+	if (!sender_path(p, sizeof p)) return;
 	if (!np.sender[0] && !np.in_fmt[0]) { unlink(p); return; }
 	FILE *f = fopen(p, "w");
 	if (f) { fprintf(f, "%s\n%s\n%s\n", np.sender, np.in_fmt, np.out_fmt); fclose(f); }
@@ -433,7 +476,7 @@ static void sender_keep(void) {
 
 static void sender_load(void) {
 	char p[256], line[3][160];
-	sender_path(p, sizeof p);
+	if (!sender_path(p, sizeof p)) return;
 	FILE *f = fopen(p, "r");
 	if (!f) return;
 	for (int i = 0; i < 3; i++) {
@@ -448,6 +491,8 @@ static void sender_load(void) {
 
 static void item(uint32_t type, uint32_t code, const uint8_t *d, size_t n) {
 	bool starts = false; // it says something's playing: a session starts, if one hasn't
+	np.heard = lv_tick_get();
+	if (type == code4("ssnc") && code == code4("phbt")) { np.heartbeat = true; return; }
 	if (np_log) fprintf(stderr, "sprite: now playing: %.4s %.4s, %zu bytes\n", (const char *)&(uint32_t){ __builtin_bswap32(type) }, (const char *)&(uint32_t){ __builtin_bswap32(code) }, n);
 	if (type == code4("core")) {
 		if (code == code4("minm")) set_str(np.title, sizeof np.title, d, n);
@@ -464,10 +509,8 @@ static void item(uint32_t type, uint32_t code, const uint8_t *d, size_t n) {
 			shell_nowplaying_changed();
 			return;
 		} else if (code == code4("pend") || code == code4("paus") || code == code4("pfls")) {
-			if (np.playing) progress_at(elapsed_now(), 0);
 			set_playing(false);
 		} else if (code == code4("pres") || code == code4("prsm")) {
-			if (!np.playing) np.at = lv_tick_get();
 			set_playing(true);
 		} else if (code == code4("disc")) {
 			np.sender[0] = np.in_fmt[0] = np.out_fmt[0] = 0; // (its name and the stream's description came as it connected, not with each session: kept till it goes)
@@ -489,7 +532,11 @@ static void item(uint32_t type, uint32_t code, const uint8_t *d, size_t n) {
 			memcpy(s, d, n);
 			s[n] = 0;
 			unsigned long a, c, e;
-			if (sscanf(s, "%lu/%lu/%lu", &a, &c, &e) == 3 && e > a) progress_at((double)(uint32_t)(c - a) / 44100, (double)(uint32_t)(e - a) / 44100);
+			if (sscanf(s, "%lu/%lu/%lu", &a, &c, &e) == 3 && e > a) {
+				int32_t at = (int32_t)(uint32_t)(c - a); // (a moment before the start, as a track begins: nothing gone yet)
+				progress_at(at < 0 ? 0 : at / 44100.0, (double)(uint32_t)(e - a) / 44100);
+			}
+			starts = true; // (it comes as playing starts: AirPlay 1's session, when Sprite started part way through)
 		} else if (code == code4("copl")) {
 			if (np_log && getenv("XDG_RUNTIME_DIR")) { // (each kept, to read)
 				static int k;
@@ -514,7 +561,8 @@ static void item(uint32_t type, uint32_t code, const uint8_t *d, size_t n) {
 
 static int np_readable(int fd, uint32_t mask, void *data) {
 	static uint8_t pkt[65536];
-	for (;;) {
+	// (a few at a time: the event loop comes back while there's more, and the screen's drawn between)
+	for (int i = 0; i < 64; i++) {
 		ssize_t r = recv(fd, pkt, sizeof pkt, MSG_DONTWAIT);
 		if (r < 0) break;
 		if (r < 8) continue;
@@ -523,17 +571,17 @@ static int np_readable(int fd, uint32_t mask, void *data) {
 			if (r < 24) continue;
 			uint32_t ix = be32(pkt + 8), count = be32(pkt + 12), ct = be32(pkt + 16), cc = be32(pkt + 20);
 			size_t len = r - 24;
-			if (ix == 0) { chunk_len = 0; chunk_count = count; chunk_type = ct; chunk_code = cc; chunk_next = 0; }
+			if (ix == 0) { chunk_len = 0; chunk_count = count; chunk_type = ct; chunk_code = cc; chunk_next = 0; chunk_ok = true; }
 			// a chunk out of turn (one lost): the item's dropped
-			if (ix != chunk_next || count != chunk_count || ct != chunk_type || cc != chunk_code || chunk_len + len > NP_ITEM_MAX) {
-				chunk_next = UINT32_MAX;
+			if (!chunk_ok || ix != chunk_next || ix >= count || count != chunk_count || ct != chunk_type || cc != chunk_code || chunk_len + len > NP_ITEM_MAX) {
+				chunk_ok = false;
 				continue;
 			}
 			if (!chunk_buf && !(chunk_buf = malloc(NP_ITEM_MAX))) continue;
 			memcpy(chunk_buf + chunk_len, pkt + 24, len);
 			chunk_len += len;
 			if (++chunk_next == chunk_count) {
-				chunk_next = UINT32_MAX;
+				chunk_ok = false;
 				item(chunk_type, chunk_code, chunk_buf, chunk_len);
 			}
 			continue;
@@ -584,7 +632,9 @@ static void np_progress(void) {
 static void np_tick(lv_timer_t *t) {
 	np_progress();
 	double e = elapsed_now();
-	uint32_t ms = np.playing ? (uint32_t)((1.0 - (e - floor(e))) * 1000) + 15 :
+	bool ended = np.duration > 0 && e >= np.duration; // (held at the end till the next track's details: nothing turns over)
+	uint32_t ms = np.playing && !ended ? (uint32_t)((1.0 - (e - floor(e))) * 1000) + 15 :
+		np.playing ? 1000 :
 		lv_tick_elaps(np.stopped) < NP_PAUSED_MS ? NP_PAUSED_MS - lv_tick_elaps(np.stopped) + 15 : 1000; // (stopped: Paused, as soon as it's due)
 	lv_timer_set_period(t, ms < 50 ? 50 : ms);
 }
@@ -608,6 +658,7 @@ static void np_fill(void) {
 		lv_obj_add_flag(art_img, LV_OBJ_FLAG_HIDDEN);
 		lv_obj_remove_flag(art_none, LV_OBJ_FLAG_HIDDEN);
 	}
+	art_unused();
 	uint32_t tint = np.art ? np.tint : C_NP_BG;
 	lv_obj_set_style_bg_color(scr, lv_color_hex(tint), 0);
 	np_progress();
@@ -744,6 +795,7 @@ static void fade_cb(void *o, int32_t v) { lv_obj_set_style_opa(o, (lv_opa_t)v, 0
 
 static void faded_out(void) {
 	lv_obj_add_flag(scr, LV_OBJ_FLAG_HIDDEN);
+	art_unused();
 	shell_nowplaying_shown(false);
 	if (cover_release) {
 		cover_release = false;
@@ -756,6 +808,11 @@ static void fade_done(lv_anim_t *a) { if (!np_vis) faded_out(); }
 static void fade(bool in) {
 	lv_anim_delete(scr, fade_cb);
 	lv_opa_t from = lv_obj_get_style_opa(scr, 0), to = in ? LV_OPA_COVER : LV_OPA_TRANSP;
+	// over an app (not the screensaver), at once: the shell's own page is what would show through, not the app (its windows aren't drawn while the shell covers them)
+	if (sprite_foreground() && !screensaver_active()) {
+		lv_obj_set_style_opa(scr, to, 0);
+		from = to;
+	}
 	if (from == to) { if (!in) faded_out(); return; }
 	lv_anim_t a;
 	lv_anim_init(&a);
@@ -814,6 +871,20 @@ static void np_refresh(void) {
 	sprite_request_frame();
 }
 
+// A session whose end never came (shairport-sync stopped, from Services, or by an update, or
+// failed): over once nothing's come for a while. Playing, with its heartbeat, 30 s; stopped, a
+// minute (it says the session's over 10 s after it stops). Playing without a heartbeat (an older
+// Shairport Sync), it's left: a minute without a word is usual then.
+static void np_watch(lv_timer_t *t) {
+	if (!np.active) return;
+	uint32_t quiet = lv_tick_elaps(np.heard);
+	if (np.playing ? !(np.heartbeat && quiet > 30000) : quiet <= 60000) return;
+	if (np_log) fprintf(stderr, "sprite: now playing: nothing for %u s: the session's over\n", quiet / 1000);
+	clear_all();
+	np_refresh();
+	shell_nowplaying_changed();
+}
+
 /* ---- for the shell ---- */
 
 // What AirPlay's sending and the rate it's played at, for Settings, Audio: "AAC at 48 kHz, converted to 44.1 kHz" (rates in rate(), the shell's way of saying them). mixed: the mixer's rate, which it ends up at whatever shairport-sync passes on (it sends 48 kHz on, and the mixer converts it, now it sets the OpenFrame's volume rather than its own); 0 (direct) for what shairport-sync sends the DAC. False if nothing's playing.
@@ -839,6 +910,7 @@ void nowplaying_init(void) {
 	np_log = getenv("SPRITE_NP_LOG") && !strcmp(getenv("SPRITE_NP_LOG"), "1");
 	sender_load();
 	np_build();
+	lv_timer_create(np_watch, 5000, NULL);
 	np_fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
 	if (np_fd < 0) return;
 	struct sockaddr_in a = { .sin_family = AF_INET, .sin_port = htons(NP_PORT), .sin_addr.s_addr = htonl(INADDR_LOOPBACK) };
@@ -875,14 +947,14 @@ void nowplaying_open(void) {
 }
 
 void nowplaying_close(void) {
-	bool was = np_opened, vis = np_vis;
+	bool was = np_opened, vis = scr && !lv_obj_has_flag(scr, LV_OBJ_FLAG_HIDDEN); // (showing, or still fading out)
 	np_opened = np_saver = false;
 	np_refresh();
-	// fading out: the shell covers what's under it (an app) till it's gone, though the screensaver's just let go
-	if (vis && !np_asleep) {
+	// fading out: the shell covers what's under it till it's gone, though the screensaver's just let go
+	if (vis && !lv_obj_has_flag(scr, LV_OBJ_FLAG_HIDDEN)) {
 		sprite_set_covered(true);
 		cover_release = true;
-	} else if (was && !screensaver_active()) {
+	} else if ((was || vis) && !screensaver_active()) {
 		sprite_set_covered(false);
 	}
 }

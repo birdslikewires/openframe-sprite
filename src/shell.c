@@ -3515,6 +3515,7 @@ static void aud_dac_tick(lv_timer_t *t) {
 
 static void aud_show(void) {
 	if (!aud_list) return;
+	aud_src_show(); // (at once, not at the next second's look)
 	lv_obj_clean(aud_list);
 	for (int i = 0; i < aud_n; i++) {
 		struct aud_card *c = &aud_cards[i];
@@ -3771,11 +3772,12 @@ static void vol_watch(lv_timer_t *t) {
 	idle_at = lv_tick_get();
 	if (unseen() || !aud_can_slide()) return;
 	int v = audio_volume(aud_out, aud_mixer);
-	if (v < 0 || v == last) return;
+	if (v < 0) return;
+	if (v != last) bar_aud_icon(v);
 	last = v;
-	bar_aud_icon(v);
-	if (bar_open && !lv_obj_has_state(bar_vol_slider, LV_STATE_PRESSED)) lv_slider_set_value(bar_vol_slider, v, LV_ANIM_OFF);
-	if (aud_slider && !lv_obj_has_state(aud_slider, LV_STATE_PRESSED)) {
+	// each slider by its own value (one held while it changed catches up once it's let go)
+	if (bar_open && !lv_obj_has_state(bar_vol_slider, LV_STATE_PRESSED) && lv_slider_get_value(bar_vol_slider) != v) lv_slider_set_value(bar_vol_slider, v, LV_ANIM_OFF);
+	if (aud_slider && !lv_obj_has_state(aud_slider, LV_STATE_PRESSED) && lv_slider_get_value(aud_slider) != v) {
 		lv_slider_set_value(aud_slider, v, LV_ANIM_OFF);
 		aud_now_show(v);
 	}
@@ -4634,6 +4636,7 @@ static bool glance(void) {
 // sleep_min, unless something asks it not to (a video playing) or the calibration's screen
 // is up. Asleep only if of-backlight's service takes it: without one the screen stays on, and
 // a touch isn't swallowed.
+static void np_pending_check(void);
 static void idle_tick(lv_timer_t *t) {
 	// Asleep: asked again each minute (of-backlight takes a repeat as nothing), so a service
 	// that's been restarted awake, or missed it, has the screen off again
@@ -4654,6 +4657,7 @@ static void idle_tick(lv_timer_t *t) {
 		if ((shell_dark() && lv_tick_elaps(glance_asked) >= 3000) || idle >= GLANCE_IDLE_MS + GLANCE_HOLD_MS) glancing = false;
 		else if (idle < GLANCE_IDLE_MS && lv_tick_elaps(glance_asked) >= GLANCE_REPEAT_MS) glance();
 	}
+	np_pending_check();
 	if (cal || sprite_sleep_inhibited()) return;
 	uint64_t idle = sprite_idle_ms();
 	if (ss_min && !sleeping && !screensaver_active() && idle >= (uint64_t)ss_min * 60000) {
@@ -4726,19 +4730,28 @@ void shell_nowplaying_shown(bool shown) {
 #define NP_AUTO_IDLE_MS 30000
 static bool np_pending;
 
+// Whether it may come up by itself now: the switch on, not calibrating, nothing holding the screen awake, and no app showing that the screensaver's set never to cover
+static bool np_auto_ok(void) {
+	return saver_np() && !cal && !sprite_sleep_inhibited() && !(sprite_foreground() && !ss_min);
+}
+
 static void np_started(void) {
 	np_pending = false;
-	if (!saver_np() || cal || screensaver_active()) return; // (the screensaver shows it already)
+	if (!np_auto_ok() || screensaver_active()) return; // (the screensaver shows it already)
 	if (sleeping || shell_dark()) { np_pending = true; return; }
-	if (sprite_sleep_inhibited() || sprite_idle_ms() < NP_AUTO_IDLE_MS) return;
-	if (sprite_foreground() && !ss_min) return;
+	if (sprite_idle_ms() < NP_AUTO_IDLE_MS) return;
 	bar_vol_hide();
 	pull_dismiss();
 	nowplaying_open();
 }
 
+// (the screen lit by itself, the room lighter, before a touch: the moment's gone, and it's left to the screensaver)
+static void np_pending_check(void) {
+	if (np_pending && !sleeping && !shell_dark()) np_pending = false;
+}
+
 static void np_woken(void) {
-	if (np_pending && nowplaying_active() && !screensaver_active()) nowplaying_open();
+	if (np_pending && nowplaying_active() && !screensaver_active() && np_auto_ok()) nowplaying_open();
 	np_pending = false;
 }
 
